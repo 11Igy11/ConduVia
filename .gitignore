@@ -4,3 +4,20 @@ __pycache__/
 .cache/
 .idea/
 .vscode/
+# Python
+__pycache__/
+*.pyc
+
+# Virtual environment
+.venv/
+
+# SQLite / cache
+cache/
+*.db
+
+# Generated reports
+reports/
+
+# OS
+.DS_Store
+Thumbs.db
