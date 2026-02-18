@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from PySide6.QtCore import Qt, QAbstractTableModel, QModelIndex, QSortFilterProxyModel, QTimer
-from PySide6.QtGui import QGuiApplication, QColor
+from PySide6.QtGui import QGuiApplication, QColor, QIcon
 from PySide6.QtWidgets import (
     QApplication, QWidget, QHBoxLayout, QVBoxLayout,
     QPushButton, QLabel, QStackedWidget, QFileDialog,
@@ -198,7 +198,7 @@ class NumericSortProxy(QSortFilterProxyModel):
 class App(QWidget):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Conduvia")
+        self.setWindowTitle("ConduVia")
         self.setMinimumSize(1100, 700)
         self.resize(1200, 800)
 
@@ -227,7 +227,12 @@ class App(QWidget):
         self._findings_rows: list[Any] = []
         self._findings_view_rows: list[Any] = []
 
-        root = QHBoxLayout(self)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(8, 8, 8, 4)
+        outer.setSpacing(4)
+
+        root = QHBoxLayout()
+
 
         # Sidebar
         sidebar = QVBoxLayout()
@@ -435,7 +440,7 @@ class App(QWidget):
         actions.addStretch()
         findings_root.addLayout(actions)
 
-        # Findings filter row (THIS is what was missing)
+        # Findings filter row
         frow = QHBoxLayout()
         frow.addWidget(QLabel("Status:"))
         self.cmb_find_status = QComboBox()
@@ -544,6 +549,21 @@ class App(QWidget):
 
         root.addLayout(sidebar, 1)
         root.addWidget(self.pages, 8)
+        # Potpis
+        # ---- add root layout into outer (top area)
+        outer.addLayout(root, 1)
+
+        # ---- footer signature (bottom-right)
+        footer = QHBoxLayout()
+        footer.addStretch()
+
+        self.lbl_signature = QLabel("by _Igy_")
+        self.lbl_signature.setStyleSheet(""" QLabel {color: #444444;font-size: 14px;
+        font-style: italic;}""")
+
+        footer.addWidget(self.lbl_signature)
+        outer.addLayout(footer)
+
 
         # init
         self.refresh_projects()
@@ -1357,9 +1377,20 @@ class App(QWidget):
 
 def main():
     app = QApplication(sys.argv)
+
+    base_dir = Path(__file__).resolve().parent          # ...\Conduvia\ui
+    project_dir = base_dir.parent                       # ...\Conduvia
+    icon_path = project_dir / "assets" / "ConduVia.ico"
+
+    icon = QIcon(str(icon_path))
+
+    app.setWindowIcon(icon)   # globalno (taskbar + dialogs)
     w = App()
+    w.setWindowIcon(icon)     # eksplicitno na glavnom prozoru
     w.showMaximized()
+
     sys.exit(app.exec())
+
 
 
 if __name__ == "__main__":
