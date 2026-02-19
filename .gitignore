@@ -21,3 +21,18 @@ reports/
 # OS
 .DS_Store
 Thumbs.db
+# --- device-activity-tracker (module) ---
+modules/device-activity-tracker/**/node_modules/
+modules/device-activity-tracker/auth_info_baileys/
+modules/device-activity-tracker/**/.env
+modules/device-activity-tracker/**/.cache/
+modules/device-activity-tracker/**/dist/
+modules/device-activity-tracker/**/build/
+
+# Local datasets (do not commit)
+data/
+data/**/*.json
+
+modules/device-activity-tracker/
+
+

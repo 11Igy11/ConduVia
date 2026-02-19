@@ -1,6 +1,7 @@
 import sys
 import ipaddress
 import html
+from ui.live_rtt import LiveRTT
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -204,6 +205,9 @@ class App(QWidget):
 
         init_db()
 
+        # Live RTT launcher
+        self.live_rtt = LiveRTT(parent=self, qr_timeout_ms=10_000)
+
         # State
         self.current_project_id: int | None = None
         self.current_project_name: str = ""
@@ -238,10 +242,13 @@ class App(QWidget):
         sidebar = QVBoxLayout()
         btn_projects = QPushButton("Projects")
         btn_explore = QPushButton("Explore")
+        btn_live_rtt = QPushButton("Live RTT")
         btn_projects.setFixedHeight(40)
         btn_explore.setFixedHeight(40)
+        btn_live_rtt.setFixedHeight(40)
         sidebar.addWidget(btn_projects)
         sidebar.addWidget(btn_explore)
+        sidebar.addWidget(btn_live_rtt)
         sidebar.addStretch()
 
         # Pages
@@ -545,6 +552,7 @@ class App(QWidget):
         # Nav + actions
         btn_projects.clicked.connect(lambda: self.pages.setCurrentIndex(0))
         btn_explore.clicked.connect(lambda: self.pages.setCurrentIndex(1))
+        btn_live_rtt.clicked.connect(self.live_rtt.show_dialog)
         self.btn_load.clicked.connect(self.load_dataset_dialog)
 
         root.addLayout(sidebar, 1)
@@ -1373,6 +1381,14 @@ class App(QWidget):
             return ""
         v = self._current_flow.get(key, "")
         return "" if v is None else str(v)
+    
+    def closeEvent(self, event):
+        try:
+            self.live_rtt.stop()
+        except Exception:
+            pass
+        super().closeEvent(event)
+
 
 
 def main():
