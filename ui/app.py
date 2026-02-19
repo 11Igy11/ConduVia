@@ -7,14 +7,14 @@ from pathlib import Path
 from typing import Any
 
 from PySide6.QtCore import Qt, QAbstractTableModel, QModelIndex, QSortFilterProxyModel, QTimer
-from PySide6.QtGui import QGuiApplication, QColor, QIcon
+from PySide6.QtGui import QGuiApplication, QColor, QIcon, QFont, QPixmap
 from PySide6.QtWidgets import (
     QApplication, QWidget, QHBoxLayout, QVBoxLayout,
     QPushButton, QLabel, QStackedWidget, QFileDialog,
     QTextEdit, QTabWidget, QTableView, QLineEdit,
     QSplitter, QFormLayout, QGroupBox,
     QListWidget, QListWidgetItem, QMessageBox, QInputDialog,
-    QComboBox, QMenu
+    QComboBox, QMenu, QFrame
 )
 
 from core.loader import load_folder
@@ -197,6 +197,150 @@ class NumericSortProxy(QSortFilterProxyModel):
 
 # ---------- Main App ----------
 class App(QWidget):
+    def build_home_page(self) -> QWidget:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(28, 24, 28, 24)
+        layout.setSpacing(16)
+
+    # ---------- header (logo + title) ----------
+        header = QHBoxLayout()
+        header.setSpacing(14)
+
+        logo = QLabel()
+        logo.setFixedSize(64, 64)
+
+        icon_path = self.project_dir / "assets" / "ConduVia.ico"  # koristiš ga već u main()
+        if icon_path.exists():
+            pm = QPixmap(str(icon_path))
+        if not pm.isNull():
+            logo.setPixmap(pm.scaled(64, 64, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        logo.setStyleSheet("border-radius: 10px;")
+
+        title_col = QVBoxLayout()
+        title_col.setSpacing(2)
+
+        title = QLabel("ConduVia")
+        f = QFont()
+        f.setPointSize(30)
+        f.setBold(True)
+        title.setFont(f)
+
+        subtitle = QLabel("Network flow analysis & Live RTT correlation")
+        subtitle.setStyleSheet("color: #666666; font-size: 14px;")
+
+        title_col.addWidget(title)
+        title_col.addWidget(subtitle)
+
+        header.addWidget(logo, 0)
+        header.addLayout(title_col, 1)
+        header.addStretch()
+
+        layout.addLayout(header)
+
+    # ---------- status chip row ----------
+        status = self.live_rtt.get_status()
+        chip = QLabel(
+        f"Live RTT: {'RUNNING' if status.running else 'STOPPED'}   |   "
+        f"UI: {'UP' if status.ui_up else 'DOWN'}   |   "
+        f"Session: {'FOUND' if status.has_session else 'NONE'}"
+    )
+        chip.setStyleSheet("""
+        QLabel {
+            padding: 6px 10px;
+            background: #f3f4f6;
+            border: 1px solid #e5e7eb;
+            border-radius: 999px;
+            color: #333333;
+            font-size: 12px;
+        }
+    """)
+        layout.addWidget(chip, 0)
+
+    # ---------- main card ----------
+        card = QFrame()
+        card.setFrameShape(QFrame.StyledPanel)
+        card.setStyleSheet("""
+        QFrame {
+            background: #ffffff;
+            border: 1px solid #e6e6e6;
+            border-radius: 12px;
+        }
+    """)
+        card_layout = QVBoxLayout(card)
+        card_layout.setContentsMargins(20, 18, 20, 18)
+        card_layout.setSpacing(12)
+
+    # Quick start block
+        qs_title = QLabel("Quick start")
+        qs_title.setStyleSheet("font-size: 14px; font-weight: 600; color: #111827;")
+
+        info = QLabel(
+        "1) Create/Open a project\n"
+        "2) Load a dataset folder\n"
+        "3) (Optional) Start Live RTT for real-time correlation"
+    )
+        info.setStyleSheet("color: #374151; font-size: 13px;")
+        info.setWordWrap(True)
+
+    # Actions
+        actions = QHBoxLayout()
+        actions.setSpacing(10)
+
+        btn_projects = QPushButton("Projects")
+        btn_explore = QPushButton("Explore")
+        btn_live = QPushButton("Live RTT")
+        btn_open_dash = QPushButton("Open dashboard")
+
+        for b in (btn_projects, btn_explore, btn_live, btn_open_dash):
+            b.setFixedHeight(36)
+
+        btn_projects.clicked.connect(lambda: self.pages.setCurrentIndex(self.IDX_PROJECTS))
+        btn_explore.clicked.connect(lambda: self.pages.setCurrentIndex(self.IDX_EXPLORE))
+        btn_live.clicked.connect(self.live_rtt.show_dialog)
+        btn_open_dash.clicked.connect(self.live_rtt.action_open_dashboard)
+
+    # “primary” look for Live RTT button
+        btn_live.setStyleSheet("""
+        QPushButton {
+            background: #111827;
+            color: white;
+            border: 1px solid #111827;
+            border-radius: 8px;
+            padding: 0 12px;
+        }
+        QPushButton:hover { background: #0b1220; }
+    """)
+    # subtle style for others
+        for b in (btn_projects, btn_explore, btn_open_dash):
+            b.setStyleSheet("""
+            QPushButton {
+                background: #ffffff;
+                color: #111827;
+                border: 1px solid #e5e7eb;
+                border-radius: 8px;
+                padding: 0 12px;
+            }
+            QPushButton:hover { background: #f9fafb; }
+        """)
+
+        actions.addWidget(btn_projects)
+        actions.addWidget(btn_explore)
+        actions.addWidget(btn_live)
+        actions.addWidget(btn_open_dash)
+        actions.addStretch()
+
+        card_layout.addWidget(qs_title)
+        card_layout.addWidget(info)
+        card_layout.addSpacing(6)
+        card_layout.addLayout(actions)
+
+        layout.addWidget(card)
+        layout.addStretch()
+
+        return page
+        
+
     def __init__(self):
         super().__init__()
         self.setWindowTitle("ConduVia")
@@ -204,6 +348,8 @@ class App(QWidget):
         self.resize(1200, 800)
 
         init_db()
+        self.project_dir = Path(__file__).resolve().parent.parent
+
 
         # Live RTT launcher
         self.live_rtt = LiveRTT(parent=self, qr_timeout_ms=10_000)
@@ -253,6 +399,11 @@ class App(QWidget):
 
         # Pages
         self.pages = QStackedWidget()
+                # Page indexes
+        self.IDX_HOME = 0
+        self.IDX_PROJECTS = 1
+        self.IDX_EXPLORE = 2
+
 
         # -------- Projects page --------
         projects_page = QWidget()
@@ -546,12 +697,19 @@ class App(QWidget):
         explore_layout.addWidget(self.tabs, 1)
 
         # Add pages
+                # Add pages (Home -> Projects -> Explore)
+        home_page = self.build_home_page()
+        self.pages.addWidget(home_page)
         self.pages.addWidget(projects_page)
         self.pages.addWidget(explore_container)
 
+        # Start on Home
+        self.pages.setCurrentIndex(self.IDX_HOME)
+
+
         # Nav + actions
-        btn_projects.clicked.connect(lambda: self.pages.setCurrentIndex(0))
-        btn_explore.clicked.connect(lambda: self.pages.setCurrentIndex(1))
+        btn_projects.clicked.connect(lambda: self.pages.setCurrentIndex(self.IDX_PROJECTS))
+        btn_explore.clicked.connect(lambda: self.pages.setCurrentIndex(self.IDX_EXPLORE))
         btn_live_rtt.clicked.connect(self.live_rtt.show_dialog)
         self.btn_load.clicked.connect(self.load_dataset_dialog)
 
@@ -773,7 +931,7 @@ class App(QWidget):
         if not fp or str(fp).startswith("("):
             return
         self.load_dataset_path(str(fp))
-        self.pages.setCurrentIndex(1)
+        self.pages.setCurrentIndex(self.IDX_EXPLORE)
 
     # ---------- Explore ----------
     def load_dataset_dialog(self):

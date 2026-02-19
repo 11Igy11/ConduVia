@@ -322,7 +322,7 @@ class LiveRTT(QObject):
         p.setProgram(npm)
         p.setArguments(["start"])
 
-    # 🔒 SPRIJEČI React dev server da sam otvara browser
+    #  React dev server does not open browser
         env = QProcessEnvironment.systemEnvironment()
         env.insert("BROWSER", "none")
         p.setProcessEnvironment(env)
