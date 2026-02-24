@@ -1,10 +1,12 @@
 import sys
 import ipaddress
+from ui.registry_page import RegistryPage
 import html
 from ui.live_rtt import LiveRTT
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+from core.protocols import format_ip_proto
 
 from PySide6.QtCore import Qt, QAbstractTableModel, QModelIndex, QSortFilterProxyModel, QTimer
 from PySide6.QtGui import QGuiApplication, QColor, QIcon, QFont, QPixmap
@@ -120,10 +122,14 @@ class FlowTableModel(QAbstractTableModel):
 
         if role == Qt.DisplayRole:
             val = flow.get(key, "")
+            if key == "protocol":
+                return format_ip_proto(val)
             return "" if val is None else str(val)
 
         if role == Qt.ToolTipRole:
             val = flow.get(key, "")
+            if key == "protocol":
+                return format_ip_proto(val)
             return "" if val is None else str(val)
 
         if role == Qt.UserRole:
@@ -290,15 +296,18 @@ class App(QWidget):
         btn_projects = QPushButton("Projects")
         btn_explore = QPushButton("Explore")
         btn_live = QPushButton("Live RTT")
+        btn_registry = QPushButton("Registry")
         btn_open_dash = QPushButton("Open dashboard")
 
-        for b in (btn_projects, btn_explore, btn_live, btn_open_dash):
+        for b in (btn_projects, btn_explore, btn_registry, btn_live, btn_open_dash):
             b.setFixedHeight(36)
 
         btn_projects.clicked.connect(lambda: self.pages.setCurrentIndex(self.IDX_PROJECTS))
         btn_explore.clicked.connect(lambda: self.pages.setCurrentIndex(self.IDX_EXPLORE))
+        btn_registry.clicked.connect(lambda: self.pages.setCurrentIndex(self.IDX_REGISTRY))
         btn_live.clicked.connect(self.live_rtt.show_dialog)
         btn_open_dash.clicked.connect(self.live_rtt.action_open_dashboard)
+        
 
     # “primary” look for Live RTT button
         btn_live.setStyleSheet("""
@@ -312,7 +321,7 @@ class App(QWidget):
         QPushButton:hover { background: #0b1220; }
     """)
     # subtle style for others
-        for b in (btn_projects, btn_explore, btn_open_dash):
+        for b in (btn_projects, btn_explore, btn_registry, btn_open_dash):
             b.setStyleSheet("""
             QPushButton {
                 background: #ffffff;
@@ -385,15 +394,20 @@ class App(QWidget):
 
 
         # Sidebar
+        # Sidebar
         sidebar = QVBoxLayout()
+
         btn_projects = QPushButton("Projects")
         btn_explore = QPushButton("Explore")
+        btn_registry = QPushButton("Registry")
         btn_live_rtt = QPushButton("Live RTT")
-        btn_projects.setFixedHeight(40)
-        btn_explore.setFixedHeight(40)
-        btn_live_rtt.setFixedHeight(40)
+
+        for b in (btn_projects, btn_explore, btn_registry, btn_live_rtt):
+            b.setFixedHeight(40)
+
         sidebar.addWidget(btn_projects)
         sidebar.addWidget(btn_explore)
+        sidebar.addWidget(btn_registry)
         sidebar.addWidget(btn_live_rtt)
         sidebar.addStretch()
 
@@ -403,6 +417,7 @@ class App(QWidget):
         self.IDX_HOME = 0
         self.IDX_PROJECTS = 1
         self.IDX_EXPLORE = 2
+        self.IDX_REGISTRY = 3
 
 
         # -------- Projects page --------
@@ -702,6 +717,8 @@ class App(QWidget):
         self.pages.addWidget(home_page)
         self.pages.addWidget(projects_page)
         self.pages.addWidget(explore_container)
+        self.registry_page = RegistryPage()
+        self.pages.addWidget(self.registry_page)
 
         # Start on Home
         self.pages.setCurrentIndex(self.IDX_HOME)
@@ -712,6 +729,7 @@ class App(QWidget):
         btn_explore.clicked.connect(lambda: self.pages.setCurrentIndex(self.IDX_EXPLORE))
         btn_live_rtt.clicked.connect(self.live_rtt.show_dialog)
         self.btn_load.clicked.connect(self.load_dataset_dialog)
+        btn_registry.clicked.connect(lambda: self.pages.setCurrentIndex(self.IDX_REGISTRY))
 
         root.addLayout(sidebar, 1)
         root.addWidget(self.pages, 8)
@@ -949,6 +967,8 @@ class App(QWidget):
         self.current_folder = Path(folder)
         files, flows = load_folder(folder, debug=False)
         self.flows = flows
+        if hasattr(self, "registry_page"):
+            self.registry_page.set_dataset(folder, files, flows)
 
         self.lbl_path.setText(f"Dataset: {folder}")
         self.lbl_stats.setText(f"JSON files: {len(files)}\nTotal flow records: {len(flows)}")
@@ -1044,7 +1064,7 @@ class App(QWidget):
 
         self.d_src.setText(f"{flow.get('src_ip','')}:{flow.get('src_port','')}")
         self.d_dst.setText(f"{flow.get('dst_ip','')}:{flow.get('dst_port','')}")
-        self.d_proto.setText(str(flow.get("protocol", "")))
+        self.d_proto.setText(format_ip_proto(flow.get("protocol", "")))
         self.d_app.setText(str(flow.get("application_name", "")))
         self.d_bytes.setText(str(flow.get("bidirectional_bytes", "")))
         self.d_packets.setText(str(flow.get("bidirectional_packets", "")))
