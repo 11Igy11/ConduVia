@@ -653,7 +653,7 @@ class App(QWidget):
         self.findings_list.itemSelectionChanged.connect(self.on_finding_selected)
         self.findings_list.itemDoubleClicked.connect(lambda _: self.jump_to_selected_finding())
 
-        # Right click menu on Findings (restored)
+        # Right click menu on Findings
         self.findings_list.setContextMenuPolicy(Qt.CustomContextMenu)
         self.findings_list.customContextMenuRequested.connect(self.on_findings_context_menu)
 
@@ -1382,7 +1382,7 @@ class App(QWidget):
         src = row["src_ip"]
         dst = row["dst_ip"]
 
-        self.pages.setCurrentIndex(1)
+        self.pages.setCurrentIndex(2)
         self.tabs.setCurrentIndex(1)
 
         self.search.setText("")

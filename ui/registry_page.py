@@ -315,7 +315,7 @@ class RegistryPage(QWidget):
         self.chk_full.setChecked(False)
         self.chk_full.toggled.connect(self._on_toggle_full)
 
-        self.btn_export = QPushButton("Export report…")
+        self.btn_export = QPushButton("Export HTML report")
         self.btn_export.setObjectName("Primary")
         self.btn_export.setFixedHeight(38)
         self.btn_export.clicked.connect(self.export_report)
@@ -441,7 +441,7 @@ class RegistryPage(QWidget):
         nl.addWidget(lbl)
 
         self.txt_note = QLabel(
-            "Passive analysis only (no DPI / MITM). Findings are indicative and based on metadata "
+            "Passive analysis only. Findings are indicative and based on metadata "
             "(IP, protocol, app, timing, volume)."
         )
         self.txt_note.setStyleSheet("color:#374151;")
@@ -796,7 +796,7 @@ class RegistryPage(QWidget):
         """
 
         prefilled_text = """
-Predmet je izrađen temeljem pasivne analize mrežnih tokova (bez DPI/MITM).
+Predmet je izrađen temeljem pasivne analize mrežnih tokova.
 Zaključci su indikativni i temelje se na metapodacima (IP, protokoli, aplikacije, vrijeme, volumen).
 """.strip()
 
