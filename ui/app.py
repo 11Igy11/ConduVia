@@ -23,7 +23,7 @@ from core.loader import load_folder
 from core.analyzer import top_src_ips, top_dst_ips, top_applications, top_protocols
 from core.db import (
     init_db, create_project, list_projects, get_project,
-    add_dataset_load, list_recent_datasets,
+    delete_project, add_dataset_load, list_recent_datasets,
     add_finding, list_findings, get_finding,
     update_finding, delete_finding,
     get_project_notes, set_project_notes,
@@ -430,9 +430,11 @@ class App(QWidget):
         self.btn_new_project = QPushButton("New project")
         self.btn_open_project = QPushButton("Open selected")
         self.btn_refresh_projects = QPushButton("Refresh")
+        self.btn_delete_project = QPushButton("Delete selected")
         btn_row.addWidget(self.btn_new_project)
         btn_row.addWidget(self.btn_open_project)
         btn_row.addWidget(self.btn_refresh_projects)
+        btn_row.addWidget(self.btn_delete_project)
 
         self.projects_list = QListWidget()
         self.projects_list.itemSelectionChanged.connect(self.on_project_selected_preview)
@@ -450,6 +452,8 @@ class App(QWidget):
         self.btn_open_dataset.clicked.connect(self.open_selected_dataset)
         recent_btn_row.addWidget(self.btn_open_dataset)
         recent_btn_row.addStretch()
+
+        self.btn_delete_project.clicked.connect(self.delete_selected_project)
 
         projects_layout.addWidget(self.lbl_active_project)
         projects_layout.addLayout(btn_row)
@@ -913,6 +917,64 @@ class App(QWidget):
             return
         pid = int(item.data(Qt.UserRole))
         self.set_active_project(pid)
+    
+    def delete_selected_project(self):
+        item = self.projects_list.currentItem()
+        if not item:
+            return
+
+        project_id = int(item.data(Qt.UserRole))
+        project = get_project(project_id)
+        if not project:
+            QMessageBox.warning(self, "Delete project", "Project not found.")
+            return
+
+        msg = QMessageBox(self)
+        msg.setIcon(QMessageBox.Warning)
+        msg.setWindowTitle("Delete project")
+        msg.setText("Delete selected project?")
+        msg.setInformativeText(
+            f"{project.name} (id={project.id})\n\n"
+            "This will permanently delete:\n"
+            "• project\n"
+            "• loaded datasets\n"
+            "• findings\n"
+            "• activity log"
+        )
+
+        btn_delete = msg.addButton("Delete", QMessageBox.DestructiveRole)
+        msg.addButton(QMessageBox.Cancel)
+        msg.setDefaultButton(QMessageBox.Cancel)
+
+        msg.exec()
+        if msg.clickedButton() != btn_delete:
+            return
+
+        try:
+            delete_project(project_id)
+        except Exception as e:
+            QMessageBox.critical(self, "Delete project failed", str(e))
+            return
+
+    # ---- IMPORTANT PART ----
+        if self.current_project_id == project_id:
+            # reset application state
+            self.current_project_id = None
+            self.current_project = None
+
+        # reset UI elements that depend on project
+            self.lbl_current_project.setText("No project selected")
+
+            if hasattr(self, "registry_page"):
+                self.registry_page.set_dataset("", [], [])
+
+            if hasattr(self, "findings_page"):
+                self.findings_page.clear()
+
+            if hasattr(self, "activity_page"):
+                self.activity_page.clear()
+
+        self.refresh_projects()
 
     def set_active_project(self, project_id: int):
         p = get_project(project_id)

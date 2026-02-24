@@ -219,6 +219,12 @@ def touch_project(project_id: int, db_path: Path = DEFAULT_DB_PATH) -> None:
             (project_id,),
         )
 
+def delete_project(project_id: int, db_path: Path = DEFAULT_DB_PATH) -> None:
+    with _connect(db_path) as con:
+        # foreign_keys=ON je u init_db, ali je dobro osigurati i ovdje
+        con.execute("PRAGMA foreign_keys=ON;")
+        con.execute("DELETE FROM projects WHERE id = ?;", (project_id,))
+
 
 def get_project_notes(project_id: int, db_path: Path = DEFAULT_DB_PATH) -> str:
     with _connect(db_path) as con:
