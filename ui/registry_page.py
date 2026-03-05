@@ -3,15 +3,18 @@ from core.protocols import format_ip_proto
 import html
 from pathlib import Path
 from typing import Any
+from core.timeutils import parse_flow_timestamp
 
-from PySide6.QtCore import Qt, QAbstractTableModel, QModelIndex, QSortFilterProxyModel
+from PySide6.QtCore import Qt, Signal, QAbstractTableModel, QModelIndex, QSortFilterProxyModel, QSize, QRectF
+from PySide6.QtGui import QPainter, QColor, QPen, QFontMetrics
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QLineEdit,
     QTableView, QFileDialog, QMessageBox, QFrame, QGridLayout, QTabWidget,
-    QSizePolicy, QCheckBox, QScrollArea
+    QSizePolicy, QCheckBox, QScrollArea, QProgressBar, QToolTip
 )
 
 from core.parser import extract_dataset_meta, build_registry_columns, compute_registry_summary
+from core.analyst import compute_analyst_summary
 
 
 # ----------------- helpers -----------------
@@ -46,6 +49,352 @@ def _safe_int(x: Any) -> int:
 def _esc(x: Any) -> str:
     return html.escape("" if x is None else str(x))
 
+def _mini_hist_24_html(vals: list[int], *, height_px: int = 14) -> str:
+    """
+    Qt RichText safe mini histogram.
+    Expects 24 ints. If vals are 0..100 we use them directly as percent-of-height.
+    Uses nested tables + pixel heights (no % heights) to avoid Qt CSS quirks.
+    """
+    if not isinstance(vals, list) or len(vals) != 24:
+        return ""
+
+    # if already 0..100, keep; else normalize to 0..100
+    mx = max(vals) if vals else 0
+    if mx <= 0:
+        norm = [0] * 24
+    elif mx <= 100 and min(vals) >= 0:
+        # looks like already normalized
+        norm = [int(v) for v in vals]
+    else:
+        norm = [int(round((v / mx) * 100)) for v in vals]
+
+    # Build 24 bars using pixel height, not % height.
+    tds = []
+    for h, p in enumerate(norm):
+        if p < 0: p = 0
+        if p > 100: p = 100
+        bar_h = int(round((p / 100) * height_px))
+        empty_h = height_px - bar_h
+
+        tds.append(
+            "<td style='width:4.16%;padding:0 1px;vertical-align:bottom;'>"
+            f"<div title='{h:02d}:00 — {vals[h]}' "
+            f"style='height:{height_px}px;border:1px solid #e5e7eb;"
+            "background:#f3f4f6;border-radius:4px;overflow:hidden;'>"
+            # empty spacer
+            f"<div style='height:{empty_h}px;'></div>"
+            # bar
+            f"<div style='height:{bar_h}px;background:#111827;'></div>"
+            "</div>"
+            "</td>"
+        )
+
+    bars_row = (
+        "<table style='width:100%;border-collapse:collapse;' cellspacing='0' cellpadding='0'>"
+        "<tr>" + "".join(tds) + "</tr>"
+        "</table>"
+    )
+
+    labels_row = """
+    <table style='width:100%;border-collapse:collapse;margin-top:4px;' cellspacing='0' cellpadding='0'>
+      <tr>
+        <td style='width:0%;font-size:11px;color:#6b7280;'>00</td>
+        <td style='width:25%;font-size:11px;color:#6b7280;text-align:center;'>06</td>
+        <td style='width:25%;font-size:11px;color:#6b7280;text-align:center;'>12</td>
+        <td style='width:25%;font-size:11px;color:#6b7280;text-align:center;'>18</td>
+        <td style='width:25%;font-size:11px;color:#6b7280;text-align:right;'>23</td>
+      </tr>
+    </table>
+    """
+
+    return "<div style='margin-top:6px;'>" + bars_row + labels_row + "</div>"
+
+
+def _direction_bar_html(out_pct: float, in_pct: float, *, width_px: int = 220, height_px: int = 8) -> str:
+    """
+    Small OUT/IN bar (single bar split) as HTML.
+    """
+    try:
+        o = float(out_pct)
+    except Exception:
+        o = 0.0
+    try:
+        i = float(in_pct)
+    except Exception:
+        i = 0.0
+
+    # normalize if needed
+    s = o + i
+    if s > 0:
+        o = (o / s) * 100.0
+        i = (i / s) * 100.0
+    else:
+        o = 0.0
+        i = 0.0
+
+    o = 0.0 if o < 0 else 100.0 if o > 100 else o
+    i = 0.0 if i < 0 else 100.0 if i > 100 else i
+
+    return (
+        f"<div style='display:inline-block;width:{width_px}px;height:{height_px}px;"
+        "border:1px solid #e5e7eb;border-radius:999px;overflow:hidden;background:#f3f4f6;'>"
+        f"<span style='display:inline-block;height:{height_px}px;width:{o:.1f}%;background:#111827;'></span>"
+        f"<span style='display:inline-block;height:{height_px}px;width:{i:.1f}%;background:#9ca3af;'></span>"
+        "</div>"
+    )
+class DirectionBarWidget(QWidget):
+    def __init__(self, parent: QWidget | None = None):
+        super().__init__(parent)
+        self._out_pct = 0.0
+        self._in_pct = 0.0
+        self.setMinimumHeight(14)
+        self.setMaximumHeight(14)
+
+    def sizeHint(self) -> QSize:
+        return QSize(260, 14)
+
+    def set_pcts(self, out_pct: float, in_pct: float):
+        try:
+            o = float(out_pct)
+        except Exception:
+            o = 0.0
+        try:
+            i = float(in_pct)
+        except Exception:
+            i = 0.0
+
+        s = o + i
+        if s > 0:
+            o = (o / s) * 100.0
+            i = (i / s) * 100.0
+        else:
+            o = 0.0
+            i = 0.0
+
+        self._out_pct = max(0.0, min(100.0, o))
+        self._in_pct = max(0.0, min(100.0, i))
+        self.update()
+
+    def paintEvent(self, _):
+        p = QPainter(self)
+        try:
+            p.setRenderHint(QPainter.Antialiasing, True)
+
+            w = self.width()
+            h = self.height()
+
+            border = QColor("#e5e7eb")
+            bg = QColor("#f3f4f6")
+            out_c = QColor("#111827")
+            in_c = QColor("#9ca3af")
+            r = 7.0
+
+            p.setPen(QPen(border, 1))
+            p.setBrush(bg)
+            p.drawRoundedRect(0.5, 0.5, w - 1.0, h - 1.0, r, r)
+
+            inner_w = max(0.0, w - 2.0)
+            inner_h = max(0.0, h - 2.0)
+            x0 = 1.0
+            y0 = 1.0
+
+            out_w = (self._out_pct / 100.0) * inner_w
+            in_w = max(0.0, inner_w - out_w)
+
+            if out_w > 0:
+                p.setPen(Qt.NoPen)
+                p.setBrush(out_c)
+                p.drawRoundedRect(x0, y0, out_w, inner_h, r, r)
+
+            if in_w > 0:
+                p.setPen(Qt.NoPen)
+                p.setBrush(in_c)
+                p.drawRoundedRect(x0 + out_w, y0, in_w, inner_h, r, r)
+
+        finally:
+            p.end()
+
+
+class MiniHistogram24Widget(QWidget):
+    hourClicked = Signal(int)   # emits 0..23
+    def __init__(self, parent: QWidget | None = None):
+        super().__init__(parent)
+        self._vals: list[int] = [0] * 24     # RAW counts
+        self._show_labels = True
+        self.setMinimumHeight(46)
+        self._peak_hour = -1
+        self._bar_rects = [QRectF() for _ in range(24)]
+        self.setMouseTracking(True)
+        self._quiet_hour = -1
+        self._quiet_hours: set[int] = set()
+        self._mode = "bytes"   # "bytes" or "flows"
+
+    def sizeHint(self) -> QSize:
+        return QSize(520, 46)
+
+    def set_values(self, vals: list[int] | None):
+        if not isinstance(vals, list) or len(vals) != 24:
+            self._vals = [0] * 24
+        else:
+            out = []
+            for v in vals:
+                try:
+                    iv = int(v)
+                except Exception:
+                    iv = 0
+                out.append(max(0, iv))
+            self._vals = out
+
+                # peak hour (uvijek prema trenutno prikazanim vrijednostima)
+        if any(self._vals):
+            self._peak_hour = max(range(24), key=lambda i: self._vals[i])
+        else:
+            self._peak_hour = -1
+
+        self.update()
+    
+    def set_mode(self, mode: str):
+        self._mode = "flows" if mode == "flows" else "bytes"
+        self.update()
+
+    def set_peak_quiet(self, peak_hour: int, quiet_hour: int):
+        self._peak_hour = int(peak_hour) if peak_hour is not None else -1
+        self._quiet_hour = int(quiet_hour) if quiet_hour is not None else -1
+        self.update()
+
+    def set_quiet_hours(self, hours: list[int] | set[int] | None):
+        if not hours:
+            self._quiet_hours = set()
+        else:
+            self._quiet_hours = {int(h) for h in hours if 0 <= int(h) <= 23}
+        self.update()
+
+    def mouseMoveEvent(self, e):
+        pos = e.position()  # Qt6
+        hit = -1
+        for i, r in enumerate(self._bar_rects):
+            if r.contains(pos):
+                hit = i
+                break
+
+        if hit >= 0:
+            v = int(self._vals[hit])
+
+            if self._mode == "flows":
+                tip = f"{hit:02d}:00 — {v} flows"
+            else:
+                mb = v / (1024.0 * 1024.0)
+                tip = f"{hit:02d}:00 — {mb:.1f} MB"
+
+            QToolTip.showText(e.globalPosition().toPoint(), tip, self)
+        else:
+            QToolTip.hideText()
+
+        super().mouseMoveEvent(e)
+
+    def mousePressEvent(self, e):
+        pos = e.position()  # Qt6
+        hit = -1
+        for i, r in enumerate(self._bar_rects):
+            if r.contains(pos):
+                hit = i
+                break
+
+        if hit >= 0:
+            self.hourClicked.emit(hit)
+
+        super().mousePressEvent(e)
+
+    def paintEvent(self, _):
+        p = QPainter(self)
+        try:
+            p.setRenderHint(QPainter.Antialiasing, False)  # oštrije, čitljivije
+
+            w = self.width()
+            h = self.height()
+
+            bar_fg = QColor("#111827")
+            base_c = QColor("#e5e7eb")
+            text_c = QColor("#6b7280")
+
+            label_h = 16 if self._show_labels else 0
+            top_pad = 2
+            bottom_pad = 2
+            bars_h = max(1, h - label_h - top_pad - bottom_pad)
+
+            n = 24
+            gap = 3
+            pad_x = 6
+            avail_w = max(1, w - 2 * pad_x)
+            bar_w = max(2, int((avail_w - gap * (n - 1)) / n))
+            used_w = bar_w * n + gap * (n - 1)
+            x0 = pad_x + int((avail_w - used_w) / 2)
+            y0 = top_pad
+
+            # baseline
+            p.setPen(QPen(base_c, 1))
+            p.drawLine(x0, y0 + bars_h, x0 + used_w, y0 + bars_h)
+
+            # sqrt scaling: razbije “sve isto” problem
+            mx = max(self._vals) if self._vals else 0
+            if mx <= 0:
+                scaled = [0] * 24
+            else:
+                import math
+                mxs = math.sqrt(mx)
+                scaled = [math.sqrt(v) / mxs for v in self._vals]  # 0..1
+
+            # bars (bez kutijica/bordera)
+            p.setPen(Qt.NoPen)
+            for i in range(24):
+                frac = scaled[i]
+                bh = int(frac * bars_h)
+                x = x0 + i * (bar_w + gap)
+
+                # rect za hover (cijela kolona)
+                self._bar_rects[i] = QRectF(x, y0, bar_w, bars_h)
+
+                if bh <= 0:
+                    continue
+
+                # peak / quiet highlight
+                if i == self._peak_hour:
+                    p.setBrush(QColor("#2563eb"))  # peak
+                elif i in self._quiet_hours:
+                    p.setBrush(QColor("#f59e0b"))  # quiet
+                else:
+                    p.setBrush(bar_fg)
+
+                p.drawRect(x, y0 + (bars_h - bh), bar_w, bh)
+                
+            # labels
+            if self._show_labels:
+                f = p.font()
+                f.setPointSize(9)
+                p.setFont(f)
+                fm = QFontMetrics(p.font())
+                p.setPen(text_c)
+
+                def draw_label(hour: int, align: str):
+                    x = x0 + hour * (bar_w + gap) + int(bar_w / 2)
+                    text = f"{hour:02d}"
+                    tw = fm.horizontalAdvance(text)
+                    y = y0 + bars_h + fm.ascent() + 2
+                    if align == "left":
+                        p.drawText(x0, y, text)
+                    elif align == "right":
+                        p.drawText(x0 + used_w - tw, y, text)
+                    else:
+                        p.drawText(int(x - tw / 2), y, text)
+
+                draw_label(0, "left")
+                draw_label(6, "center")
+                draw_label(12, "center")
+                draw_label(18, "center")
+                draw_label(23, "right")
+
+        finally:
+            p.end()
 
 # ----------------- models -----------------
 class RegistryTableModel(QAbstractTableModel):
@@ -96,12 +445,32 @@ class TextFilterProxy(QSortFilterProxyModel):
     def __init__(self):
         super().__init__()
         self._q = ""
+        self._hour: int | None = None  # 0..23 or None
 
     def set_query(self, q: str):
         self._q = (q or "").strip().lower()
         self.invalidateFilter()
 
+    def set_hour_filter(self, hour: int | None):
+        if hour is None:
+            self._hour = None
+        else:
+            h = int(hour)
+            self._hour = h if 0 <= h <= 23 else None
+        self.invalidateFilter()
+
     def filterAcceptsRow(self, row: int, parent: QModelIndex) -> bool:
+        # Hour filter (fast path) - uses cached _cv_hour in flow dict
+        if self._hour is not None:
+            sm = self.sourceModel()
+            try:
+                flow = sm._rows[row]  # RegistryTableModel rows
+                h = int(flow.get("_cv_hour", -1))
+            except Exception:
+                h = -1
+            if h != self._hour:
+                return False
+            
         if not self._q:
             return True
         m = self.sourceModel()
@@ -179,6 +548,7 @@ class RegistryPage(QWidget):
         self._meta: dict[str, Any] = {}
         self._summary: dict[str, Any] = {}
         self._cols: list[str] = []
+        self._analyst: dict[str, Any] = {}
 
         # ---- base layout ----
         root = QVBoxLayout(self)
@@ -378,6 +748,88 @@ class RegistryPage(QWidget):
 
         rp.addWidget(self.stats_wrap)
 
+                # ---------------- Analyst Summary card ----------------
+        self.analyst_card = QFrame()
+        self.analyst_card.setObjectName("Card")
+        al = QVBoxLayout(self.analyst_card)
+        al.setContentsMargins(14, 12, 14, 12)
+        al.setSpacing(8)
+
+        hdr2 = QHBoxLayout()
+        self.lbl_analyst_title = QLabel("Analyst summary")
+        self.lbl_analyst_title.setStyleSheet("font-size:14px;font-weight:900;color:#111827;")
+        hdr2.addWidget(self.lbl_analyst_title)
+        hdr2.addStretch()
+        al.addLayout(hdr2)
+
+        # Risk row: label + progress
+        risk_row = QHBoxLayout()
+        self.lbl_risk = QLabel("Risk score: —")
+        self.lbl_risk.setStyleSheet("color:#111827;font-weight:700;")
+        risk_row.addWidget(self.lbl_risk, 0)
+
+        self.risk_bar = QProgressBar()
+        self.risk_bar.setRange(0, 100)
+        self.risk_bar.setValue(0)
+        self.risk_bar.setTextVisible(True)
+        self.risk_bar.setFormat("%p%")
+        self.risk_bar.setFixedHeight(18)
+        self.risk_bar.setStyleSheet("""
+            QProgressBar {
+                border: 1px solid #e5e7eb;
+                border-radius: 9px;
+                background: #f3f4f6;
+                text-align: center;
+                font-weight: 700;
+                color: #111827;
+            }
+            QProgressBar::chunk {
+                background: #111827;
+                border-radius: 9px;
+            }
+        """)
+        risk_row.addWidget(self.risk_bar, 1)
+        al.addLayout(risk_row)
+
+        # Body text (rich)
+        self.lbl_analyst_body = QLabel("")
+        self.lbl_analyst_body.setTextFormat(Qt.RichText)
+        self.lbl_analyst_body.setWordWrap(True)
+        self.lbl_analyst_body.setStyleSheet("color:#374151;")
+        al.addWidget(self.lbl_analyst_body)
+                # OUT vs IN text
+        self.lbl_dir_text = QLabel("")
+        self.lbl_dir_text.setTextFormat(Qt.RichText)
+        self.lbl_dir_text.setWordWrap(True)
+        self.lbl_dir_text.setStyleSheet("color:#374151;")
+        al.addWidget(self.lbl_dir_text)
+
+            # OUT vs IN bar widget
+        self.dir_bar = DirectionBarWidget()
+        al.addWidget(self.dir_bar)
+
+        hist_hdr = QHBoxLayout()
+
+        self.lbl_hist_title = QLabel("Activity by bytes")
+        self.lbl_hist_title.setStyleSheet("color:#6b7280;font-size:12px;")
+        hist_hdr.addWidget(self.lbl_hist_title)
+
+        hist_hdr.addStretch()
+
+        self.btn_hist_toggle = QPushButton("By flows")
+        self.btn_hist_toggle.setFixedHeight(28)
+        self.btn_hist_toggle.clicked.connect(self._on_toggle_hist_mode)
+        hist_hdr.addWidget(self.btn_hist_toggle)
+
+        al.addLayout(hist_hdr)
+
+        self.hist24 = MiniHistogram24Widget()
+        self.hist24.hourClicked.connect(self._on_hist_hour_clicked)
+        self._hour_filter: int | None = None
+        al.addWidget(self.hist24)     
+
+        rp.addWidget(self.analyst_card)
+
         # Insights card
         insights_card = QFrame()
         insights_card.setObjectName("Card")
@@ -536,12 +988,25 @@ class RegistryPage(QWidget):
                 self._meta = {}
 
         self._summary = compute_registry_summary(self._flows, top_n=15)
+        self._analyst = compute_analyst_summary(self._flows, self._meta)
+        self._hist_mode = "bytes"
+        self._last_activity = {}
+
+        # build visible columns BEFORE adding internal cache keys
         self._cols = build_registry_columns(self._flows)
+
+        # cache local hour once per flow for fast UI filtering
+        for f in self._flows:
+            if not isinstance(f, dict):
+                continue
+            dt = parse_flow_timestamp(f)
+            f["_cv_hour"] = int(dt.hour) if dt is not None else -1
 
         self.model.set_data(self._flows, self._cols)
 
         self._render_meta()
         self._render_stats()
+        self._render_analyst()
         self._render_full_hint()
         self._render_insight_current()
 
@@ -620,13 +1085,241 @@ class RegistryPage(QWidget):
         self._set_stat(self.card_uapps, str(uniq_apps))
         self._set_stat(self.card_bytes, _human_bytes(total_bytes))
 
+    def _render_analyst(self):
+        a = self._analyst or {}
+        if not a:
+            self.lbl_risk.setText("Risk score: —")
+            self.risk_bar.setValue(0)
+            self.lbl_analyst_body.setText("No analyst summary available.")
+            self.lbl_dir_text.setText("")
+            self.dir_bar.set_pcts(0.0, 0.0)
+            self._last_activity = {}
+            self.hist24.set_mode("bytes")
+            self.hist24.set_quiet_hours([])
+            self.hist24.set_values([0] * 24)
+            return
+
+        # ---- risk ----
+        risk = a.get("risk", {}) or {}
+        score = int(risk.get("score", 0) or 0)
+        level = str(risk.get("level", "LOW") or "LOW")
+        reasons = list(risk.get("reasons", []) or [])
+
+        self.lbl_risk.setText(f"Risk score: {score}/100 ({level})")
+        self.risk_bar.setValue(max(0, min(100, score)))
+
+                 # ---- dominant app ----
+        cov = a.get("coverage", {}) or {}
+        dom = a.get("dominant_app", {}) or {}
+        dom_b = (dom.get("by_bytes", {}) or {})
+        dom_c = (dom.get("by_count", {}) or {})
+        dom_text = (
+            f"<b>Dominant app:</b> {html.escape(str(dom_b.get('name','—')))} "
+            f"({float(dom_b.get('share_pct',0.0)):.1f}% bytes) "
+            f"<span style='color:#6b7280'>(count: {html.escape(str(dom_c.get('name','—')))}, "
+            f"{float(dom_c.get('share_pct',0.0)):.1f}%)</span>"
+        )
+
+                # ---- bytes direction ----
+        bytes_s = a.get("bytes", {}) or {}
+        out_share = float(bytes_s.get("outbound_share_total_pct", 0.0) or 0.0)
+
+        dirb = bytes_s.get("direction_bar", {}) or {}
+        out_b = _human_bytes(dirb.get("outbound_bytes", 0))
+        in_b = _human_bytes(dirb.get("inbound_bytes", 0))
+        out_p = float(dirb.get("outbound_bytes_pct", 0.0) or 0.0)
+        in_p = float(dirb.get("inbound_bytes_pct", 0.0) or 0.0)
+
+        # ---- dominance ----
+        domn = a.get("dominance", {}) or {}
+        top_out = (domn.get("top_internal_outbound", {}) or {})
+        top_dst = (domn.get("top_destination_outbound", {}) or {})
+
+        # ---- activity ----
+        act = a.get("activity", {}) or {}
+        peak = act.get("peak_hour", None)
+        quiet = act.get("quiet_hour", None)
+        night = float(act.get("night_share_pct", 0.0) or 0.0)
+        business = float(act.get("business_share_pct", 0.0) or 0.0)
+
+        def hfmt(h):
+            return "—" if h is None else f"{int(h):02d}:00"
+
+                # ---- body text ----
+        lines = []
+        lines.append(
+            f"<b>Coverage:</b> {int(cov.get('total_flows',0) or 0)} flows | "
+            f"<b>Outbound share:</b> {out_share:.1f}%"
+        )
+        lines.append(dom_text)
+        lines.append(
+            f"<b>Top internal (outbound):</b> {html.escape(str(top_out.get('ip','—')))} "
+            f"({float(top_out.get('share_of_outbound_pct',0.0)):.1f}%) &nbsp;&nbsp; "
+            f"<b>Top dst (outbound):</b> {html.escape(str(top_dst.get('ip','—')))} "
+            f"({float(top_dst.get('share_of_outbound_pct',0.0)):.1f}%)"
+        )
+        lines.append(
+            f"<b>Activity:</b> peak {hfmt(peak)}, quiet {hfmt(quiet)} | "
+            f"night {night:.1f}%, business {business:.1f}%"
+        )
+
+        if reasons:
+            rs = "".join(f"<li>{html.escape(str(r))}</li>" for r in reasons[:3])
+            lines.append(f"<b>Top reasons:</b><ul style='margin:6px 0 0 18px;'>{rs}</ul>")
+        else:
+            lines.append("<b>Top reasons:</b> —")
+
+        self.lbl_analyst_body.setText("<br>".join(lines))
+
+                    # ---- OUT vs IN ----
+        self.lbl_dir_text.setText(
+            f"<b>OUT vs IN:</b> OUT {html.escape(out_b)} ({out_p:.1f}%) &nbsp;|&nbsp; "
+            f"IN {html.escape(in_b)} ({in_p:.1f}%)"
+        )
+        self.dir_bar.set_pcts(out_p, in_p)
+
+                    # ---- cache activity + apply histogram mode ----
+        self._last_activity = act
+
+                    # button text: pokazuje što će se dogoditi klikom
+        self.btn_hist_toggle.setText("By bytes" if self._hist_mode == "flows" else "By flows")
+
+        self._apply_hist_mode()
+
+
+    def _on_hist_hour_clicked(self, hour: int):
+        # toggle
+        h = int(hour)
+        if self._hour_filter == h:
+            self._hour_filter = None
+        else:
+            self._hour_filter = h
+
+        # ensure dataset is visible
+        if self._hour_filter is not None and not self.chk_full.isChecked():
+            self.chk_full.setChecked(True)
+
+        # apply filter
+        self.proxy.set_hour_filter(self._hour_filter)
+
+        # switch to Dataset tab when selecting an hour
+        if self._hour_filter is not None:
+            self.main_tabs.setCurrentIndex(1)  # Dataset
+
+        # update hint text (rows/cols + optional filter)
+        self._render_full_hint()
+
+    def _on_toggle_hist_mode(self):
+        self._hist_mode = "flows" if self._hist_mode == "bytes" else "bytes"
+        self.btn_hist_toggle.setText("By bytes" if self._hist_mode == "flows" else "By flows")
+        self._apply_hist_mode()
+
+
+    def _apply_hist_mode(self):
+        act = self._last_activity or {}
+
+        if self._hist_mode == "flows":
+            self.lbl_hist_title.setText("Activity by flows")
+            hh = act.get("hour_hist_24") or act.get("hour_hist") or [0] * 24
+            self.hist24.set_mode("flows")
+        else:
+            self.lbl_hist_title.setText("Activity by bytes")
+            hh = act.get("hour_bytes_24") or act.get("hour_bytes") or [0] * 24
+            self.hist24.set_mode("bytes")
+
+        if not isinstance(hh, list) or len(hh) != 24:
+            hh = [0] * 24
+
+                    # quiet band: donjih ~20% nenultih sati
+        vals = [int(v or 0) for v in hh]
+        nonzero = sorted(v for v in vals if v > 0)
+
+        quiet_hours: list[int] = []
+        if nonzero:
+            idx = int(0.20 * (len(nonzero) - 1))
+            thr = nonzero[idx]
+            quiet_hours = [i for i, v in enumerate(vals) if 0 < v <= thr]
+
+        self.hist24.set_quiet_hours(quiet_hours)
+        self.hist24.set_values(hh)
+
+    def hfmt(h):
+        return "—" if h is None else f"{int(h):02d}:00"
+
+        # build body
+        lines = []
+        lines.append(
+            f"<b>Coverage:</b> {int(cov.get('total_flows',0) or 0)} flows | "
+                     f"<b>Outbound share:</b> {out_share:.1f}%"
+        )
+        lines.append(dom_text)
+
+        lines.append(
+            f"<b>Top internal (outbound):</b> {html.escape(str(top_out.get('ip','—')))} "
+            f"({float(top_out.get('share_of_outbound_pct',0.0)):.1f}%) &nbsp;&nbsp; "
+            f"<b>Top dst (outbound):</b> {html.escape(str(top_dst.get('ip','—')))} "
+            f"({float(top_dst.get('share_of_outbound_pct',0.0)):.1f}%)"
+        )
+
+        lines.append(
+            f"<b>Activity:</b> peak {hfmt(peak)}, quiet {hfmt(quiet)} | "
+            f"night {night:.1f}%, business {business:.1f}%"
+        )
+
+        if reasons:
+            # show max 3 reasons
+            rs = "".join(f"<li>{html.escape(str(r))}</li>" for r in reasons[:3])
+            lines.append(f"<b>Top reasons:</b><ul style='margin:6px 0 0 18px;'>{rs}</ul>")
+        else:
+            lines.append("<b>Top reasons:</b> —")
+
+               
+        
+                # ---- OUT vs IN (text + widget) ----
+        self.lbl_dir_text.setText(
+        f"<b>OUT vs IN:</b> OUT {html.escape(out_b)} ({out_p:.1f}%) &nbsp;|&nbsp; "
+        f"IN {html.escape(in_b)} ({in_p:.1f}%)"
+        )
+        self.dir_bar.set_pcts(out_p, in_p)
+
+                # ---- Activity 24h (prefer normalized) ----
+        # ---- Activity 24h BYTES ----
+        hh = act.get("hour_bytes_24") or act.get("hour_bytes") or [0] * 24
+
+        if not isinstance(hh, list) or len(hh) != 24:
+            hh = [0] * 24
+
+                # ---- quiet band (donjih ~20% nenultih sati) ----
+        vals = [int(v or 0) for v in hh]
+        nonzero = sorted(v for v in vals if v > 0)
+
+        quiet_hours: list[int] = []
+        if nonzero:
+            idx = int(0.20 * (len(nonzero) - 1))
+            thr = nonzero[idx]
+            quiet_hours = [i for i, v in enumerate(vals) if 0 < v <= thr]
+
+        self.hist24.set_quiet_hours(quiet_hours)
+
+        self.hist24.set_values(hh)
+
     def _render_full_hint(self):
-        self.lbl_full_hint.setText(f"Rows: {len(self._flows)}  |  Columns: {len(self._cols)}")
+        total = len(self._flows)
+        try:
+            shown = self.proxy.rowCount()
+        except Exception:
+            shown = total
+
+        base = f"Rows: {shown}/{total}  |  Columns: {len(self._cols)}"
+        if getattr(self, "_hour_filter", None) is not None:
+            base += f"  |  Hour filter: {int(self._hour_filter):02d}:00"
+        self.lbl_full_hint.setText(base)
 
     def _on_toggle_full(self, checked: bool):
         # Dataset tab is ALWAYS clickable; this only controls its content + export include_full.
         self.lbl_dataset_disabled.setVisible(not checked)
         self.table.setVisible(checked)
+        self._render_full_hint()
 
     # ----------------- insights -----------------
     def _on_insight_tab_changed(self, _idx: int):

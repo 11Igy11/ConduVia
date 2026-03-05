@@ -2,7 +2,6 @@ import sys
 import ipaddress
 from ui.registry_page import RegistryPage
 import html
-from ui.live_rtt import LiveRTT
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -16,7 +15,7 @@ from PySide6.QtWidgets import (
     QTextEdit, QTabWidget, QTableView, QLineEdit,
     QSplitter, QFormLayout, QGroupBox,
     QListWidget, QListWidgetItem, QMessageBox, QInputDialog,
-    QComboBox, QMenu, QFrame
+    QComboBox, QMenu, QFrame, QSizePolicy, QScrollArea
 )
 
 from core.loader import load_folder
@@ -244,24 +243,7 @@ class App(QWidget):
 
         layout.addLayout(header)
 
-    # ---------- status chip row ----------
-        status = self.live_rtt.get_status()
-        chip = QLabel(
-        f"Live RTT: {'RUNNING' if status.running else 'STOPPED'}   |   "
-        f"UI: {'UP' if status.ui_up else 'DOWN'}   |   "
-        f"Session: {'FOUND' if status.has_session else 'NONE'}"
-    )
-        chip.setStyleSheet("""
-        QLabel {
-            padding: 6px 10px;
-            background: #f3f4f6;
-            border: 1px solid #e5e7eb;
-            border-radius: 999px;
-            color: #333333;
-            font-size: 12px;
-        }
-    """)
-        layout.addWidget(chip, 0)
+ 
 
     # ---------- main card ----------
         card = QFrame()
@@ -295,33 +277,19 @@ class App(QWidget):
 
         btn_projects = QPushButton("Projects")
         btn_explore = QPushButton("Explore")
-        btn_live = QPushButton("Live RTT")
         btn_registry = QPushButton("Registry")
-        btn_open_dash = QPushButton("Open dashboard")
-
-        for b in (btn_projects, btn_explore, btn_registry, btn_live, btn_open_dash):
+        
+        for b in (btn_projects, btn_explore, btn_registry):
             b.setFixedHeight(36)
 
-        btn_projects.clicked.connect(lambda: self.pages.setCurrentIndex(self.IDX_PROJECTS))
-        btn_explore.clicked.connect(lambda: self.pages.setCurrentIndex(self.IDX_EXPLORE))
-        btn_registry.clicked.connect(lambda: self.pages.setCurrentIndex(self.IDX_REGISTRY))
-        btn_live.clicked.connect(self.live_rtt.show_dialog)
-        btn_open_dash.clicked.connect(self.live_rtt.action_open_dashboard)
-        
+        btn_projects.clicked.connect(lambda: self.go_page(self.IDX_PROJECTS, self._nav_projects))
+        btn_explore.clicked.connect(lambda: self.go_page(self.IDX_EXPLORE, self._nav_explore))
+        btn_registry.clicked.connect(lambda: self.go_page(self.IDX_REGISTRY, self._nav_registry))
+               
 
-    # “primary” look for Live RTT button
-        btn_live.setStyleSheet("""
-        QPushButton {
-            background: #111827;
-            color: white;
-            border: 1px solid #111827;
-            border-radius: 8px;
-            padding: 0 12px;
-        }
-        QPushButton:hover { background: #0b1220; }
-    """)
+   
     # subtle style for others
-        for b in (btn_projects, btn_explore, btn_registry, btn_open_dash):
+        for b in (btn_projects, btn_explore, btn_registry):
             b.setStyleSheet("""
             QPushButton {
                 background: #ffffff;
@@ -335,8 +303,7 @@ class App(QWidget):
 
         actions.addWidget(btn_projects)
         actions.addWidget(btn_explore)
-        actions.addWidget(btn_live)
-        actions.addWidget(btn_open_dash)
+        actions.addWidget(btn_registry)
         actions.addStretch()
 
         card_layout.addWidget(qs_title)
@@ -348,6 +315,34 @@ class App(QWidget):
         layout.addStretch()
 
         return page
+    
+    def _build_sidebar(self) -> QVBoxLayout:
+        sidebar = QVBoxLayout()
+
+        self.btn_nav_projects = QPushButton("Projects")
+        self.btn_nav_explore = QPushButton("Explore")
+        self.btn_nav_registry = QPushButton("Registry")
+
+        for b in (self.btn_nav_projects, self.btn_nav_explore, self.btn_nav_registry):
+            b.setObjectName("NavButton")
+            b.setFixedHeight(40)
+
+                # aktivni button reference (za highlight)
+        self._nav_projects = self.btn_nav_projects
+        self._nav_explore = self.btn_nav_explore
+        self._nav_registry = self.btn_nav_registry
+
+        sidebar.addWidget(self.btn_nav_projects)
+        sidebar.addWidget(self.btn_nav_explore)
+        sidebar.addWidget(self.btn_nav_registry)
+        sidebar.addStretch()
+
+        return sidebar
+
+    def _wire_navigation(self) -> None:
+        self.btn_nav_projects.clicked.connect(lambda: self.go_page(self.IDX_PROJECTS, self._nav_projects))
+        self.btn_nav_explore.clicked.connect(lambda: self.go_page(self.IDX_EXPLORE, self._nav_explore))
+        self.btn_nav_registry.clicked.connect(lambda: self.go_page(self.IDX_REGISTRY, self._nav_registry))
         
 
     def __init__(self):
@@ -358,10 +353,6 @@ class App(QWidget):
 
         init_db()
         self.project_dir = Path(__file__).resolve().parent.parent
-
-
-        # Live RTT launcher
-        self.live_rtt = LiveRTT(parent=self, qr_timeout_ms=10_000)
 
         # State
         self.current_project_id: int | None = None
@@ -392,24 +383,8 @@ class App(QWidget):
 
         root = QHBoxLayout()
 
-
-        # Sidebar
-        # Sidebar
-        sidebar = QVBoxLayout()
-
-        btn_projects = QPushButton("Projects")
-        btn_explore = QPushButton("Explore")
-        btn_registry = QPushButton("Registry")
-        btn_live_rtt = QPushButton("Live RTT")
-
-        for b in (btn_projects, btn_explore, btn_registry, btn_live_rtt):
-            b.setFixedHeight(40)
-
-        sidebar.addWidget(btn_projects)
-        sidebar.addWidget(btn_explore)
-        sidebar.addWidget(btn_registry)
-        sidebar.addWidget(btn_live_rtt)
-        sidebar.addStretch()
+                # Sidebar
+        sidebar = self._build_sidebar()
 
         # Pages
         self.pages = QStackedWidget()
@@ -540,6 +515,11 @@ class App(QWidget):
 
         grp = QGroupBox("Flow details")
         form = QFormLayout(grp)
+        form.setContentsMargins(12, 12, 12, 12)
+        form.setHorizontalSpacing(14)
+        form.setVerticalSpacing(10)
+        form.setLabelAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        form.setFormAlignment(Qt.AlignTop)
 
         self.d_src = QLabel("-"); self.d_src.setTextInteractionFlags(Qt.TextSelectableByMouse)
         self.d_dst = QLabel("-"); self.d_dst.setTextInteractionFlags(Qt.TextSelectableByMouse)
@@ -549,6 +529,11 @@ class App(QWidget):
         self.d_packets = QLabel("-")
         self.d_duration = QLabel("-")
         self.d_sni = QLabel("-"); self.d_sni.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        for w in (self.d_src, self.d_dst, self.d_proto, self.d_app, self.d_bytes, self.d_packets, self.d_duration, self.d_sni):
+            w.setMinimumHeight(18)
+            w.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+
+        self.d_sni.setWordWrap(True)
 
         form.addRow("Source:", self.d_src)
         form.addRow("Destination:", self.d_dst)
@@ -559,7 +544,15 @@ class App(QWidget):
         form.addRow("Duration (ms):", self.d_duration)
         form.addRow("SNI:", self.d_sni)
 
-        details_layout.addWidget(grp)
+        grp.setMinimumHeight(220)  # po potrebi 240
+        grp.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setWidget(grp)
+
+        details_layout.addWidget(scroll)
 
         # Buttons: copy
         btn_row1 = QHBoxLayout()
@@ -726,14 +719,15 @@ class App(QWidget):
 
         # Start on Home
         self.pages.setCurrentIndex(self.IDX_HOME)
+     
 
 
-        # Nav + actions
-        btn_projects.clicked.connect(lambda: self.pages.setCurrentIndex(self.IDX_PROJECTS))
-        btn_explore.clicked.connect(lambda: self.pages.setCurrentIndex(self.IDX_EXPLORE))
-        btn_live_rtt.clicked.connect(self.live_rtt.show_dialog)
+        
+               # Nav + actions
+        self._wire_navigation()
+        
+
         self.btn_load.clicked.connect(self.load_dataset_dialog)
-        btn_registry.clicked.connect(lambda: self.pages.setCurrentIndex(self.IDX_REGISTRY))
 
         root.addLayout(sidebar, 1)
         root.addWidget(self.pages, 8)
@@ -759,8 +753,20 @@ class App(QWidget):
         self.update_mode_label()
         self.refresh_findings_ui()
         self.refresh_notes_ui()
+        
+    def _set_active_nav(self, active: QPushButton):
+        for b in (self._nav_projects, self._nav_explore, self._nav_registry):
+            b.setProperty("active", b is active)
+            b.style().unpolish(b)
+            b.style().polish(b)
+            b.update()
 
-    # ---------- Keyboard shortcuts ----------
+
+    def go_page(self, idx: int, active_btn: QPushButton):
+        self.pages.setCurrentIndex(idx)
+        self._set_active_nav(active_btn)
+
+        # ---------- Keyboard shortcuts ----------
     def keyPressEvent(self, event):
         key = event.key()
         mods = event.modifiers()
@@ -1011,7 +1017,7 @@ class App(QWidget):
         if not fp or str(fp).startswith("("):
             return
         self.load_dataset_path(str(fp))
-        self.pages.setCurrentIndex(self.IDX_EXPLORE)
+        self.go_page(self.IDX_EXPLORE, self._nav_explore)
 
     # ---------- Explore ----------
     def load_dataset_dialog(self):
@@ -1622,17 +1628,14 @@ class App(QWidget):
         v = self._current_flow.get(key, "")
         return "" if v is None else str(v)
     
-    def closeEvent(self, event):
-        try:
-            self.live_rtt.stop()
-        except Exception:
-            pass
-        super().closeEvent(event)
-
-
-
+    
 def main():
     app = QApplication(sys.argv)
+
+    # load global stylesheet
+    qss_path = Path(__file__).resolve().parent / "style.qss"
+    if qss_path.exists():
+        app.setStyleSheet(qss_path.read_text(encoding="utf-8"))
 
     base_dir = Path(__file__).resolve().parent          # ...\Conduvia\ui
     project_dir = base_dir.parent                       # ...\Conduvia

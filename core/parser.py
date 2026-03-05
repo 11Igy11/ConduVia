@@ -1,4 +1,5 @@
 from __future__ import annotations
+from core.timeutils import parse_flow_timestamp, date_key, hour_key
 
 import json
 from collections import Counter, defaultdict
@@ -127,13 +128,10 @@ def compute_registry_summary(flows: list[dict[str, Any]], top_n: int = 10) -> di
             app_c[app] += 1
             bytes_by_app[app] += b_int
 
-        ts = f.get("bidirectional_first_seen_ms") or f.get("first_seen") or f.get("timestamp")
-        d = _parse_ts_prefix(ts, "date")
-        h = _parse_ts_prefix(ts, "hour")
-        if d:
-            by_date[d] += 1
-        if h:
-            by_hour[h] += 1
+        dt = parse_flow_timestamp(f)
+        if dt is not None:
+            by_date[date_key(dt)] += 1
+            by_hour[hour_key(dt)] += 1
 
     def top_counter(c: Counter, n: int):
         return c.most_common(n)
