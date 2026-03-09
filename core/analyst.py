@@ -114,6 +114,44 @@ def _normalize_0_100(vals: list[int]) -> list[int]:
         out.append(p)
     return out
 
+def _compute_coverage_window(flows: list[dict[str, Any]]) -> dict[str, Any]:
+    first_seen = None
+    last_seen = None
+    active_days = set()
+
+    for f in flows:
+        if not isinstance(f, dict):
+            continue
+
+        dt = parse_flow_timestamp(f)
+        if dt is None:
+            continue
+
+        if first_seen is None or dt < first_seen:
+            first_seen = dt
+
+        if last_seen is None or dt > last_seen:
+            last_seen = dt
+
+        active_days.add(dt.date())
+
+    if first_seen is None or last_seen is None:
+        return {
+            "first_seen": None,
+            "last_seen": None,
+            "days_span": 0,
+            "active_days": 0,
+        }
+
+    days_span = (last_seen.date() - first_seen.date()).days + 1
+
+    return {
+        "first_seen": first_seen,
+        "last_seen": last_seen,
+        "days_span": int(days_span),
+        "active_days": int(len(active_days)),
+    }
+
 
 # ----------------- main -----------------
 def compute_analyst_summary(flows: list[dict[str, Any]], meta: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -148,6 +186,8 @@ def compute_analyst_summary(flows: list[dict[str, Any]], meta: dict[str, Any] | 
                 duration_days = None
         except Exception:
             duration_days = None
+
+    coverage_window = _compute_coverage_window(flows)
 
     # ---- aggregations ----
     total_bytes = 0
@@ -322,6 +362,44 @@ def compute_analyst_summary(flows: list[dict[str, Any]], meta: dict[str, Any] | 
     night_share = _pct(night_count, total_timed)
     business_share = _pct(business_count, total_timed)
 
+        # ---- communication pattern ----
+    active_days = 0
+    active_days_pct = 0.0
+    avg_flows_per_active_day = 0.0
+    pattern = "unknown"
+
+    days_with_activity: set[str] = set()
+    for f in flows:
+        if not isinstance(f, dict):
+            continue
+        dt = parse_flow_timestamp(f)
+        if dt is not None:
+            days_with_activity.add(dt.strftime("%Y-%m-%d"))
+
+    active_days = len(days_with_activity)
+
+    total_period_days = None
+    if duration_days is not None:
+        total_period_days = max(1, int(duration_days) + 1)
+        active_days_pct = _pct(active_days, total_period_days)
+
+    if active_days > 0:
+        avg_flows_per_active_day = total_flows / active_days
+
+    if total_flows == 0 or active_days == 0:
+        pattern = "unknown"
+    elif total_period_days is None:
+        pattern = "active"
+    else:
+        if active_days_pct >= 80:
+            pattern = "continuous"
+        elif active_days_pct >= 40:
+            pattern = "intermittent"
+        elif active_days_pct >= 15:
+            pattern = "bursty"
+        else:
+            pattern = "sparse"
+
     hour_hist_norm = _normalize_0_100(hour_hist)
 
     # ---- largest flow shares ----
@@ -405,6 +483,10 @@ def compute_analyst_summary(flows: list[dict[str, Any]], meta: dict[str, Any] | 
             "bt": bt_raw or "",
             "et": et_raw or "",
             "duration_days": duration_days,
+            "active_days": int(active_days),
+            "active_days_pct": float(active_days_pct),
+            "avg_flows_per_active_day": float(avg_flows_per_active_day),
+            "pattern": pattern,
         },
         "bytes": {
             "total_bytes": int(total_bytes),

@@ -49,6 +49,47 @@ def _safe_int(x: Any) -> int:
 def _esc(x: Any) -> str:
     return html.escape("" if x is None else str(x))
 
+def _fmt_dt_short(x: Any) -> str:
+    if not x:
+        return "—"
+
+    # datetime object
+    try:
+        return x.strftime("%d.%m.%Y.")
+    except Exception:
+        pass
+
+    # string -> prvo probaj kao pravi ISO datetime (meta bt/et)
+    try:
+        from datetime import datetime
+        dt = datetime.fromisoformat(str(x).strip())
+        return dt.strftime("%d.%m.%Y.")
+    except Exception:
+        pass
+
+    # fallback: flow timestamp parser
+    try:
+        dt = parse_flow_timestamp({"timestamp": x})
+        if dt is not None:
+            return dt.strftime("%d.%m.%Y.")
+    except Exception:
+        pass
+
+    return str(x)
+
+
+def _fmt_days_short(x: Any) -> str:
+    try:
+        v = float(x)
+    except Exception:
+        return "—"
+
+    # ako je praktički cijeli broj, prikaži bez decimala
+    if abs(v - round(v)) < 0.05:
+        return f"{int(round(v))} days"
+
+    return f"{v:.1f} days"
+
 def _mini_hist_24_html(vals: list[int], *, height_px: int = 14) -> str:
     """
     Qt RichText safe mini histogram.
@@ -142,6 +183,7 @@ def _direction_bar_html(out_pct: float, in_pct: float, *, width_px: int = 220, h
         f"<span style='display:inline-block;height:{height_px}px;width:{i:.1f}%;background:#9ca3af;'></span>"
         "</div>"
     )
+
 class DirectionBarWidget(QWidget):
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
@@ -538,6 +580,8 @@ class RegistryPage(QWidget):
       - Report: stats + insights (Top 15) + note (scrollable page)
       - Dataset: full dataset table (visible only when checkbox enabled)
     """
+    openExploreWithSearch = Signal(str)              # npr. "1.2.3.4" ili "dns"
+    openExploreWithConversation = Signal(str, str)   # src_ip, dst_ip
 
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
@@ -879,6 +923,7 @@ class RegistryPage(QWidget):
         self.pairs_view.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
 
         il.addWidget(self.pairs_view)
+        self.pairs_view.doubleClicked.connect(self._on_insight_double_clicked)
         rp.addWidget(insights_card)
 
         # Note
@@ -937,6 +982,7 @@ class RegistryPage(QWidget):
         self.proxy = TextFilterProxy()
         self.proxy.setSourceModel(self.model)
         self.table.setModel(self.proxy)
+        self.table.doubleClicked.connect(self._on_dataset_double_clicked)
 
         self.txt_search.textChanged.connect(self.proxy.set_query)
         dp.addWidget(self.table, 1)
@@ -1063,7 +1109,7 @@ class RegistryPage(QWidget):
             chip("LIID", liid),
         ]
         if bt or et:
-            chips.append(chip("Period", f"{bt} → {et}".strip()))
+            chips.append(chip("Period", f"{_fmt_dt_short(bt)} → {_fmt_dt_short(et)}"))
 
         self.lbl_meta_chips.setText("".join(chips))
 
@@ -1084,6 +1130,8 @@ class RegistryPage(QWidget):
         self._set_stat(self.card_udst, str(uniq_dst))
         self._set_stat(self.card_uapps, str(uniq_apps))
         self._set_stat(self.card_bytes, _human_bytes(total_bytes))
+
+    
 
     def _render_analyst(self):
         a = self._analyst or {}
@@ -1111,6 +1159,15 @@ class RegistryPage(QWidget):
                  # ---- dominant app ----
         cov = a.get("coverage", {}) or {}
         dom = a.get("dominant_app", {}) or {}
+
+        active_days = int(cov.get("active_days", 0) or 0)
+        active_days_pct = float(cov.get("active_days_pct", 0.0) or 0.0)
+        avg_flows_per_active_day = float(cov.get("avg_flows_per_active_day", 0.0) or 0.0)
+        pattern = str(cov.get("pattern", "unknown") or "unknown")
+        duration_days = cov.get("duration_days", None)
+        bt = str(cov.get("bt", "") or "")
+        et = str(cov.get("et", "") or "")
+
         dom_b = (dom.get("by_bytes", {}) or {})
         dom_c = (dom.get("by_count", {}) or {})
         dom_text = (
@@ -1145,10 +1202,30 @@ class RegistryPage(QWidget):
         def hfmt(h):
             return "—" if h is None else f"{int(h):02d}:00"
 
-                # ---- body text ----
+        # ---- body text ----
         lines = []
+
+        coverage_parts = [f"{int(cov.get('total_flows', 0) or 0)} flows"]
+
+        if bt and et:
+            coverage_parts.append(f"{_fmt_dt_short(bt)} → {_fmt_dt_short(et)}")
+
+        if duration_days is not None:
+            coverage_parts.append(f"{float(duration_days):.1f} days")
+
+        if active_days > 0:
+            coverage_parts.append(f"{active_days} active days")
+
+        if active_days_pct > 0:
+            coverage_parts.append(f"{active_days_pct:.1f}% active")
+
+        if avg_flows_per_active_day > 0:
+            coverage_parts.append(f"{avg_flows_per_active_day:.1f} flows/day")
+
+        coverage_parts.append(f"pattern: {html.escape(pattern)}")
+
         lines.append(
-            f"<b>Coverage:</b> {int(cov.get('total_flows',0) or 0)} flows | "
+            f"<b>Coverage:</b> " + " | ".join(coverage_parts) + " | "
             f"<b>Outbound share:</b> {out_share:.1f}%"
         )
         lines.append(dom_text)
@@ -1242,67 +1319,7 @@ class RegistryPage(QWidget):
 
         self.hist24.set_quiet_hours(quiet_hours)
         self.hist24.set_values(hh)
-
-    def hfmt(h):
-        return "—" if h is None else f"{int(h):02d}:00"
-
-        # build body
-        lines = []
-        lines.append(
-            f"<b>Coverage:</b> {int(cov.get('total_flows',0) or 0)} flows | "
-                     f"<b>Outbound share:</b> {out_share:.1f}%"
-        )
-        lines.append(dom_text)
-
-        lines.append(
-            f"<b>Top internal (outbound):</b> {html.escape(str(top_out.get('ip','—')))} "
-            f"({float(top_out.get('share_of_outbound_pct',0.0)):.1f}%) &nbsp;&nbsp; "
-            f"<b>Top dst (outbound):</b> {html.escape(str(top_dst.get('ip','—')))} "
-            f"({float(top_dst.get('share_of_outbound_pct',0.0)):.1f}%)"
-        )
-
-        lines.append(
-            f"<b>Activity:</b> peak {hfmt(peak)}, quiet {hfmt(quiet)} | "
-            f"night {night:.1f}%, business {business:.1f}%"
-        )
-
-        if reasons:
-            # show max 3 reasons
-            rs = "".join(f"<li>{html.escape(str(r))}</li>" for r in reasons[:3])
-            lines.append(f"<b>Top reasons:</b><ul style='margin:6px 0 0 18px;'>{rs}</ul>")
-        else:
-            lines.append("<b>Top reasons:</b> —")
-
-               
-        
-                # ---- OUT vs IN (text + widget) ----
-        self.lbl_dir_text.setText(
-        f"<b>OUT vs IN:</b> OUT {html.escape(out_b)} ({out_p:.1f}%) &nbsp;|&nbsp; "
-        f"IN {html.escape(in_b)} ({in_p:.1f}%)"
-        )
-        self.dir_bar.set_pcts(out_p, in_p)
-
-                # ---- Activity 24h (prefer normalized) ----
-        # ---- Activity 24h BYTES ----
-        hh = act.get("hour_bytes_24") or act.get("hour_bytes") or [0] * 24
-
-        if not isinstance(hh, list) or len(hh) != 24:
-            hh = [0] * 24
-
-                # ---- quiet band (donjih ~20% nenultih sati) ----
-        vals = [int(v or 0) for v in hh]
-        nonzero = sorted(v for v in vals if v > 0)
-
-        quiet_hours: list[int] = []
-        if nonzero:
-            idx = int(0.20 * (len(nonzero) - 1))
-            thr = nonzero[idx]
-            quiet_hours = [i for i, v in enumerate(vals) if 0 < v <= thr]
-
-        self.hist24.set_quiet_hours(quiet_hours)
-
-        self.hist24.set_values(hh)
-
+    
     def _render_full_hint(self):
         total = len(self._flows)
         try:
@@ -1407,6 +1424,52 @@ class RegistryPage(QWidget):
         if total_bytes is None:
             total_bytes = sum(_safe_int(f.get("bidirectional_bytes")) for f in self._flows)
 
+        a = self._analyst or {}
+
+        risk = a.get("risk", {}) or {}
+        score = int(risk.get("score", 0) or 0)
+        level = str(risk.get("level", "LOW") or "LOW")
+        reasons = list(risk.get("reasons", []) or [])
+
+        cov = a.get("coverage", {}) or {}
+        active_days = int(cov.get("active_days", 0) or 0)
+        active_days_pct = float(cov.get("active_days_pct", 0.0) or 0.0)
+        avg_flows_per_active_day = float(cov.get("avg_flows_per_active_day", 0.0) or 0.0)
+        pattern = str(cov.get("pattern", "unknown") or "unknown")
+        duration_days = cov.get("duration_days", None)
+        bt_cov = str(cov.get("bt", "") or "")
+        et_cov = str(cov.get("et", "") or "")
+
+        dom = a.get("dominant_app", {}) or {}
+        dom_b = (dom.get("by_bytes", {}) or {})
+        dom_c = (dom.get("by_count", {}) or {})
+
+        bytes_s = a.get("bytes", {}) or {}
+        out_share = float(bytes_s.get("outbound_share_total_pct", 0.0) or 0.0)
+
+        dirb = bytes_s.get("direction_bar", {}) or {}
+        out_b = _human_bytes(dirb.get("outbound_bytes", 0))
+        in_b = _human_bytes(dirb.get("inbound_bytes", 0))
+        out_p = float(dirb.get("outbound_bytes_pct", 0.0) or 0.0)
+        in_p = float(dirb.get("inbound_bytes_pct", 0.0) or 0.0)
+
+        domn = a.get("dominance", {}) or {}
+        top_out = (domn.get("top_internal_outbound", {}) or {})
+        top_dst = (domn.get("top_destination_outbound", {}) or {})
+
+        act = a.get("activity", {}) or {}
+        peak = act.get("peak_hour", None)
+        quiet = act.get("quiet_hour", None)
+        night = float(act.get("night_share_pct", 0.0) or 0.0)
+        business = float(act.get("business_share_pct", 0.0) or 0.0)
+
+        hour_bytes = act.get("hour_bytes_24") or act.get("hour_bytes") or [0] * 24
+        if not isinstance(hour_bytes, list) or len(hour_bytes) != 24:
+            hour_bytes = [0] * 24
+
+        def hfmt(h):
+            return "—" if h is None else f"{int(h):02d}:00"
+
         def table_rows(items: list[tuple[Any, Any]]) -> str:
             out = []
             for k, v in (items or [])[:15]:
@@ -1418,7 +1481,12 @@ class RegistryPage(QWidget):
             <div class="card">
               <h3>{_esc(title)}</h3>
               <table>
-                <thead><tr><th>{_esc(col1)}</th><th class="num">{_esc(col2)}</th></tr></thead>
+                <thead>
+                  <tr>
+                    <th>{_esc(col1)}</th>
+                    <th class="num">{_esc(col2)}</th>
+                  </tr>
+                </thead>
                 <tbody>
                   {table_rows(items)}
                 </tbody>
@@ -1426,10 +1494,90 @@ class RegistryPage(QWidget):
             </div>
             """
 
+        reasons_html = "".join(f"<li>{_esc(r)}</li>" for r in reasons[:5]) if reasons else "<li>—</li>"
+        coverage_parts = [f"{int(cov.get('total_flows', 0) or 0)} flows"]
+
+        if bt_cov and et_cov:
+            coverage_parts.append(f"{_fmt_dt_short(bt_cov)} → {_fmt_dt_short(et_cov)}")
+
+        if duration_days is not None:
+            coverage_parts.append(f"{float(duration_days):.1f} days")
+
+        if active_days > 0:
+            coverage_parts.append(f"{active_days} active days")
+
+        if active_days_pct > 0:
+            coverage_parts.append(f"{active_days_pct:.1f}% active")
+
+        if avg_flows_per_active_day > 0:
+            coverage_parts.append(f"{avg_flows_per_active_day:.1f} flows/day")
+
+        coverage_parts.append(f"pattern: {_esc(pattern)}")
+
+        coverage_html = " | ".join(coverage_parts)
+
+        analyst_html = f"""
+        <div class="card analyst">
+          <h2>Analyst Summary</h2>
+
+          <div class="analyst-risk">
+            <div class="risk-line">
+              <span><strong>Risk score:</strong> {_esc(score)}/100 ({_esc(level)})</span>
+            </div>
+            <div class="risk-bar-wrap">
+              <div class="risk-bar-fill" style="width:{max(0, min(100, score))}%;"></div>
+            </div>
+          </div>
+
+          <div class="analyst-grid">
+            <div class="info-block">
+              <p><strong>Coverage:</strong> {coverage_html}</p>
+              <p><strong>Outbound share:</strong> {out_share:.1f}%</p>
+              <p><strong>Dominant app by bytes:</strong> {_esc(dom_b.get('name', '—'))} ({float(dom_b.get('share_pct', 0.0)):.1f}%)</p>
+              <p><strong>Dominant app by count:</strong> {_esc(dom_c.get('name', '—'))} ({float(dom_c.get('share_pct', 0.0)):.1f}%)</p>
+            </div>
+
+            <div class="info-block">
+              <p><strong>Top internal outbound:</strong> {_esc(top_out.get('ip', '—'))} ({float(top_out.get('share_of_outbound_pct', 0.0)):.1f}%)</p>
+              <p><strong>Top destination outbound:</strong> {_esc(top_dst.get('ip', '—'))} ({float(top_dst.get('share_of_outbound_pct', 0.0)):.1f}%)</p>
+              <p><strong>Peak hour:</strong> {_esc(hfmt(peak))}</p>
+              <p><strong>Quiet hour:</strong> {_esc(hfmt(quiet))}</p>
+              <p><strong>Night share:</strong> {night:.1f}%</p>
+              <p><strong>Business share:</strong> {business:.1f}%</p>
+            </div>
+          </div>
+
+          <div class="section-block">
+            <p><strong>OUT vs IN:</strong> OUT {_esc(out_b)} ({out_p:.1f}%) &nbsp;|&nbsp; IN {_esc(in_b)} ({in_p:.1f}%)</p>
+            {_direction_bar_html(out_p, in_p, width_px=320, height_px=10)}
+          </div>
+
+          <div class="section-block">
+            <p><strong>Activity by bytes</strong></p>
+            {_mini_hist_24_html(hour_bytes, height_px=18)}
+          </div>
+
+          <div class="section-block">
+            <p><strong>Top reasons</strong></p>
+            <ul class="reasons-list">
+              {reasons_html}
+            </ul>
+          </div>
+        </div>
+        """
+
+        cards = []
+        for title, key, hdrs in self._tab_defs:
+            items = s.get(key, []) or []
+            if key == "top_proto":
+                items = [(format_ip_proto(k), v) for (k, v) in items]
+            cards.append(section_card(title, items, hdrs[0], hdrs[1]))
+
         full_table_html = ""
         if include_full and self._cols:
             thead = "".join(f"<th>{_esc(c)}</th>" for c in self._cols)
             body_rows = []
+
             for row in self._flows:
                 tds = []
                 for c in self._cols:
@@ -1438,6 +1586,7 @@ class RegistryPage(QWidget):
                         v = format_ip_proto(v)
                     tds.append(f"<td>{_esc(v)}</td>")
                 body_rows.append("<tr>" + "".join(tds) + "</tr>")
+
             tbody = "\n".join(body_rows)
 
             full_table_html = f"""
@@ -1454,51 +1603,252 @@ class RegistryPage(QWidget):
 
         css = """
         :root{
-          --bg:#f9fafb; --card:#ffffff; --border:#e5e7eb; --muted:#6b7280; --text:#111827;
+          --bg:#f9fafb;
+          --card:#ffffff;
+          --border:#e5e7eb;
+          --muted:#6b7280;
+          --text:#111827;
           --soft:#f3f4f6;
         }
-        body{font-family:Inter,Segoe UI,Arial,sans-serif;margin:32px;background:var(--bg);color:var(--text);}
-        .page{max-width:1100px;margin:0 auto;background:var(--card);border:1px solid var(--border);border-radius:16px;padding:28px;}
-        h1{margin:0 0 6px 0;font-size:26px;}
-        .sub{color:var(--muted);margin-bottom:18px;}
-        .chips{display:flex;gap:10px;flex-wrap:wrap;margin:10px 0 18px 0;}
-        .chip{background:var(--soft);border:1px solid var(--border);border-radius:999px;padding:6px 10px;font-size:12px;color:#374151;}
-        .chip b{color:var(--text);}
-        .stats{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin:12px 0 18px 0;}
-        .stat{border:1px solid var(--border);border-radius:14px;padding:12px;}
-        .stat .t{color:var(--muted);font-size:12px;margin-bottom:2px;}
-        .stat .v{font-size:20px;font-weight:900;}
-        .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-top:12px;}
-        .card{border:1px solid var(--border);border-radius:14px;padding:14px;}
-        .card h3{margin:0 0 10px 0;font-size:14px;}
-        table{width:100%;border-collapse:collapse;font-size:13px;}
-        th,td{border-top:1px solid var(--border);padding:8px 6px;text-align:left;vertical-align:top;}
-        th{background:#fafafa;color:#374151;font-weight:900;}
-        th.num, td.num{text-align:center;font-variant-numeric:tabular-nums;}
-        .note{margin-top:18px;}
-        .note p{white-space:pre-wrap;color:#374151;margin:0;}
-        .details{margin-top:16px;border:1px solid var(--border);border-radius:14px;padding:12px;background:#fff;}
-        .details summary{cursor:pointer;font-weight:900;color:#111827;}
-        .tablewrap{overflow:auto;margin-top:10px;border-radius:12px;border:1px solid var(--border);}
-        table.full{min-width:1100px;}
-        .footer{margin-top:18px;color:var(--muted);font-size:12px;}
+
+        body{
+          font-family:Inter, Segoe UI, Arial, sans-serif;
+          font-size:14px;
+          line-height:1.5;
+          margin:32px;
+          background:var(--bg);
+          color:var(--text);
+        }
+
+        .page{
+          max-width:1100px;
+          margin:0 auto;
+          background:var(--card);
+          border:1px solid var(--border);
+          border-radius:16px;
+          padding:28px;
+        }
+
+        h1{
+          margin:0 0 6px 0;
+          font-size:28px;
+          line-height:1.2;
+          font-weight:800;
+        }
+
+        h2{
+          margin:0 0 12px 0;
+          font-size:20px;
+          line-height:1.3;
+          font-weight:700;
+        }
+
+        h3{
+          margin:0 0 10px 0;
+          font-size:16px;
+          line-height:1.3;
+          font-weight:700;
+        }
+
+        p, li, td, th, summary, .sub, .chip, .footer{
+          font-size:14px;
+          line-height:1.5;
+        }
+
+        .sub{
+          color:var(--muted);
+          margin-bottom:8px;
+        }
+
+        .chips{
+          display:flex;
+          gap:10px;
+          flex-wrap:wrap;
+          margin:14px 0 20px 0;
+        }
+
+        .chip{
+          background:var(--soft);
+          border:1px solid var(--border);
+          border-radius:999px;
+          padding:6px 10px;
+          color:#374151;
+        }
+
+        .chip b{
+          color:var(--text);
+        }
+
+        .stats{
+          display:grid;
+          grid-template-columns:repeat(5,1fr);
+          gap:12px;
+          margin:12px 0 18px 0;
+        }
+
+        .stat{
+          border:1px solid var(--border);
+          border-radius:14px;
+          padding:12px;
+        }
+
+        .stat .t{
+          color:var(--muted);
+          font-size:12px;
+          line-height:1.4;
+          margin-bottom:4px;
+        }
+
+        .stat .v{
+          font-size:20px;
+          line-height:1.2;
+          font-weight:800;
+        }
+
+        .card{
+          border:1px solid var(--border);
+          border-radius:14px;
+          padding:14px;
+          background:#fff;
+        }
+
+        .grid{
+          display:grid;
+          grid-template-columns:repeat(3,1fr);
+          gap:14px;
+          margin-top:18px;
+        }
+
+        table{
+          width:100%;
+          border-collapse:collapse;
+        }
+
+        th, td{
+          border-top:1px solid var(--border);
+          padding:8px 6px;
+          text-align:left;
+          vertical-align:top;
+        }
+
+        th{
+          background:#fafafa;
+          color:#374151;
+          font-weight:700;
+        }
+
+        th.num, td.num{
+          text-align:center;
+          font-variant-numeric:tabular-nums;
+        }
+
+        .analyst{
+          margin:18px 0;
+        }
+
+        .analyst-grid{
+          display:grid;
+          grid-template-columns:1fr 1fr;
+          gap:18px;
+          margin-top:12px;
+        }
+
+        .info-block p{
+          margin:0 0 8px 0;
+          color:#374151;
+        }
+
+        .section-block{
+          margin-top:14px;
+        }
+
+        .section-block p{
+          margin:0 0 8px 0;
+          color:#374151;
+        }
+
+        .analyst-risk{
+          margin-top:8px;
+        }
+
+        .risk-line{
+          margin-bottom:8px;
+          color:#111827;
+          font-weight:700;
+        }
+
+        .risk-bar-wrap{
+          width:100%;
+          height:16px;
+          background:#f3f4f6;
+          border:1px solid #e5e7eb;
+          border-radius:999px;
+          overflow:hidden;
+        }
+
+        .risk-bar-fill{
+          height:100%;
+          background:#111827;
+          border-radius:999px;
+        }
+
+        .reasons-list{
+          margin:6px 0 0 18px;
+          padding:0;
+          color:#374151;
+        }
+
+        .note{
+          margin-top:18px;
+        }
+
+        .note p{
+          white-space:pre-wrap;
+          color:#374151;
+          margin:0;
+        }
+
+        .details{
+          margin-top:16px;
+          border:1px solid var(--border);
+          border-radius:14px;
+          padding:12px;
+          background:#fff;
+        }
+
+        .details summary{
+          cursor:pointer;
+          font-weight:700;
+          color:#111827;
+        }
+
+        .tablewrap{
+          overflow:auto;
+          margin-top:10px;
+          border-radius:12px;
+          border:1px solid var(--border);
+        }
+
+        table.full{
+          min-width:1100px;
+        }
+
+        .footer{
+          margin-top:18px;
+          color:var(--muted);
+        }
+
         @media (max-width:1100px){
           .stats{grid-template-columns:repeat(2,1fr);}
           .grid{grid-template-columns:1fr;}
+          .analyst-grid{grid-template-columns:1fr;}
         }
         """
 
         prefilled_text = """
-Predmet je izrađen temeljem pasivne analize mrežnih tokova.
+Izvješće je izrađeno temeljem pasivne analize mrežnih tokova.
 Zaključci su indikativni i temelje se na metapodacima (IP, protokoli, aplikacije, vrijeme, volumen).
 """.strip()
-
-        cards = []
-        for title, key, hdrs in self._tab_defs:
-            items = s.get(key, []) or []
-            if key == "top_proto":
-                items = [(format_ip_proto(k), v) for (k, v) in items]
-            cards.append(section_card(title, items, hdrs[0], hdrs[1]))
 
         folder_txt = _esc(str(self._folder)) if self._folder else "—"
 
@@ -1513,14 +1863,14 @@ Zaključci su indikativni i temelje se na metapodacima (IP, protokoli, aplikacij
   <div class="page">
     <h1>ConduVia – Report</h1>
     <div class="sub">Registry / Summary export</div>
-    <div class="sub" style="margin-top:-10px;">Folder: {folder_txt}</div>
+    <div class="sub">Folder: {folder_txt}</div>
 
     <div class="chips">
       <div class="chip"><b>Klasa:</b> {_esc(klasa or "—")}</div>
       <div class="chip"><b>Urbroj:</b> {_esc(urbroj or "—")}</div>
       <div class="chip"><b>Target:</b> {_esc(target or "—")} ({_esc(targettype or "—")})</div>
       <div class="chip"><b>LIID:</b> {_esc(liid or "—")}</div>
-      <div class="chip"><b>Period:</b> {_esc(bt or "—")} → {_esc(et or "—")}</div>
+      <div class="chip"><b>Period:</b> {_fmt_dt_short(bt)} → {_fmt_dt_short(et)}</div>
     </div>
 
     <div class="stats">
@@ -1530,6 +1880,8 @@ Zaključci su indikativni i temelje se na metapodacima (IP, protokoli, aplikacij
       <div class="stat"><div class="t">Unique apps</div><div class="v">{_esc(uniq_apps)}</div></div>
       <div class="stat"><div class="t">Total bytes</div><div class="v">{_esc(_human_bytes(total_bytes))}</div></div>
     </div>
+
+    {analyst_html}
 
     <div class="grid">
       {''.join(cards)}
@@ -1543,9 +1895,72 @@ Zaključci su indikativni i temelje se na metapodacima (IP, protokoli, aplikacij
     {full_table_html}
 
     <div class="footer">
-      Generated by ConduVia.
+      Generated by ConduVia. ThinkTank by: _Igy_
     </div>
   </div>
 </body>
 </html>
 """
+    
+    def _on_dataset_double_clicked(self, index: QModelIndex):
+        if not index.isValid():
+            return
+
+        src_index = self.proxy.mapToSource(index)
+        row = src_index.row()
+
+        try:
+            flow = self.model._rows[row]
+        except Exception:
+            return
+
+        src = str(flow.get("src_ip") or "")
+        dst = str(flow.get("dst_ip") or "")
+        if not src or not dst:
+            return
+
+        self.openExploreWithConversation.emit(src, dst)
+
+    def _on_insight_double_clicked(self, index: QModelIndex):
+        if not index.isValid():
+            return
+
+        # uzmi "Item" iz prve kolone (0) – bez obzira gdje je user kliknuo
+        try:
+            item = self.pairs_model.data(self.pairs_model.index(index.row(), 0), Qt.DisplayRole) or ""
+        except Exception:
+            item = ""
+
+        item = str(item).strip()
+        if not item:
+            return
+
+        # koji insight tab je aktivan?
+        idx = self.ins_tabs.currentIndex()
+        if idx < 0 or idx >= len(self._tab_defs):
+            return
+
+        title, key, _hdrs = self._tab_defs[idx]
+
+        # Mapiranje: što dvoklik radi na kojem tabu
+        # - IP/app/proto: otvori Explore i upiši u search
+        # - ostalo: fallback na search (ako ima smisla)
+        if key in ("top_src", "top_dst", "top_bytes_src", "top_bytes_dst"):
+            # item je IP
+            self.openExploreWithSearch.emit(item)
+            return
+
+        if key in ("top_app", "top_bytes_app"):
+            # item je app name
+            self.openExploreWithSearch.emit(item)
+            return
+
+        if key == "top_proto":
+            # item je već formatiran (format_ip_proto) -> Explore search radi po DisplayRole, pa je OK
+            self.openExploreWithSearch.emit(item)
+            return
+
+        # Dates / Hours – samo ako želiš:
+        # top_date: emitaj date string (ako Explore ima takav tekst u redovima)
+        # top_hour: emitaj npr. "13" ili "13:00" (ovisno kako ti se pojavljuje u datasetu)
+        self.openExploreWithSearch.emit(item)
