@@ -209,6 +209,9 @@ def compute_analyst_summary(flows: list[dict[str, Any]], meta: dict[str, Any] | 
     hour_hist = [0] * 24
     hour_bytes = [0] * 24
 
+    day_hist = Counter()
+    day_bytes = Counter()
+    
     largest_total_flow_bytes = 0
     largest_total_flow: dict[str, Any] | None = None
 
@@ -242,6 +245,9 @@ def compute_analyst_summary(flows: list[dict[str, Any]], meta: dict[str, Any] | 
             hour = int(dt.hour)
             hour_hist[hour] += 1
             hour_bytes[hour] += b_total
+            day_key = dt.strftime("%Y-%m-%d")
+            day_hist[day_key] += 1
+            day_bytes[day_key] += b_total
 
         # classify direction
         src_priv = bool(src) and _is_private_ip(src)
@@ -542,6 +548,10 @@ def compute_analyst_summary(flows: list[dict[str, Any]], meta: dict[str, Any] | 
             "hour_hist_norm": hour_hist_norm,
             "hour_bytes": hour_bytes,
             "hour_bytes_24": hour_bytes,
+
+            "day_hist": dict(sorted(day_hist.items())),
+            "day_bytes": dict(sorted(day_bytes.items())),
+
             "peak_hour": peak_hour,
             "quiet_hour": quiet_hour,
             "night_share_pct": float(night_share),

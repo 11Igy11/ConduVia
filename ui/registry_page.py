@@ -90,6 +90,122 @@ def _fmt_days_short(x: Any) -> str:
 
     return f"{v:.1f} days"
 
+def _day_activity_html(day_hist: dict[str, Any], day_bytes: dict[str, Any], *, top_n: int = 7) -> str:
+    if not isinstance(day_hist, dict) or not day_hist:
+        return "<span style='color:#6b7280;'>—</span>"
+
+    items = []
+    for day, count in day_hist.items():
+        try:
+            c = int(count)
+        except Exception:
+            c = 0
+
+        try:
+            b = int((day_bytes or {}).get(day, 0))
+        except Exception:
+            b = 0
+
+        items.append((str(day), c, b))
+
+    # sortiraj po datumu
+    items.sort(key=lambda x: x[0])
+
+    # uzmi zadnjih N dana
+    if len(items) > top_n:
+        items = items[-top_n:]
+
+    rows = []
+    for i, (day, count, total_bytes) in enumerate(items):
+
+        mb = float(total_bytes) / (1024.0 * 1024.0)
+
+        bg = "#ffffff" if i % 2 == 0 else "#fafafa"
+
+        rows.append(
+            "<tr style='background:" + bg + ";'>"
+            f"<td style='padding:7px 12px;border-top:1px solid #eef2f7;color:#374151;'>{_esc(_fmt_dt_short(day))}</td>"
+            f"<td style='padding:7px 12px;border-top:1px solid #eef2f7;color:#111827;font-weight:700;text-align:right;'>{count}</td>"
+            f"<td style='padding:7px 12px;border-top:1px solid #eef2f7;color:#374151;font-weight:600;text-align:right;'>{mb:.1f} MB</td>"
+            "</tr>"
+        )
+
+    return (
+        "<div style='margin-top:8px;max-width:520px;"
+        "border:1px solid #e5e7eb;border-radius:10px;overflow:hidden;"
+        "background:#ffffff;'>"
+        "<table style='width:100%;border-collapse:collapse;'>"
+        "<thead>"
+        "<tr style='background:#f9fafb;'>"
+        "<th style='padding:8px 12px;text-align:left;color:#6b7280;font-size:11px;font-weight:700;'>Date</th>"
+        "<th style='padding:8px 12px;text-align:right;color:#6b7280;font-size:11px;font-weight:700;'>Flows</th>"
+        "<th style='padding:8px 12px;text-align:right;color:#6b7280;font-size:11px;font-weight:700;'>Bytes</th>"
+        "</tr>"
+        "</thead>"
+        "<tbody>"
+        + "".join(rows) +
+        "</tbody>"
+        "</table>"
+        "</div>"
+    )
+
+def _top_active_days_html(day_hist: dict[str, Any], day_bytes: dict[str, Any], *, top_n: int = 5) -> str:
+    if not isinstance(day_hist, dict) or not day_hist:
+        return "<span style='color:#6b7280;'>—</span>"
+
+    items = []
+    for day, count in day_hist.items():
+        try:
+            c = int(count)
+        except Exception:
+            c = 0
+
+        try:
+            b = int((day_bytes or {}).get(day, 0))
+        except Exception:
+            b = 0
+
+        items.append((str(day), c, b))
+ 
+
+    # sort by flows desc
+    items.sort(key=lambda x: x[1], reverse=True)
+    items = items[:top_n]
+
+    rows = []
+    for i, (day, count, total_bytes) in enumerate(items):
+
+        mb = float(total_bytes) / (1024.0 * 1024.0)
+
+        bg = "#ffffff" if i % 2 == 0 else "#fafafa"
+
+        rows.append(
+            "<tr style='background:" + bg + ";'>"
+            f"<td style='padding:7px 12px;border-top:1px solid #eef2f7;color:#374151;'>{_esc(_fmt_dt_short(day))}</td>"
+            f"<td style='padding:7px 12px;border-top:1px solid #eef2f7;color:#111827;font-weight:700;text-align:right;'>{count}</td>"
+            f"<td style='padding:7px 12px;border-top:1px solid #eef2f7;color:#374151;font-weight:600;text-align:right;'>{mb:.1f} MB</td>"
+            "</tr>"
+        )
+
+    return (
+        "<div style='margin-top:8px;max-width:520px;"
+        "border:1px solid #e5e7eb;border-radius:10px;overflow:hidden;"
+        "background:#ffffff;'>"
+        "<table style='width:100%;border-collapse:collapse;'>"
+        "<thead>"
+        "<tr style='background:#f9fafb;'>"
+        "<th style='padding:8px 12px;text-align:left;color:#6b7280;font-size:11px;font-weight:700;'>Date</th>"
+        "<th style='padding:8px 12px;text-align:right;color:#6b7280;font-size:11px;font-weight:700;'>Flows</th>"
+        "<th style='padding:8px 12px;text-align:right;color:#6b7280;font-size:11px;font-weight:700;'>Bytes</th>"
+        "</tr>"
+        "</thead>"
+        "<tbody>"
+        + "".join(rows) +
+        "</tbody>"
+        "</table>"
+        "</div>"
+    )
+
 def _mini_hist_24_html(vals: list[int], *, height_px: int = 14) -> str:
     """
     Qt RichText safe mini histogram.
@@ -840,22 +956,26 @@ class RegistryPage(QWidget):
         self.lbl_analyst_body.setTextFormat(Qt.RichText)
         self.lbl_analyst_body.setWordWrap(True)
         self.lbl_analyst_body.setStyleSheet("color:#374151;")
+        self.lbl_analyst_body.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
         al.addWidget(self.lbl_analyst_body)
-                # OUT vs IN text
-        self.lbl_dir_text = QLabel("")
-        self.lbl_dir_text.setTextFormat(Qt.RichText)
-        self.lbl_dir_text.setWordWrap(True)
-        self.lbl_dir_text.setStyleSheet("color:#374151;")
-        al.addWidget(self.lbl_dir_text)
 
-            # OUT vs IN bar widget
-        self.dir_bar = DirectionBarWidget()
-        al.addWidget(self.dir_bar)
+        self.lbl_day_section = QLabel("")
+        self.lbl_day_section.setTextFormat(Qt.RichText)
+        self.lbl_day_section.setWordWrap(True)
+        self.lbl_day_section.setStyleSheet("color:#374151;")
+        al.addWidget(self.lbl_day_section)
+
+        self.lbl_activity_text = QLabel("")
+        self.lbl_activity_text.setTextFormat(Qt.RichText)
+        self.lbl_activity_text.setWordWrap(True)
+        self.lbl_activity_text.setStyleSheet("color:#374151;")
+        al.addWidget(self.lbl_activity_text)
+        al.addSpacing(4)
 
         hist_hdr = QHBoxLayout()
 
         self.lbl_hist_title = QLabel("Activity by bytes")
-        self.lbl_hist_title.setStyleSheet("color:#6b7280;font-size:12px;")
+        self.lbl_hist_title.setStyleSheet("color:#374151;font-size:12px;font-weight:700;")
         hist_hdr.addWidget(self.lbl_hist_title)
 
         hist_hdr.addStretch()
@@ -870,7 +990,18 @@ class RegistryPage(QWidget):
         self.hist24 = MiniHistogram24Widget()
         self.hist24.hourClicked.connect(self._on_hist_hour_clicked)
         self._hour_filter: int | None = None
-        al.addWidget(self.hist24)     
+        al.addWidget(self.hist24)
+
+                # OUT vs IN text
+        self.lbl_dir_text = QLabel("")
+        self.lbl_dir_text.setTextFormat(Qt.RichText)
+        self.lbl_dir_text.setWordWrap(True)
+        self.lbl_dir_text.setStyleSheet("color:#374151;")
+        al.addWidget(self.lbl_dir_text)
+
+            # OUT vs IN bar widget
+        self.dir_bar = DirectionBarWidget()
+        al.addWidget(self.dir_bar)    
 
         rp.addWidget(self.analyst_card)
 
@@ -1139,6 +1270,8 @@ class RegistryPage(QWidget):
             self.lbl_risk.setText("Risk score: —")
             self.risk_bar.setValue(0)
             self.lbl_analyst_body.setText("No analyst summary available.")
+            self.lbl_day_section.setText("")
+            self.lbl_activity_text.setText("")
             self.lbl_dir_text.setText("")
             self.dir_bar.set_pcts(0.0, 0.0)
             self._last_activity = {}
@@ -1194,6 +1327,8 @@ class RegistryPage(QWidget):
 
         # ---- activity ----
         act = a.get("activity", {}) or {}
+        day_hist = act.get("day_hist", {}) or {}
+        day_bytes = act.get("day_bytes", {}) or {}
         peak = act.get("peak_hour", None)
         quiet = act.get("quiet_hour", None)
         night = float(act.get("night_share_pct", 0.0) or 0.0)
@@ -1203,8 +1338,6 @@ class RegistryPage(QWidget):
             return "—" if h is None else f"{int(h):02d}:00"
 
         # ---- body text ----
-        lines = []
-
         coverage_parts = [f"{int(cov.get('total_flows', 0) or 0)} flows"]
 
         if bt and et:
@@ -1224,31 +1357,63 @@ class RegistryPage(QWidget):
 
         coverage_parts.append(f"pattern: {html.escape(pattern)}")
 
-        lines.append(
+        if reasons:
+            rs = "".join(f"<li>{html.escape(str(r))}</li>" for r in reasons[:3])
+            reasons_html = f"<b>Top reasons:</b><ul style='margin:4px 0 6px 18px;'>{rs}</ul>"
+        else:
+            reasons_html = "<b>Top reasons:</b> —"
+
+        coverage_html = (
             f"<b>Coverage:</b> " + " | ".join(coverage_parts) + " | "
             f"<b>Outbound share:</b> {out_share:.1f}%"
         )
-        lines.append(dom_text)
-        lines.append(
+
+        dominance_html = (
             f"<b>Top internal (outbound):</b> {html.escape(str(top_out.get('ip','—')))} "
             f"({float(top_out.get('share_of_outbound_pct',0.0)):.1f}%) &nbsp;&nbsp; "
             f"<b>Top dst (outbound):</b> {html.escape(str(top_dst.get('ip','—')))} "
             f"({float(top_dst.get('share_of_outbound_pct',0.0)):.1f}%)"
         )
-        lines.append(
-            f"<b>Activity:</b> peak {hfmt(peak)}, quiet {hfmt(quiet)} | "
-            f"night {night:.1f}%, business {business:.1f}%"
+
+        analyst_html = (
+            f"{reasons_html}"
+            f"{coverage_html}<br>"
+            f"{dom_text}<br>"
+            f"{dominance_html}"
         )
 
-        if reasons:
-            rs = "".join(f"<li>{html.escape(str(r))}</li>" for r in reasons[:3])
-            lines.append(f"<b>Top reasons:</b><ul style='margin:6px 0 0 18px;'>{rs}</ul>")
-        else:
-            lines.append("<b>Top reasons:</b> —")
+        self.lbl_analyst_body.setText(analyst_html)
 
-        self.lbl_analyst_body.setText("<br>".join(lines))
+        recent_html = _day_activity_html(day_hist, day_bytes)
+        top_html = _top_active_days_html(day_hist, day_bytes)
 
-                    # ---- OUT vs IN ----
+        day_section = (
+            "<div style='margin-top:10px;'>"
+            "<table style='width:100%;border-collapse:collapse;' cellspacing='0' cellpadding='0'>"
+            "<tr>"
+            "<td style='width:50%;vertical-align:top;padding-right:8px;'>"
+            "<div style='font-weight:700;color:#111827;margin-bottom:6px;'>Activity by day</div>"
+            f"{recent_html}"
+            "</td>"
+            "<td style='width:50%;vertical-align:top;padding-left:8px;'>"
+            "<div style='font-weight:700;color:#111827;margin-bottom:6px;'>Top active days</div>"
+            f"{top_html}"
+            "</td>"
+            "</tr>"
+            "</table>"
+            "</div>"
+        )
+
+        self.lbl_day_section.setText(day_section)
+
+        self.lbl_activity_text.setText(
+            "<div style='margin-top:6px;'>"
+            f"<b>Activity:</b> peak {hfmt(peak)}, quiet {hfmt(quiet)} | "
+            f"night {night:.1f}%, business {business:.1f}%"
+            "</div>"
+        )
+
+        # ---- OUT vs IN ----
         self.lbl_dir_text.setText(
             f"<b>OUT vs IN:</b> OUT {html.escape(out_b)} ({out_p:.1f}%) &nbsp;|&nbsp; "
             f"IN {html.escape(in_b)} ({in_p:.1f}%)"
@@ -1462,10 +1627,16 @@ class RegistryPage(QWidget):
         quiet = act.get("quiet_hour", None)
         night = float(act.get("night_share_pct", 0.0) or 0.0)
         business = float(act.get("business_share_pct", 0.0) or 0.0)
+        day_hist = act.get("day_hist", {}) or {}
+        day_bytes = act.get("day_bytes", {}) or {}
 
         hour_bytes = act.get("hour_bytes_24") or act.get("hour_bytes") or [0] * 24
         if not isinstance(hour_bytes, list) or len(hour_bytes) != 24:
             hour_bytes = [0] * 24
+
+        hour_flows = act.get("hour_hist_24") or act.get("hour_hist") or [0] * 24
+        if not isinstance(hour_flows, list) or len(hour_flows) != 24:
+            hour_flows = [0] * 24
 
         def hfmt(h):
             return "—" if h is None else f"{int(h):02d}:00"
@@ -1516,6 +1687,28 @@ class RegistryPage(QWidget):
 
         coverage_html = " | ".join(coverage_parts)
 
+        dom_text = (
+            f"<strong>Dominant app:</strong> {_esc(dom_b.get('name', '—'))} "
+            f"({float(dom_b.get('share_pct', 0.0)):.1f}% bytes) "
+            f"<span style='color:#6b7280'>(count: {_esc(dom_c.get('name', '—'))}, "
+            f"{float(dom_c.get('share_pct', 0.0)):.1f}%)</span>"
+        )
+
+        dominance_html = (
+            f"<strong>Top internal (outbound):</strong> {_esc(top_out.get('ip', '—'))} "
+            f"({float(top_out.get('share_of_outbound_pct', 0.0)):.1f}%) &nbsp;&nbsp; "
+            f"<strong>Top dst (outbound):</strong> {_esc(top_dst.get('ip', '—'))} "
+            f"({float(top_dst.get('share_of_outbound_pct', 0.0)):.1f}%)"
+        )
+
+        activity_line_html = (
+            f"<strong>Activity:</strong> peak {_esc(hfmt(peak))}, quiet {_esc(hfmt(quiet))} | "
+            f"night {night:.1f}%, business {business:.1f}%"
+        )
+
+        recent_days_html = _day_activity_html(day_hist, day_bytes)
+        top_days_html = _top_active_days_html(day_hist, day_bytes)
+
         analyst_html = f"""
         <div class="card analyst">
           <h2>Analyst Summary</h2>
@@ -1529,39 +1722,59 @@ class RegistryPage(QWidget):
             </div>
           </div>
 
-          <div class="analyst-grid">
-            <div class="info-block">
-              <p><strong>Coverage:</strong> {coverage_html}</p>
-              <p><strong>Outbound share:</strong> {out_share:.1f}%</p>
-              <p><strong>Dominant app by bytes:</strong> {_esc(dom_b.get('name', '—'))} ({float(dom_b.get('share_pct', 0.0)):.1f}%)</p>
-              <p><strong>Dominant app by count:</strong> {_esc(dom_c.get('name', '—'))} ({float(dom_c.get('share_pct', 0.0)):.1f}%)</p>
-            </div>
-
-            <div class="info-block">
-              <p><strong>Top internal outbound:</strong> {_esc(top_out.get('ip', '—'))} ({float(top_out.get('share_of_outbound_pct', 0.0)):.1f}%)</p>
-              <p><strong>Top destination outbound:</strong> {_esc(top_dst.get('ip', '—'))} ({float(top_dst.get('share_of_outbound_pct', 0.0)):.1f}%)</p>
-              <p><strong>Peak hour:</strong> {_esc(hfmt(peak))}</p>
-              <p><strong>Quiet hour:</strong> {_esc(hfmt(quiet))}</p>
-              <p><strong>Night share:</strong> {night:.1f}%</p>
-              <p><strong>Business share:</strong> {business:.1f}%</p>
-            </div>
-          </div>
-
-          <div class="section-block">
-            <p><strong>OUT vs IN:</strong> OUT {_esc(out_b)} ({out_p:.1f}%) &nbsp;|&nbsp; IN {_esc(in_b)} ({in_p:.1f}%)</p>
-            {_direction_bar_html(out_p, in_p, width_px=320, height_px=10)}
-          </div>
-
-          <div class="section-block">
-            <p><strong>Activity by bytes</strong></p>
-            {_mini_hist_24_html(hour_bytes, height_px=18)}
-          </div>
-
-          <div class="section-block">
-            <p><strong>Top reasons</strong></p>
+          <div class="section-block compact-top">
+            <p><strong>Top reasons:</strong></p>
             <ul class="reasons-list">
               {reasons_html}
             </ul>
+          </div>
+
+          <div class="section-block compact">
+            <p><strong>Coverage:</strong> {coverage_html} | <strong>Outbound share:</strong> {out_share:.1f}%</p>
+          </div>
+
+          <div class="section-block compact">
+            <p>{dom_text}</p>
+          </div>
+
+          <div class="section-block compact">
+            <p>{dominance_html}</p>
+          </div>
+
+          <div class="section-block compact day-split">
+            <div class="day-col">
+              <div class="mini-title">Activity by day</div>
+              {recent_days_html}
+            </div>
+            <div class="day-col">
+              <div class="mini-title">Top active days</div>
+              {top_days_html}
+            </div>
+          </div>
+
+          <div class="section-block compact">
+            <p>{activity_line_html}</p>
+          </div>
+
+        <div class="section-block compact">
+            <div class="hist-head">
+              <p><strong>Activity by bytes</strong></p>
+              <span class="hist-note">Same as Registry view</span>
+            </div>
+            {_mini_hist_24_html(hour_bytes, height_px=18)}
+          </div>
+
+          <div class="section-block compact">
+            <div class="hist-head">
+              <p><strong>Activity by flows</strong></p>
+              <span class="hist-note">Same as Registry view</span>
+            </div>
+            {_mini_hist_24_html(hour_flows, height_px=18)}
+          </div>
+
+          <div class="section-block compact">
+            <p><strong>OUT vs IN:</strong> OUT {_esc(out_b)} ({out_p:.1f}%) &nbsp;|&nbsp; IN {_esc(in_b)} ({in_p:.1f}%)</p>
+            {_direction_bar_html(out_p, in_p, width_px=320, height_px=10)}
           </div>
         </div>
         """
@@ -1762,9 +1975,51 @@ class RegistryPage(QWidget):
           margin-top:14px;
         }
 
+        .section-block.compact{
+          margin-top:10px;
+        }
+
+        .section-block.compact-top{
+          margin-top:12px;
+        }
+
         .section-block p{
           margin:0 0 8px 0;
           color:#374151;
+        }
+
+        .mini-title{
+          font-weight:700;
+          color:#111827;
+          margin-bottom:6px;
+        }
+
+        .day-split{
+          display:grid;
+          grid-template-columns:1fr 1fr;
+          gap:16px;
+          align-items:start;
+        }
+
+        .day-col{
+          min-width:0;
+        }
+
+        .hist-head{
+          display:flex;
+          align-items:center;
+          justify-content:space-between;
+          gap:12px;
+          margin-bottom:6px;
+        }
+
+        .hist-head p{
+          margin:0;
+        }
+
+        .hist-note{
+          color:#6b7280;
+          font-size:12px;
         }
 
         .analyst-risk{
@@ -1842,6 +2097,7 @@ class RegistryPage(QWidget):
           .stats{grid-template-columns:repeat(2,1fr);}
           .grid{grid-template-columns:1fr;}
           .analyst-grid{grid-template-columns:1fr;}
+          .day-split{grid-template-columns:1fr;}
         }
         """
 
