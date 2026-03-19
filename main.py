@@ -11,7 +11,6 @@ from core.analyzer import (
     top_flows_by_bytes,
 )
 
-
 DATA_FOLDER = r"C:\Users\igi_t\Desktop\Projekti\Conduvia\data"
 WHITELIST_SNI = [
     # dodaj što god smatraš normalnim; može biti i prazno
@@ -22,8 +21,6 @@ WHITELIST_SNI = [
     "cloudfront.net",
     "akamai",
 ]
-
-
 
 def main() -> None:
     folder = DATA_FOLDER
@@ -82,11 +79,9 @@ def main() -> None:
             break
     print(f"(excluded {excluded} whitelisted entries)")
 
-
     print("\nTop 10 biggest flows (by bytes):")
     for row in top_flows_by_bytes(flows, limit=10):
         print(row)
-
 
 if __name__ == "__main__":
     main()

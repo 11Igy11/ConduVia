@@ -8,7 +8,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-
 PREFERRED_COLUMNS = [
     "src_ip", "src_port", "dst_ip", "dst_port",
     "protocol", "application_name", "requested_server_name",
@@ -16,7 +15,6 @@ PREFERRED_COLUMNS = [
     "bidirectional_duration_ms",
     "bidirectional_packets", "bidirectional_bytes",
 ]
-
 
 def extract_dataset_meta(json_path: str | Path) -> dict[str, Any]:
     """
@@ -48,7 +46,6 @@ def extract_dataset_meta(json_path: str | Path) -> dict[str, Any]:
 
     return meta
 
-
 def build_registry_columns(flows: list[dict[str, Any]]) -> list[str]:
     all_cols: set[str] = set()
     for f in flows:
@@ -67,7 +64,6 @@ def build_registry_columns(flows: list[dict[str, Any]]) -> list[str]:
 
     return cols
 
-
 def _parse_ts_prefix(ts: Any, mode: str) -> str:
     """
     mode: 'date' -> YYYY-MM-DD
@@ -84,7 +80,6 @@ def _parse_ts_prefix(ts: Any, mode: str) -> str:
     if mode == "hour":
         return s[:13]  # YYYY-MM-DD HH
     return ""
-
 
 def compute_registry_summary(flows: list[dict[str, Any]], top_n: int = 10) -> dict[str, Any]:
     src_c = Counter()

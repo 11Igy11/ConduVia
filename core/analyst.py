@@ -22,20 +22,17 @@ def _safe_int(x: Any) -> int:
     except Exception:
         return 0
 
-
 def _pct(part: int | float, whole: int | float) -> float:
     w = float(whole) if whole else 0.0
     if w <= 0:
         return 0.0
     return (float(part) / w) * 100.0
 
-
 def _is_private_ip(ip: str) -> bool:
     try:
         return ipaddress.ip_address(ip).is_private
     except Exception:
         return False
-
 
 def _parse_flow_dt(ts: Any) -> datetime | None:
     # 1) epoch (ms or s)
@@ -71,7 +68,6 @@ def _parse_flow_dt(ts: Any) -> datetime | None:
             pass
     return None
 
-
 def _parse_meta_iso_dt(s: Any) -> datetime | None:
     """
     Meta bt/et sample:
@@ -85,14 +81,12 @@ def _parse_meta_iso_dt(s: Any) -> datetime | None:
     except Exception:
         return None
 
-
 def _score_level(score: int) -> str:
     if score >= 70:
         return "HIGH"
     if score >= 35:
         return "MED"
     return "LOW"
-
 
 def _normalize_0_100(vals: list[int]) -> list[int]:
     """Normalize list to 0..100 ints, keeping shape (for mini-hist)."""
@@ -151,7 +145,6 @@ def _compute_coverage_window(flows: list[dict[str, Any]]) -> dict[str, Any]:
         "days_span": int(days_span),
         "active_days": int(len(active_days)),
     }
-
 
 # ----------------- main -----------------
 def compute_analyst_summary(flows: list[dict[str, Any]], meta: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -368,7 +361,7 @@ def compute_analyst_summary(flows: list[dict[str, Any]], meta: dict[str, Any] | 
     night_share = _pct(night_count, total_timed)
     business_share = _pct(business_count, total_timed)
 
-        # ---- communication pattern ----
+    # ---- communication pattern ----
     active_days = 0
     active_days_pct = 0.0
     avg_flows_per_active_day = 0.0

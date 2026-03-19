@@ -4,7 +4,6 @@ import json
 from pathlib import Path
 from typing import Any
 
-
 def list_json_files(folder: str | Path) -> list[Path]:
     """
     Return all .json files in folder (non-recursive) sorted by name.
@@ -17,7 +16,6 @@ def list_json_files(folder: str | Path) -> list[Path]:
         [x for x in p.iterdir() if x.is_file() and x.suffix.lower() == ".json"],
         key=lambda x: x.name,
     )
-
 
 def load_json_file(path: str | Path, *, debug: bool = False) -> list[dict[str, Any]]:
     """
@@ -64,7 +62,6 @@ def load_json_file(path: str | Path, *, debug: bool = False) -> list[dict[str, A
         f"Unsupported JSON structure in: {p.name} "
         f"(top-level type: {type(data).__name__})"
     )
-
 
 def load_folder(folder: str | Path, *, debug: bool = False) -> tuple[list[Path], list[dict[str, Any]]]:
     """

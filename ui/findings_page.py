@@ -9,7 +9,6 @@ from PySide6.QtWidgets import (
     QListWidget, QTextEdit
 )
 
-
 class FindingsPage(QWidget):
     jumpRequested = Signal()
     editRequested = Signal()
@@ -112,20 +111,16 @@ class FindingsPage(QWidget):
         except Exception:
             return None
 
-
     def clear_detail(self):
         self.finding_detail.setText("")
         self.set_actions_enabled(False)
-
 
     def show_detail(self, text: str):
         self.finding_detail.setText(text)
         self.set_actions_enabled(True)
 
-
     def clear_list(self):
         self.findings_list.clear()
-
 
     def add_list_item(self, text: str, fid: int | None):
         from PySide6.QtWidgets import QListWidgetItem
@@ -174,7 +169,6 @@ class FindingsPage(QWidget):
                 return False
 
         return True
-
 
     def sort_rows(self, rows: list[Any], mode: str) -> list[Any]:
 

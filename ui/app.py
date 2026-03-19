@@ -30,7 +30,6 @@ from core.db import (
     list_activity, add_activity
 )
 
-
 # ---------- helpers ----------
 def is_private_ip(ip: str) -> bool:
     try:
@@ -38,15 +37,12 @@ def is_private_ip(ip: str) -> bool:
     except Exception:
         return False
 
-
 def status_emoji(status: str) -> str:
     s = (status or "").strip() or "New"
     return {"New": "🆕", "Investigating": "🟡", "Confirmed": "✅", "False Positive": "⚪"}.get(s, "🆕")
 
-
 def esc(s: Any) -> str:
     return html.escape("" if s is None else str(s))
-
 
 def normalize_tags(tags: str) -> str:
     # keep it simple: comma-separated, trim, remove empties, keep order, avoid duplicates
@@ -64,7 +60,6 @@ def normalize_tags(tags: str) -> str:
         seen.add(t.lower())
         parts.append(t)
     return ", ".join(parts)
-
 
 # ---------- Table Model ----------
 class FlowTableModel(QAbstractTableModel):
@@ -149,7 +144,6 @@ class FlowTableModel(QAbstractTableModel):
 
         return None
 
-
 # ---------- Proxy ----------
 class NumericSortProxy(QSortFilterProxyModel):
     def __init__(self):
@@ -200,7 +194,6 @@ class NumericSortProxy(QSortFilterProxyModel):
         rs = self.sourceModel().data(right, Qt.DisplayRole) or ""
         return str(ls) < str(rs)
 
-
 # ---------- Main App ----------
 class App(QWidget):
     def build_home_page(self) -> QWidget:
@@ -231,7 +224,7 @@ class App(QWidget):
         f.setBold(True)
         title.setFont(f)
 
-        subtitle = QLabel("Network flow analysis & Live RTT correlation")
+        subtitle = QLabel("Network flow analysis")
         subtitle.setStyleSheet("color: #666666; font-size: 14px;")
 
         title_col.addWidget(title)
@@ -241,9 +234,7 @@ class App(QWidget):
         header.addLayout(title_col, 1)
         header.addStretch()
 
-        layout.addLayout(header)
-
- 
+        layout.addLayout(header) 
 
     # ---------- main card ----------
         card = QFrame()
@@ -265,8 +256,7 @@ class App(QWidget):
 
         info = QLabel(
         "1) Create/Open a project\n"
-        "2) Load a dataset folder\n"
-        "3) (Optional) Start Live RTT for real-time correlation"
+        "2) Load a dataset folder\n"        
     )
         info.setStyleSheet("color: #374151; font-size: 13px;")
         info.setWordWrap(True)
@@ -314,7 +304,7 @@ class App(QWidget):
         """Ensure at least one flow for (src,dst) exists in loaded_flows; expand paging if needed."""
         if not self.flows:
             return
-
+        
         # već učitano? brzo provjeri
         for f in self.loaded_flows:
             if not isinstance(f, dict):
@@ -358,7 +348,6 @@ class App(QWidget):
 
         return None, None
 
-
     def _select_flow_pair(self, src: str, dst: str):
         self.table.clearSelection()
 
@@ -375,7 +364,6 @@ class App(QWidget):
         self.go_page(self.IDX_EXPLORE, self._nav_explore)
         self.tabs.setCurrentIndex(1)
 
-
     def leave_conversation(self, clear_search: bool = False):
         self.proxy.clear_conversation()
         self._conversation_on = False
@@ -387,7 +375,6 @@ class App(QWidget):
             self.search.setText("")
 
         self.update_showing()
-
 
     def enter_conversation(self, src: str, dst: str):
         if not src or not dst:
@@ -434,11 +421,6 @@ class App(QWidget):
         # 1) sidebar navigation
         self._wire_navigation()
 
-        # 2) HOME page buttons -> isti routing kao sidebar
-        self.btn_home_projects.clicked.connect(lambda: self.go_page(self.IDX_PROJECTS, self._nav_projects))
-        self.btn_home_explore.clicked.connect(lambda: self.go_page(self.IDX_EXPLORE, self._nav_explore))
-        self.btn_home_registry.clicked.connect(lambda: self.go_page(self.IDX_REGISTRY, self._nav_registry))
-
         # 3) Explore - search filter
         self.search.textChanged.connect(self.proxy.set_filter_text)
         self.search.textChanged.connect(self.update_showing)
@@ -473,7 +455,6 @@ class App(QWidget):
         self.btn_open_project.clicked.connect(self.open_selected_project)
         self.btn_delete_project.clicked.connect(self.delete_selected_project)
         self.projects_list.itemSelectionChanged.connect(self.on_project_selected_preview)
-
         self.btn_open_dataset.clicked.connect(self.open_selected_dataset)
 
         # 10b) Double click shortcuts
@@ -487,7 +468,6 @@ class App(QWidget):
         fp.jumpRequested.connect(self.jump_to_selected_finding)
         fp.editRequested.connect(self.edit_selected_finding)
         fp.deleteRequested.connect(self.delete_selected_finding)
-
         fp.doubleClickedFinding.connect(self.jump_to_selected_finding)
 
         fp.btn_find_clear.clicked.connect(self.clear_findings_filters)
@@ -495,7 +475,6 @@ class App(QWidget):
         fp.cmb_find_sort.currentTextChanged.connect(self.apply_findings_filter)
         fp.txt_find_search.textChanged.connect(self.apply_findings_filter)
         fp.txt_find_tag.textChanged.connect(self.apply_findings_filter)
-
         fp.contextMenuRequestedFromList.connect(self.on_findings_context_menu)
 
         # 12) Notes autosave
@@ -604,10 +583,9 @@ class App(QWidget):
 
         # Pages + indexes
         self.pages = QStackedWidget()
-        self.IDX_HOME = 0
-        self.IDX_PROJECTS = 1
-        self.IDX_EXPLORE = 2
-        self.IDX_REGISTRY = 3
+        self.IDX_PROJECTS = 0
+        self.IDX_EXPLORE = 1
+        self.IDX_REGISTRY = 2
 
         # -------- Projects page --------
         projects_page = QWidget()
@@ -828,15 +806,14 @@ class App(QWidget):
         explore_layout.addWidget(self.tabs, 1)
 
         # Pages
-        home_page = self.build_home_page()
-        self.pages.addWidget(home_page)
         self.pages.addWidget(projects_page)
         self.pages.addWidget(explore_container)
 
         self.registry_page = RegistryPage()
         self.pages.addWidget(self.registry_page)
 
-        self.pages.setCurrentIndex(self.IDX_HOME)
+        self.pages.setCurrentIndex(self.IDX_PROJECTS)
+        self._set_active_nav(self._nav_projects)
 
         root.addLayout(sidebar, 1)
         root.addWidget(self.pages, 8)
@@ -1323,7 +1300,6 @@ class App(QWidget):
         self.txt_find_search.setText("")
         self.txt_find_tag.setText("")
         self.apply_findings_filter()
-
     
     def refresh_findings_ui(self):
         self._findings_rows = []
@@ -1611,8 +1587,7 @@ class App(QWidget):
         if not self._current_flow:
             return ""
         v = self._current_flow.get(key, "")
-        return "" if v is None else str(v)
-    
+        return "" if v is None else str(v)    
     
 def main():
     app = QApplication(sys.argv)
@@ -1628,14 +1603,12 @@ def main():
 
     icon = QIcon(str(icon_path))
 
-    app.setWindowIcon(icon)   # globalno (taskbar + dialogs)
+    app.setWindowIcon(icon)   # global (taskbar + dialogs)
     w = App()
-    w.setWindowIcon(icon)     # eksplicitno na glavnom prozoru
+    w.setWindowIcon(icon)     # explicit on main window
     w.showMaximized()
 
     sys.exit(app.exec())
-
-
 
 if __name__ == "__main__":
     main()

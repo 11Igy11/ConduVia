@@ -16,7 +16,6 @@ from PySide6.QtWidgets import (
 from core.parser import extract_dataset_meta, build_registry_columns, compute_registry_summary
 from core.analyst import compute_analyst_summary
 
-
 # ----------------- helpers -----------------
 def _human_bytes(n: int | float | None) -> str:
     try:
@@ -32,7 +31,6 @@ def _human_bytes(n: int | float | None) -> str:
         return f"{int(v)} {units[i]}"
     return f"{v:.1f} {units[i]}"
 
-
 def _safe_int(x: Any) -> int:
     if x is None:
         return 0
@@ -44,7 +42,6 @@ def _safe_int(x: Any) -> int:
         return int(float(x))
     except Exception:
         return 0
-
 
 def _esc(x: Any) -> str:
     return html.escape("" if x is None else str(x))
@@ -59,7 +56,7 @@ def _fmt_dt_short(x: Any) -> str:
     except Exception:
         pass
 
-    # string -> prvo probaj kao pravi ISO datetime (meta bt/et)
+    # string -> try as real ISO datetime (meta bt/et)
     try:
         from datetime import datetime
         dt = datetime.fromisoformat(str(x).strip())
@@ -76,7 +73,6 @@ def _fmt_dt_short(x: Any) -> str:
         pass
 
     return str(x)
-
 
 def _fmt_days_short(x: Any) -> str:
     try:
@@ -108,10 +104,10 @@ def _day_activity_html(day_hist: dict[str, Any], day_bytes: dict[str, Any], *, t
 
         items.append((str(day), c, b))
 
-    # sortiraj po datumu
+    # sort by date
     items.sort(key=lambda x: x[0])
 
-    # uzmi zadnjih N dana
+    # latest N days
     if len(items) > top_n:
         items = items[-top_n:]
 
@@ -165,8 +161,7 @@ def _top_active_days_html(day_hist: dict[str, Any], day_bytes: dict[str, Any], *
         except Exception:
             b = 0
 
-        items.append((str(day), c, b))
- 
+        items.append((str(day), c, b)) 
 
     # sort by flows desc
     items.sort(key=lambda x: x[1], reverse=True)
@@ -372,7 +367,6 @@ class DirectionBarWidget(QWidget):
         finally:
             p.end()
 
-
 class MiniHistogram24Widget(QWidget):
     hourClicked = Signal(int)   # emits 0..23
     def __init__(self, parent: QWidget | None = None):
@@ -403,7 +397,7 @@ class MiniHistogram24Widget(QWidget):
                 out.append(max(0, iv))
             self._vals = out
 
-                # peak hour (uvijek prema trenutno prikazanim vrijednostima)
+                # peak hour (allways according shown values)
         if any(self._vals):
             self._peak_hour = max(range(24), key=lambda i: self._vals[i])
         else:
@@ -466,7 +460,7 @@ class MiniHistogram24Widget(QWidget):
     def paintEvent(self, _):
         p = QPainter(self)
         try:
-            p.setRenderHint(QPainter.Antialiasing, False)  # oštrije, čitljivije
+            p.setRenderHint(QPainter.Antialiasing, False)  # sharper
 
             w = self.width()
             h = self.height()
@@ -493,7 +487,7 @@ class MiniHistogram24Widget(QWidget):
             p.setPen(QPen(base_c, 1))
             p.drawLine(x0, y0 + bars_h, x0 + used_w, y0 + bars_h)
 
-            # sqrt scaling: razbije “sve isto” problem
+            # sqrt scaling: break's “all the same” problem
             mx = max(self._vals) if self._vals else 0
             if mx <= 0:
                 scaled = [0] * 24
@@ -502,14 +496,14 @@ class MiniHistogram24Widget(QWidget):
                 mxs = math.sqrt(mx)
                 scaled = [math.sqrt(v) / mxs for v in self._vals]  # 0..1
 
-            # bars (bez kutijica/bordera)
+            # bars (without border)
             p.setPen(Qt.NoPen)
             for i in range(24):
                 frac = scaled[i]
                 bh = int(frac * bars_h)
                 x = x0 + i * (bar_w + gap)
 
-                # rect za hover (cijela kolona)
+                # rect for hover (whole column)
                 self._bar_rects[i] = QRectF(x, y0, bar_w, bars_h)
 
                 if bh <= 0:
@@ -598,7 +592,6 @@ class RegistryTableModel(QAbstractTableModel):
 
         return None
 
-
 class TextFilterProxy(QSortFilterProxyModel):
     def __init__(self):
         super().__init__()
@@ -637,7 +630,6 @@ class TextFilterProxy(QSortFilterProxyModel):
             if v and self._q in str(v).lower():
                 return True
         return False
-
 
 class PairsModel(QAbstractTableModel):
     """2-col model for (key, value) lists."""
@@ -685,7 +677,6 @@ class PairsModel(QAbstractTableModel):
 
         return None
 
-
 # ----------------- page -----------------
 class RegistryPage(QWidget):
     """
@@ -696,7 +687,7 @@ class RegistryPage(QWidget):
       - Report: stats + insights (Top 15) + note (scrollable page)
       - Dataset: full dataset table (visible only when checkbox enabled)
     """
-    openExploreWithSearch = Signal(str)              # npr. "1.2.3.4" ili "dns"
+    openExploreWithSearch = Signal(str)              # example: "1.2.3.4" or "dns"
     openExploreWithConversation = Signal(str, str)   # src_ip, dst_ip
 
     def __init__(self, parent: QWidget | None = None):
@@ -908,7 +899,7 @@ class RegistryPage(QWidget):
 
         rp.addWidget(self.stats_wrap)
 
-                # ---------------- Analyst Summary card ----------------
+        # ---------------- Analyst Summary card ----------------
         self.analyst_card = QFrame()
         self.analyst_card.setObjectName("Card")
         al = QVBoxLayout(self.analyst_card)
@@ -992,14 +983,14 @@ class RegistryPage(QWidget):
         self._hour_filter: int | None = None
         al.addWidget(self.hist24)
 
-                # OUT vs IN text
+        # OUT vs IN text
         self.lbl_dir_text = QLabel("")
         self.lbl_dir_text.setTextFormat(Qt.RichText)
         self.lbl_dir_text.setWordWrap(True)
         self.lbl_dir_text.setStyleSheet("color:#374151;")
         al.addWidget(self.lbl_dir_text)
 
-            # OUT vs IN bar widget
+        # OUT vs IN bar widget
         self.dir_bar = DirectionBarWidget()
         al.addWidget(self.dir_bar)    
 
@@ -1260,9 +1251,7 @@ class RegistryPage(QWidget):
         self._set_stat(self.card_usrc, str(uniq_src))
         self._set_stat(self.card_udst, str(uniq_dst))
         self._set_stat(self.card_uapps, str(uniq_apps))
-        self._set_stat(self.card_bytes, _human_bytes(total_bytes))
-
-    
+        self._set_stat(self.card_bytes, _human_bytes(total_bytes))    
 
     def _render_analyst(self):
         a = self._analyst or {}
@@ -1289,7 +1278,7 @@ class RegistryPage(QWidget):
         self.lbl_risk.setText(f"Risk score: {score}/100 ({level})")
         self.risk_bar.setValue(max(0, min(100, score)))
 
-                 # ---- dominant app ----
+        # ---- dominant app ----
         cov = a.get("coverage", {}) or {}
         dom = a.get("dominant_app", {}) or {}
 
@@ -1310,7 +1299,7 @@ class RegistryPage(QWidget):
             f"{float(dom_c.get('share_pct',0.0)):.1f}%)</span>"
         )
 
-                # ---- bytes direction ----
+        # ---- bytes direction ----
         bytes_s = a.get("bytes", {}) or {}
         out_share = float(bytes_s.get("outbound_share_total_pct", 0.0) or 0.0)
 
@@ -1420,14 +1409,13 @@ class RegistryPage(QWidget):
         )
         self.dir_bar.set_pcts(out_p, in_p)
 
-                    # ---- cache activity + apply histogram mode ----
+        # ---- cache activity + apply histogram mode ----
         self._last_activity = act
 
-                    # button text: pokazuje što će se dogoditi klikom
+        # button text: show what happen's on click
         self.btn_hist_toggle.setText("By bytes" if self._hist_mode == "flows" else "By flows")
 
         self._apply_hist_mode()
-
 
     def _on_hist_hour_clicked(self, hour: int):
         # toggle
@@ -1456,7 +1444,6 @@ class RegistryPage(QWidget):
         self.btn_hist_toggle.setText("By bytes" if self._hist_mode == "flows" else "By flows")
         self._apply_hist_mode()
 
-
     def _apply_hist_mode(self):
         act = self._last_activity or {}
 
@@ -1472,7 +1459,7 @@ class RegistryPage(QWidget):
         if not isinstance(hh, list) or len(hh) != 24:
             hh = [0] * 24
 
-                    # quiet band: donjih ~20% nenultih sati
+        # quiet band: low ~20% not null hours
         vals = [int(v or 0) for v in hh]
         nonzero = sorted(v for v in vals if v > 0)
 
@@ -2181,7 +2168,7 @@ Zaključci su indikativni i temelje se na metapodacima (IP, protokoli, aplikacij
         if not index.isValid():
             return
 
-        # uzmi "Item" iz prve kolone (0) – bez obzira gdje je user kliknuo
+        # take "Item" from fist column (0) – doesn't matter where user clicked
         try:
             item = self.pairs_model.data(self.pairs_model.index(index.row(), 0), Qt.DisplayRole) or ""
         except Exception:
@@ -2191,32 +2178,29 @@ Zaključci su indikativni i temelje se na metapodacima (IP, protokoli, aplikacij
         if not item:
             return
 
-        # koji insight tab je aktivan?
+        # which insight tab is active
         idx = self.ins_tabs.currentIndex()
         if idx < 0 or idx >= len(self._tab_defs):
             return
 
         title, key, _hdrs = self._tab_defs[idx]
 
-        # Mapiranje: što dvoklik radi na kojem tabu
-        # - IP/app/proto: otvori Explore i upiši u search
-        # - ostalo: fallback na search (ako ima smisla)
+        # Mapping: doubleclick on wich tab
+        # - IP/app/proto: open Explore and insert in search
+        # - other: fallback on search (if make sense)
         if key in ("top_src", "top_dst", "top_bytes_src", "top_bytes_dst"):
-            # item je IP
+            # item is IP
             self.openExploreWithSearch.emit(item)
             return
 
         if key in ("top_app", "top_bytes_app"):
-            # item je app name
+            # item is app name
             self.openExploreWithSearch.emit(item)
             return
 
         if key == "top_proto":
-            # item je već formatiran (format_ip_proto) -> Explore search radi po DisplayRole, pa je OK
+            # item is formated (format_ip_proto) -> Explore search works on DisplayRole, so it's OK
             self.openExploreWithSearch.emit(item)
             return
-
-        # Dates / Hours – samo ako želiš:
-        # top_date: emitaj date string (ako Explore ima takav tekst u redovima)
-        # top_hour: emitaj npr. "13" ili "13:00" (ovisno kako ti se pojavljuje u datasetu)
+   
         self.openExploreWithSearch.emit(item)

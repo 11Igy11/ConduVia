@@ -13,9 +13,8 @@ DEFAULT_TS_FIELDS: tuple[str, ...] = (
     "timestamp",
 )
 
-# podrži i nDPI-style alternative ako zatreba kasnije:
+# support nDPI-style alternative if needed:
 # DEFAULT_TS_FIELDS += ("first_seen_ms", "flow_start_ms", ...)
-
 
 def parse_timestamp(value: Any) -> datetime | None:
     """
@@ -82,7 +81,6 @@ def parse_timestamp(value: Any) -> datetime | None:
 
     return None
 
-
 def parse_flow_timestamp(
     flow: dict[str, Any],
     fields: Iterable[str] = DEFAULT_TS_FIELDS,
@@ -94,16 +92,13 @@ def parse_flow_timestamp(
                 return dt
     return None
 
-
 def date_key(dt: datetime) -> str:
     # local date key: YYYY-MM-DD (matches your old slicing)
     return dt.astimezone(LOCAL_TZ).strftime("%Y-%m-%d")
 
-
 def hour_key(dt: datetime) -> str:
     # local hour key: YYYY-MM-DD HH (matches your old slicing)
     return dt.astimezone(LOCAL_TZ).strftime("%Y-%m-%d %H")
-
 
 def _dt_from_epoch(x: float) -> datetime | None:
     try:
@@ -115,7 +110,6 @@ def _dt_from_epoch(x: float) -> datetime | None:
         return datetime.fromtimestamp(seconds, tz=timezone.utc).astimezone(LOCAL_TZ)
     except Exception:
         return None
-
 
 def _try_parse_numeric_epoch_string(s: str) -> datetime | None:
     try:
