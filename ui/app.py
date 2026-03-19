@@ -1,4 +1,5 @@
 import sys
+from core.ai.assistant_service import AIAssistantService
 import ipaddress
 from ui.registry_page import RegistryPage
 import html
@@ -8,7 +9,7 @@ from typing import Any
 from core.protocols import format_ip_proto
 from ui.findings_page import FindingsPage
 
-from PySide6.QtCore import Qt, QAbstractTableModel, QModelIndex, QSortFilterProxyModel, QTimer
+from PySide6.QtCore import Qt, QAbstractTableModel, QModelIndex, QSortFilterProxyModel, QTimer, QObject, QThread, Signal
 from PySide6.QtGui import QGuiApplication, QColor, QIcon, QFont, QPixmap
 from PySide6.QtWidgets import (
     QApplication, QWidget, QHBoxLayout, QVBoxLayout,
@@ -193,6 +194,23 @@ class NumericSortProxy(QSortFilterProxyModel):
         ls = self.sourceModel().data(left, Qt.DisplayRole) or ""
         rs = self.sourceModel().data(right, Qt.DisplayRole) or ""
         return str(ls) < str(rs)
+    
+class AITextWorker(QObject):
+    finished = Signal(str)
+    error = Signal(str)
+
+    def __init__(self, fn, *args, **kwargs):
+        super().__init__()
+        self.fn = fn
+        self.args = args
+        self.kwargs = kwargs
+
+    def run(self):
+        try:
+            result = self.fn(*self.args, **self.kwargs)
+            self.finished.emit(result)
+        except Exception as e:
+            self.error.emit(str(e))
 
 # ---------- Main App ----------
 class App(QWidget):
@@ -437,8 +455,12 @@ class App(QWidget):
 
         # 7) Explore actions
         self.btn_load.clicked.connect(self.load_dataset_dialog)
+        self.btn_ai_summary.clicked.connect(self.generate_ai_summary)
         self.btn_toggle_conv.clicked.connect(self.toggle_conversation)
         self.btn_mark_finding.clicked.connect(self.mark_as_finding)
+
+        # 7A) AI explain flow
+        self.btn_ai_explain.clicked.connect(self.explain_selected_flow)
 
         # 8) Copy buttons
         self.btn_copy_src.clicked.connect(lambda: self.copy_text(self.current_value("src_ip")))
@@ -536,6 +558,8 @@ class App(QWidget):
         self.project_dir = Path(__file__).resolve().parent.parent
         self._init_state()
 
+        self.ai_service = AIAssistantService()
+
         self._build_ui()
         self._wire_ui()
         self._post_init()
@@ -570,6 +594,11 @@ class App(QWidget):
         # Findings in-memory cache (for filter/sort)
         self._findings_rows: list[Any] = []
         self._findings_view_rows: list[Any] = []
+
+        # AI background worker
+        self._ai_thread: QThread | None = None
+        self._ai_worker: AITextWorker | None = None
+        self._ai_mode: str | None = None
 
     def _build_ui(self) -> None:
         outer = QVBoxLayout(self)
@@ -655,9 +684,25 @@ class App(QWidget):
 
         self.tabs = QTabWidget()
 
+        summary_tab = QWidget()
+        summary_layout = QVBoxLayout(summary_tab)
+
+        self.btn_ai_summary = QPushButton("Generate AI Summary")
+
         self.txt_summary = QTextEdit()
         self.txt_summary.setReadOnly(True)
-        self.tabs.addTab(self.txt_summary, "Summary")
+
+        self.txt_ai_summary = QTextEdit()
+        self.txt_ai_summary.setReadOnly(True)
+        self.txt_ai_summary.setPlaceholderText("AI summary will appear here...")
+
+        summary_layout.addWidget(self.btn_ai_summary)
+        summary_layout.addWidget(QLabel("Dataset summary"))
+        summary_layout.addWidget(self.txt_summary, 2)
+        summary_layout.addWidget(QLabel("AI assistant output"))
+        summary_layout.addWidget(self.txt_ai_summary, 2)
+
+        self.tabs.addTab(summary_tab, "Summary")
 
         flows_tab = QWidget()
         flows_tab_layout = QVBoxLayout(flows_tab)
@@ -742,8 +787,10 @@ class App(QWidget):
 
         self.btn_toggle_conv = QPushButton("Conversation: OFF")
         self.btn_mark_finding = QPushButton("Mark as Finding")
+        self.btn_ai_explain = QPushButton("Explain with AI")
         details_layout.addWidget(self.btn_toggle_conv)
         details_layout.addWidget(self.btn_mark_finding)
+        details_layout.addWidget(self.btn_ai_explain)
         details_layout.addStretch()
 
         self.splitter.addWidget(details_panel)
@@ -1173,6 +1220,100 @@ class App(QWidget):
 
         lines.append("\n(Table is paged. Scroll to auto-load more, or click Load next.)")
         self.txt_summary.setText("\n".join(lines))
+
+    def generate_ai_summary(self):
+        if not self.flows:
+            QMessageBox.information(self, "AI Assistant", "Load a dataset first.")
+            return
+
+        if self._ai_thread is not None:
+            QMessageBox.information(self, "AI Assistant", "AI summary is already running.")
+            return
+
+        self.btn_ai_summary.setEnabled(False)
+        self.txt_ai_summary.setPlainText("Generating AI summary...")
+
+        dataset_path = str(self.current_folder) if self.current_folder else ""
+
+        self._ai_mode = "summary"
+        self._ai_thread = QThread()
+        self._ai_worker = AITextWorker(
+            self.ai_service.generate_dataset_summary,
+            list(self.flows),
+            self.current_project_name,
+            dataset_path,
+        )
+
+        self._ai_worker.moveToThread(self._ai_thread)
+        self._ai_thread.started.connect(self._ai_worker.run)
+        self._ai_worker.finished.connect(self.on_ai_task_finished)
+        self._ai_worker.error.connect(self.on_ai_task_error)
+
+        self._ai_worker.finished.connect(self._ai_thread.quit)
+        self._ai_worker.error.connect(self._ai_thread.quit)
+
+        self._ai_thread.finished.connect(self._cleanup_ai_thread)
+
+        self._ai_thread.start()
+
+    def explain_selected_flow(self):
+        if not self._current_flow:
+            QMessageBox.information(self, "AI Assistant", "Select a flow first.")
+            return
+
+        if self._ai_thread is not None:
+            QMessageBox.information(self, "AI Assistant", "Another AI task is already running.")
+            return
+
+        self._ai_mode = "flow"
+        self.btn_ai_explain.setEnabled(False)
+        self.txt_ai_summary.setPlainText("Generating AI flow explanation...")
+        self.tabs.setCurrentIndex(0)
+
+        self._ai_thread = QThread()
+        self._ai_worker = AITextWorker(
+            self.ai_service.explain_flow,
+            dict(self._current_flow),
+        )
+
+        self._ai_worker.moveToThread(self._ai_thread)
+        self._ai_thread.started.connect(self._ai_worker.run)
+        self._ai_worker.finished.connect(self.on_ai_task_finished)
+        self._ai_worker.error.connect(self.on_ai_task_error)
+
+        self._ai_worker.finished.connect(self._ai_thread.quit)
+        self._ai_worker.error.connect(self._ai_thread.quit)
+
+        self._ai_thread.finished.connect(self._cleanup_ai_thread)
+
+        self._ai_thread.start()
+
+    def on_ai_task_finished(self, result: str):
+        self.txt_ai_summary.setPlainText(result)
+
+        if self._ai_mode == "summary":
+            self.btn_ai_summary.setEnabled(True)
+        elif self._ai_mode == "flow":
+            self.btn_ai_explain.setEnabled(True)
+
+    def on_ai_task_error(self, message: str):
+        self.txt_ai_summary.setPlainText(f"AI error: {message}")
+
+        if self._ai_mode == "summary":
+            self.btn_ai_summary.setEnabled(True)
+        elif self._ai_mode == "flow":
+            self.btn_ai_explain.setEnabled(True)
+
+    def _cleanup_ai_thread(self):
+        if self._ai_worker is not None:
+            self._ai_worker.deleteLater()
+            self._ai_worker = None
+
+        if self._ai_thread is not None:
+            self._ai_thread.deleteLater()
+            self._ai_thread = None
+
+        self._ai_mode = None
 
     def update_showing(self):
         total = len(self.model._flows)
