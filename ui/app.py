@@ -510,12 +510,14 @@ class App(QWidget):
     
     def update_conversation_summary(self):
         if not self._conversation_on:
-            self.lbl_conv_summary.setText("")
+            self.lbl_conv_summary.clear()
+            self.lbl_conv_summary.hide()
             return
 
         rows = self.proxy.rowCount()
         if rows == 0:
-            self.lbl_conv_summary.setText("")
+            self.lbl_conv_summary.clear()
+            self.lbl_conv_summary.hide()
             return
 
         total_bytes = 0
@@ -540,6 +542,7 @@ class App(QWidget):
         self.lbl_conv_summary.setText(
             f"Conversation summary — Flows: {rows} | Bytes: {total_bytes:,} | Top app: {top_app}"
         )
+        self.lbl_conv_summary.show()
 
     def _open_from_registry_search(self, q: str):
         self.go_to_explore_flows()
@@ -663,7 +666,10 @@ class App(QWidget):
         self.lbl_stats = QLabel("")
         self.lbl_showing = QLabel("")
         self.lbl_mode = QLabel("")
+        self.lbl_mode.hide()
+
         self.lbl_conv_summary = QLabel("")
+        self.lbl_conv_summary.hide()
 
         paging_row = QHBoxLayout()
         self.lbl_loaded = QLabel("")
@@ -783,6 +789,46 @@ class App(QWidget):
 
         flows_tab = QWidget()
         flows_tab_layout = QVBoxLayout(flows_tab)
+
+        # ----- FLOW TOOLBAR -----
+        toolbar = QHBoxLayout()
+        toolbar.setSpacing(6)
+
+        self.btn_copy_src = QPushButton("Copy Src IP")
+        self.btn_copy_dst = QPushButton("Copy Dst IP")
+        self.btn_copy_sni = QPushButton("Copy SNI")
+
+        self.btn_filter_src = QPushButton("Filter Src")
+        self.btn_filter_dst = QPushButton("Filter Dst")
+
+        self.btn_toggle_conv = QPushButton("Conversation: OFF")
+        self.btn_mark_finding = QPushButton("Mark as Finding")
+        self.btn_ai_explain = QPushButton("Explain with AI")
+
+        # sizes (important!)
+        for b in (
+            self.btn_copy_src, self.btn_copy_dst, self.btn_copy_sni,
+            self.btn_filter_src, self.btn_filter_dst,
+            self.btn_toggle_conv, self.btn_mark_finding, self.btn_ai_explain
+        ):
+            b.setFixedHeight(32)
+
+        toolbar.addWidget(self.btn_copy_src)
+        toolbar.addWidget(self.btn_copy_dst)
+        toolbar.addWidget(self.btn_copy_sni)
+
+        toolbar.addSpacing(10)
+
+        toolbar.addWidget(self.btn_filter_src)
+        toolbar.addWidget(self.btn_filter_dst)
+
+        toolbar.addStretch()
+
+        toolbar.addWidget(self.btn_toggle_conv)
+        toolbar.addWidget(self.btn_mark_finding)
+        toolbar.addWidget(self.btn_ai_explain)
+
+        flows_tab_layout.addLayout(toolbar)
         self.splitter = QSplitter(Qt.Horizontal)
 
         self.table = QTableView()
@@ -802,8 +848,9 @@ class App(QWidget):
         self.splitter.addWidget(self.table)
 
         details_panel = QWidget()
-        details_panel.setMinimumWidth(420)
+        details_panel.setMinimumWidth(460)
         details_layout = QVBoxLayout(details_panel)
+        details_layout.setSpacing(8)
 
         grp = QGroupBox("Flow details")
         form = QFormLayout(grp)
@@ -846,33 +893,9 @@ class App(QWidget):
         scroll.setWidget(grp)
         details_layout.addWidget(scroll)
 
-        btn_row1 = QHBoxLayout()
-        self.btn_copy_src = QPushButton("Copy Src IP")
-        self.btn_copy_dst = QPushButton("Copy Dst IP")
-        self.btn_copy_sni = QPushButton("Copy SNI")
-        btn_row1.addWidget(self.btn_copy_src)
-        btn_row1.addWidget(self.btn_copy_dst)
-        btn_row1.addWidget(self.btn_copy_sni)
-        details_layout.addLayout(btn_row1)
-
-        btn_row2 = QHBoxLayout()
-        self.btn_filter_src = QPushButton("Filter Src")
-        self.btn_filter_dst = QPushButton("Filter Dst")
-        btn_row2.addWidget(self.btn_filter_src)
-        btn_row2.addWidget(self.btn_filter_dst)
-        details_layout.addLayout(btn_row2)
-
-        self.btn_toggle_conv = QPushButton("Conversation: OFF")
-        self.btn_mark_finding = QPushButton("Mark as Finding")
-        self.btn_ai_explain = QPushButton("Explain with AI")
-        details_layout.addWidget(self.btn_toggle_conv)
-        details_layout.addWidget(self.btn_mark_finding)
-        details_layout.addWidget(self.btn_ai_explain)
-        details_layout.addStretch()
-
         self.splitter.addWidget(details_panel)
         self.splitter.setStretchFactor(0, 4)
-        self.splitter.setStretchFactor(1, 2)
+        self.splitter.setStretchFactor(1, 3)
         self.splitter.setCollapsible(1, False)
 
         flows_tab_layout.addWidget(self.splitter)
@@ -1468,8 +1491,10 @@ class App(QWidget):
             a = self.proxy.conv_a
             b = self.proxy.conv_b
             self.lbl_mode.setText(f"Mode: Conversation between {a} ⇄ {b}")
+            self.lbl_mode.show()
         else:
-            self.lbl_mode.setText("")
+            self.lbl_mode.clear()
+            self.lbl_mode.hide()
 
     # ---------- Findings ----------
     def selected_finding_id(self) -> int | None:
