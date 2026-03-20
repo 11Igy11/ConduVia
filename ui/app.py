@@ -12,7 +12,7 @@ from ui.findings_page import FindingsPage
 from PySide6.QtCore import Qt, QAbstractTableModel, QModelIndex, QSortFilterProxyModel, QTimer, QObject, QThread, Signal
 from PySide6.QtGui import QGuiApplication, QColor, QIcon, QFont, QPixmap
 from PySide6.QtWidgets import (
-    QApplication, QWidget, QHBoxLayout, QVBoxLayout,
+    QApplication, QWidget, QHBoxLayout, QVBoxLayout, QGridLayout,
     QPushButton, QLabel, QStackedWidget, QFileDialog,
     QTextEdit, QTabWidget, QTableView, QLineEdit,
     QSplitter, QFormLayout, QGroupBox,
@@ -686,21 +686,98 @@ class App(QWidget):
 
         summary_tab = QWidget()
         summary_layout = QVBoxLayout(summary_tab)
+        summary_layout.setContentsMargins(8, 8, 8, 8)
+        summary_layout.setSpacing(10)
 
         self.btn_ai_summary = QPushButton("Generate AI Summary")
 
-        self.txt_summary = QTextEdit()
-        self.txt_summary.setReadOnly(True)
+        summary_layout.addWidget(self.btn_ai_summary)
+
+        summary_split = QSplitter(Qt.Horizontal)
+
+        # ----- Left: Dataset summary -----
+        dataset_panel = QWidget()
+        dataset_layout = QVBoxLayout(dataset_panel)
+        dataset_layout.setContentsMargins(0, 0, 0, 0)
+        dataset_layout.setSpacing(8)
+
+        self.lbl_dataset_summary = QLabel("Dataset summary")
+        self.lbl_dataset_summary.setObjectName("SectionTitle")
+
+        dataset_grid = QGridLayout()
+        dataset_grid.setContentsMargins(0, 0, 0, 0)
+        dataset_grid.setHorizontalSpacing(10)
+        dataset_grid.setVerticalSpacing(10)
+
+        # Top source IPs
+        self.box_top_src = QGroupBox("Top source IPs")
+        self.box_top_src.setObjectName("SummaryCard")
+        box_top_src_layout = QVBoxLayout(self.box_top_src)
+        self.txt_top_src = QTextEdit()
+        self.txt_top_src.setReadOnly(True)
+        self.txt_top_src.setObjectName("SummaryTextBox")
+        box_top_src_layout.addWidget(self.txt_top_src)
+
+        # Top destination IPs
+        self.box_top_dst = QGroupBox("Top destination IPs")
+        self.box_top_dst.setObjectName("SummaryCard")
+        box_top_dst_layout = QVBoxLayout(self.box_top_dst)
+        self.txt_top_dst = QTextEdit()
+        self.txt_top_dst.setReadOnly(True)
+        self.txt_top_dst.setObjectName("SummaryTextBox")
+        box_top_dst_layout.addWidget(self.txt_top_dst)
+
+        # Top protocols
+        self.box_top_proto = QGroupBox("Top protocols")
+        self.box_top_proto.setObjectName("SummaryCard")
+        box_top_proto_layout = QVBoxLayout(self.box_top_proto)
+        self.txt_top_proto = QTextEdit()
+        self.txt_top_proto.setReadOnly(True)
+        self.txt_top_proto.setObjectName("SummaryTextBox")
+        box_top_proto_layout.addWidget(self.txt_top_proto)
+
+        # Top applications
+        self.box_top_apps = QGroupBox("Top applications")
+        self.box_top_apps.setObjectName("SummaryCard")
+        box_top_apps_layout = QVBoxLayout(self.box_top_apps)
+        self.txt_top_apps = QTextEdit()
+        self.txt_top_apps.setReadOnly(True)
+        self.txt_top_apps.setObjectName("SummaryTextBox")
+        box_top_apps_layout.addWidget(self.txt_top_apps)
+
+        dataset_grid.addWidget(self.box_top_src, 0, 0)
+        dataset_grid.addWidget(self.box_top_dst, 0, 1)
+        dataset_grid.addWidget(self.box_top_proto, 1, 0)
+        dataset_grid.addWidget(self.box_top_apps, 1, 1)
+
+        dataset_layout.addWidget(self.lbl_dataset_summary)
+        dataset_layout.addLayout(dataset_grid, 1)
+
+        # ----- Right: AI assistant output -----
+        ai_panel = QWidget()
+        ai_layout = QVBoxLayout(ai_panel)
+        ai_layout.setContentsMargins(0, 0, 0, 0)
+        ai_layout.setSpacing(6)
+
+        self.lbl_ai_summary = QLabel("AI assistant output")
+        self.lbl_ai_summary.setObjectName("SectionTitle")
 
         self.txt_ai_summary = QTextEdit()
         self.txt_ai_summary.setReadOnly(True)
         self.txt_ai_summary.setPlaceholderText("AI summary will appear here...")
+        self.txt_ai_summary.setMinimumWidth(520)
 
-        summary_layout.addWidget(self.btn_ai_summary)
-        summary_layout.addWidget(QLabel("Dataset summary"))
-        summary_layout.addWidget(self.txt_summary, 2)
-        summary_layout.addWidget(QLabel("AI assistant output"))
-        summary_layout.addWidget(self.txt_ai_summary, 2)
+        ai_layout.addWidget(self.lbl_ai_summary)
+        ai_layout.addWidget(self.txt_ai_summary, 1)
+
+        summary_split.addWidget(dataset_panel)
+        summary_split.addWidget(ai_panel)
+        summary_split.setStretchFactor(0, 4)
+        summary_split.setStretchFactor(1, 5)
+        summary_split.setCollapsible(0, False)
+        summary_split.setCollapsible(1, False)
+
+        summary_layout.addWidget(summary_split, 1)
 
         self.tabs.addTab(summary_tab, "Summary")
 
@@ -1093,7 +1170,12 @@ class App(QWidget):
             # reset dataset UI
             self.lbl_path.setText("No dataset loaded")
             self.lbl_stats.setText("")
-            self.txt_summary.setText("No flows loaded.")
+            self.txt_top_src.setPlainText("No flows loaded.")
+            self.txt_top_dst.setPlainText("No flows loaded.")
+            self.txt_top_proto.setPlainText("No flows loaded.")
+            self.txt_top_apps.setPlainText("No flows loaded.")
+            self.txt_ai_summary.clear()
+
             self.flows = []
             self.loaded_flows = []
             self.model.set_flows([])
@@ -1193,33 +1275,32 @@ class App(QWidget):
 
     def render_summary(self):
         if not self.flows:
-            self.txt_summary.setText("No flows loaded.")
+            self.txt_top_src.setPlainText("No flows loaded.")
+            self.txt_top_dst.setPlainText("No flows loaded.")
+            self.txt_top_proto.setPlainText("No flows loaded.")
+            self.txt_top_apps.setPlainText("No flows loaded.")
             return
 
-        lines = []
-        lines.append("=== TOP SOURCE IPs (count) ===")
+        src_lines = []
         for ip, c in top_src_ips(self.flows, limit=10):
-            lines.append(f"{ip:20} {c}")
+            src_lines.append(f"{ip:<18} {c:>5}")
 
-        lines.append("\n=== TOP DESTINATION IPs (count) ===")
+        dst_lines = []
         for ip, c in top_dst_ips(self.flows, limit=10):
-            lines.append(f"{ip:20} {c}")
+            dst_lines.append(f"{ip:<18} {c:>5}")
 
-        lines.append("\n=== TOP PROTOCOLS (count) ===")
+        proto_lines = []
         for proto, c in top_protocols(self.flows, limit=10):
-            lines.append(f"{proto:20} {c}")
+            proto_lines.append(f"{format_ip_proto(proto):<18} {c:>5}")
 
-        lines.append("\n=== TOP APPLICATIONS (count) ===")
+        app_lines = []
         for app, c in top_applications(self.flows, limit=10):
-            lines.append(f"{app:30} {c}")
+            app_lines.append(f"{app:<28} {c:>5}")
 
-        if self.current_project_id is None:
-            lines.append("\nNOTE: No active project selected. Dataset load won't be stored.")
-        else:
-            lines.append(f"\nProject: {self.current_project_name}")
-
-        lines.append("\n(Table is paged. Scroll to auto-load more, or click Load next.)")
-        self.txt_summary.setText("\n".join(lines))
+        self.txt_top_src.setPlainText("\n".join(src_lines))
+        self.txt_top_dst.setPlainText("\n".join(dst_lines))
+        self.txt_top_proto.setPlainText("\n".join(proto_lines))
+        self.txt_top_apps.setPlainText("\n".join(app_lines))
 
     def generate_ai_summary(self):
         if not self.flows:
@@ -1232,6 +1313,8 @@ class App(QWidget):
 
         self.btn_ai_summary.setEnabled(False)
         self.txt_ai_summary.setPlainText("Generating AI summary...")
+        self.btn_ai_summary.setText("Generating...")
+        QApplication.processEvents()
 
         dataset_path = str(self.current_folder) if self.current_folder else ""
 
@@ -1293,6 +1376,7 @@ class App(QWidget):
 
         if self._ai_mode == "summary":
             self.btn_ai_summary.setEnabled(True)
+            self.btn_ai_summary.setText("Generate AI Summary")
         elif self._ai_mode == "flow":
             self.btn_ai_explain.setEnabled(True)
 
@@ -1301,6 +1385,7 @@ class App(QWidget):
 
         if self._ai_mode == "summary":
             self.btn_ai_summary.setEnabled(True)
+            self.btn_ai_summary.setText("Generate AI Summary")
         elif self._ai_mode == "flow":
             self.btn_ai_explain.setEnabled(True)
 

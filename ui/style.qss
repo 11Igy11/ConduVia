@@ -116,3 +116,47 @@ QLabel#Signature {
     font-size: 14px;
     font-style: italic;
 }
+
+QLabel#SectionTitle {
+    font-size: 16px;
+    font-weight: 600;
+    color: #111827;
+    padding: 2px 0 4px 0;
+}
+
+QGroupBox#SummaryCard {
+    border: 1px solid #d9dde5;
+    border-radius: 10px;
+    margin-top: 10px;
+    padding-top: 10px;
+    background: #ffffff;
+    font-weight: 600;
+    color: #1f2937;
+    padding: 8px;
+}
+
+QGroupBox#SummaryCard:hover {
+    border: 1px solid #bfc6d4;
+}
+
+QGroupBox#SummaryCard::title {
+    subcontrol-origin: margin;
+    left: 12px;
+    padding: 0 6px 0 6px;
+    color: #111827;
+}
+
+QTextEdit#SummaryTextBox {
+    border: none;
+    background: transparent;
+    padding: 6px;
+    font-family: Consolas, "Courier New", monospace;
+    font-size: 13px;
+    color: #1f2937;
+}
+
+QTextEdit {
+    border: 1px solid #d9dde5;
+    border-radius: 8px;
+    padding: 8px;
+}
