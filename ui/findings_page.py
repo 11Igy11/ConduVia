@@ -67,16 +67,24 @@ class FindingsPage(QWidget):
         root.addLayout(frow)
 
         self.findings_split = QSplitter(Qt.Horizontal)
+
         self.findings_list = QListWidget()
+
         self.finding_detail = QTextEdit()
         self.finding_detail.setReadOnly(True)
         self.finding_detail.setPlaceholderText("Select a finding to see details...")
+        self.finding_detail.setMinimumWidth(320)
+        self.finding_detail.setMaximumWidth(420)
 
         self.findings_split.addWidget(self.findings_list)
         self.findings_split.addWidget(self.finding_detail)
-        self.findings_split.setSizes([420, 700])
 
-        root.addWidget(self.findings_split)
+        self.findings_split.setStretchFactor(0, 5)
+        self.findings_split.setStretchFactor(1, 2)
+        self.findings_split.setCollapsible(1, False)
+        self.findings_split.setSizes([1050, 360])
+
+        root.addWidget(self.findings_split, 1)
 
         self._wire_ui()
 
