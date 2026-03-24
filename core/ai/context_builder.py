@@ -57,3 +57,31 @@ def build_flow_context(flow: dict[str, Any]) -> str:
     lines.append(f"Requested server name / hostname field: {flow.get('requested_server_name', '')}")
 
     return "\n".join(lines)
+
+def build_finding_context(finding: dict[str, Any]) -> str:
+    lines: list[str] = []
+
+    lines.append(f"Finding ID: {finding.get('id', '')}")
+    lines.append(f"Title: {finding.get('title', '')}")
+    lines.append(f"Status: {finding.get('status', '')}")
+    lines.append(f"Created: {finding.get('created_at', '')}")
+    lines.append(f"Tags: {finding.get('tags', '')}")
+    lines.append("")
+
+    lines.append(f"Source IP: {finding.get('src_ip', '')}")
+    lines.append(f"Source Port: {finding.get('src_port', '')}")
+    lines.append(f"Destination IP: {finding.get('dst_ip', '')}")
+    lines.append(f"Destination Port: {finding.get('dst_port', '')}")
+    lines.append(f"Protocol: {format_ip_proto(finding.get('protocol', ''))}")
+    lines.append(f"Application: {finding.get('application_name', '')}")
+    lines.append(f"Bytes: {finding.get('bidirectional_bytes', '')}")
+    lines.append(f"Packets: {finding.get('bidirectional_packets', '')}")
+    lines.append(f"Duration (ms): {finding.get('bidirectional_duration_ms', '')}")
+    lines.append(f"Requested server name / hostname field: {finding.get('requested_server_name', '')}")
+    lines.append("")
+    lines.append("Finding note:")
+    lines.append(str(finding.get("note", "") or ""))
+    lines.append("")
+    lines.append("Important: roles of IPs, hostname meaning, and traffic purpose are not confirmed unless explicitly stated above.")
+
+    return "\n".join(lines)

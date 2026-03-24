@@ -116,34 +116,34 @@ def _day_activity_html(day_hist: dict[str, Any], day_bytes: dict[str, Any], *, t
 
         mb = float(total_bytes) / (1024.0 * 1024.0)
 
-        bg = "#ffffff" if i % 2 == 0 else "#fafafa"
+        bg = "##273549" if i % 2 == 0 else "#2f3e55"
 
         rows.append(
             "<tr style='background:" + bg + ";'>"
-            f"<td style='padding:7px 12px;border-top:1px solid #eef2f7;color:#374151;'>{_esc(_fmt_dt_short(day))}</td>"
-            f"<td style='padding:7px 12px;border-top:1px solid #eef2f7;color:#111827;font-weight:700;text-align:right;'>{count}</td>"
-            f"<td style='padding:7px 12px;border-top:1px solid #eef2f7;color:#374151;font-weight:600;text-align:right;'>{mb:.1f} MB</td>"
+            f"<td style='padding:7px 12px;border-top:1px solid #334155;color:#cbd5e1;'>{_esc(_fmt_dt_short(day))}</td>"
+            f"<td style='padding:7px 12px;border-top:1px solid #334155;color:#f8fafc;font-weight:700;text-align:right;'>{count}</td>"
+            f"<td style='padding:7px 12px;border-top:1px solid #334155;color:#cbd5e1;font-weight:600;text-align:right;'>{mb:.1f} MB</td>"
             "</tr>"
         )
 
     return (
-        "<div style='margin-top:8px;max-width:520px;"
-        "border:1px solid #e5e7eb;border-radius:10px;overflow:hidden;"
-        "background:#ffffff;'>"
-        "<table style='width:100%;border-collapse:collapse;'>"
-        "<thead>"
-        "<tr style='background:#f9fafb;'>"
-        "<th style='padding:8px 12px;text-align:left;color:#6b7280;font-size:11px;font-weight:700;'>Date</th>"
-        "<th style='padding:8px 12px;text-align:right;color:#6b7280;font-size:11px;font-weight:700;'>Flows</th>"
-        "<th style='padding:8px 12px;text-align:right;color:#6b7280;font-size:11px;font-weight:700;'>Bytes</th>"
-        "</tr>"
-        "</thead>"
-        "<tbody>"
-        + "".join(rows) +
-        "</tbody>"
-        "</table>"
-        "</div>"
-    )
+            "<div style='margin-top:8px;max-width:520px;"
+            "border:1px solid #475569;border-radius:10px;overflow:hidden;"
+            "background:#273549;'>"
+            "<table style='width:100%;border-collapse:collapse;'>"
+            "<thead>"
+            "<tr style='background:#1f2937;'>"
+            "<th style='padding:8px 12px;text-align:left;color:#94a3b8;font-size:11px;font-weight:700;'>Date</th>"
+            "<th style='padding:8px 12px;text-align:right;color:#94a3b8;font-size:11px;font-weight:700;'>Flows</th>"
+            "<th style='padding:8px 12px;text-align:right;color:#94a3b8;font-size:11px;font-weight:700;'>Bytes</th>"
+            "</tr>"
+            "</thead>"
+            "<tbody>"
+            + "".join(rows) +
+            "</tbody>"
+            "</table>"
+            "</div>"
+        )
 
 def _top_active_days_html(day_hist: dict[str, Any], day_bytes: dict[str, Any], *, top_n: int = 5) -> str:
     if not isinstance(day_hist, dict) or not day_hist:
@@ -172,26 +172,26 @@ def _top_active_days_html(day_hist: dict[str, Any], day_bytes: dict[str, Any], *
 
         mb = float(total_bytes) / (1024.0 * 1024.0)
 
-        bg = "#ffffff" if i % 2 == 0 else "#fafafa"
+        bg = "#273549" if i % 2 == 0 else "#2f3e55"
 
         rows.append(
             "<tr style='background:" + bg + ";'>"
-            f"<td style='padding:7px 12px;border-top:1px solid #eef2f7;color:#374151;'>{_esc(_fmt_dt_short(day))}</td>"
-            f"<td style='padding:7px 12px;border-top:1px solid #eef2f7;color:#111827;font-weight:700;text-align:right;'>{count}</td>"
-            f"<td style='padding:7px 12px;border-top:1px solid #eef2f7;color:#374151;font-weight:600;text-align:right;'>{mb:.1f} MB</td>"
+            f"<td style='padding:7px 12px;border-top:1px solid #334155;color:#cbd5e1;'>{_esc(_fmt_dt_short(day))}</td>"
+            f"<td style='padding:7px 12px;border-top:1px solid #334155;color:#f8fafc;font-weight:700;text-align:right;'>{count}</td>"
+            f"<td style='padding:7px 12px;border-top:1px solid #334155;color:#cbd5e1;font-weight:600;text-align:right;'>{mb:.1f} MB</td>"
             "</tr>"
         )
 
     return (
         "<div style='margin-top:8px;max-width:520px;"
-        "border:1px solid #e5e7eb;border-radius:10px;overflow:hidden;"
-        "background:#ffffff;'>"
+        "border:1px solid #475569;border-radius:10px;overflow:hidden;"
+        "background:#273549;'>"
         "<table style='width:100%;border-collapse:collapse;'>"
         "<thead>"
-        "<tr style='background:#f9fafb;'>"
-        "<th style='padding:8px 12px;text-align:left;color:#6b7280;font-size:11px;font-weight:700;'>Date</th>"
-        "<th style='padding:8px 12px;text-align:right;color:#6b7280;font-size:11px;font-weight:700;'>Flows</th>"
-        "<th style='padding:8px 12px;text-align:right;color:#6b7280;font-size:11px;font-weight:700;'>Bytes</th>"
+        "<tr style='background:#1f2937;'>"
+        "<th style='padding:8px 12px;text-align:left;color:#94a3b8;font-size:11px;font-weight:700;'>Date</th>"
+        "<th style='padding:8px 12px;text-align:right;color:#94a3b8;font-size:11px;font-weight:700;'>Flows</th>"
+        "<th style='padding:8px 12px;text-align:right;color:#94a3b8;font-size:11px;font-weight:700;'>Bytes</th>"
         "</tr>"
         "</thead>"
         "<tbody>"
@@ -231,12 +231,12 @@ def _mini_hist_24_html(vals: list[int], *, height_px: int = 14) -> str:
         tds.append(
             "<td style='width:4.16%;padding:0 1px;vertical-align:bottom;'>"
             f"<div title='{h:02d}:00 — {vals[h]}' "
-            f"style='height:{height_px}px;border:1px solid #e5e7eb;"
-            "background:#f3f4f6;border-radius:4px;overflow:hidden;'>"
+            f"style='height:{height_px}px;border:1px solid #475569;"
+            "background:#1f2937;border-radius:4px;overflow:hidden;'>"
             # empty spacer
             f"<div style='height:{empty_h}px;'></div>"
             # bar
-            f"<div style='height:{bar_h}px;background:#111827;'></div>"
+            f"<div style='height:{bar_h}px;background:#3b82f6;'></div>"
             "</div>"
             "</td>"
         )
@@ -250,11 +250,11 @@ def _mini_hist_24_html(vals: list[int], *, height_px: int = 14) -> str:
     labels_row = """
     <table style='width:100%;border-collapse:collapse;margin-top:4px;' cellspacing='0' cellpadding='0'>
       <tr>
-        <td style='width:0%;font-size:11px;color:#6b7280;'>00</td>
-        <td style='width:25%;font-size:11px;color:#6b7280;text-align:center;'>06</td>
-        <td style='width:25%;font-size:11px;color:#6b7280;text-align:center;'>12</td>
-        <td style='width:25%;font-size:11px;color:#6b7280;text-align:center;'>18</td>
-        <td style='width:25%;font-size:11px;color:#6b7280;text-align:right;'>23</td>
+        <td style='width:0%;font-size:11px;color:#94a3b8;'>00</td>
+        <td style='width:25%;font-size:11px;color:#94a3b8;text-align:center;'>06</td>
+        <td style='width:25%;font-size:11px;color:#94a3b8;text-align:center;'>12</td>
+        <td style='width:25%;font-size:11px;color:#94a3b8;text-align:center;'>18</td>
+        <td style='width:25%;font-size:11px;color:#94a3b8;text-align:right;'>23</td>
       </tr>
     </table>
     """
@@ -289,9 +289,9 @@ def _direction_bar_html(out_pct: float, in_pct: float, *, width_px: int = 220, h
 
     return (
         f"<div style='display:inline-block;width:{width_px}px;height:{height_px}px;"
-        "border:1px solid #e5e7eb;border-radius:999px;overflow:hidden;background:#f3f4f6;'>"
-        f"<span style='display:inline-block;height:{height_px}px;width:{o:.1f}%;background:#111827;'></span>"
-        f"<span style='display:inline-block;height:{height_px}px;width:{i:.1f}%;background:#9ca3af;'></span>"
+        "border:1px solid #475569;border-radius:999px;overflow:hidden;background:#1f2937;'>"
+        f"<span style='display:inline-block;height:{height_px}px;width:{o:.1f}%;background:#3b82f6;'></span>"
+        f"<span style='display:inline-block;height:{height_px}px;width:{i:.1f}%;background:#64748b;'></span>"
         "</div>"
     )
 
@@ -336,10 +336,10 @@ class DirectionBarWidget(QWidget):
             w = self.width()
             h = self.height()
 
-            border = QColor("#e5e7eb")
-            bg = QColor("#f3f4f6")
-            out_c = QColor("#111827")
-            in_c = QColor("#9ca3af")
+            border = QColor("#475569")
+            bg = QColor("#1f2937")
+            out_c = QColor("#3b82f6")
+            in_c = QColor("#64748b")
             r = 7.0
 
             p.setPen(QPen(border, 1))
@@ -465,9 +465,9 @@ class MiniHistogram24Widget(QWidget):
             w = self.width()
             h = self.height()
 
-            bar_fg = QColor("#111827")
-            base_c = QColor("#e5e7eb")
-            text_c = QColor("#6b7280")
+            bar_fg = QColor("#3b82f6")
+            base_c = QColor("#475569")
+            text_c = QColor("#94a3b8")
 
             label_h = 16 if self._show_labels else 0
             top_pad = 2
@@ -706,88 +706,6 @@ class RegistryPage(QWidget):
         root.setContentsMargins(16, 16, 16, 16)
         root.setSpacing(12)
 
-        # ---- style (only for this page) ----
-        self.setStyleSheet("""
-            QWidget { font-family: Segoe UI, Inter, Arial; }
-            QScrollArea { background: transparent; }
-            QScrollBar:vertical { width: 12px; background: transparent; }
-
-            QLineEdit {
-                padding: 9px 10px;
-                border: 1px solid #e5e7eb;
-                border-radius: 10px;
-                background: #ffffff;
-            }
-            QLineEdit:focus { border: 1px solid #cbd5e1; }
-
-            QCheckBox { color: #111827; }
-            QCheckBox::indicator { width: 18px; height: 18px; }
-
-            QPushButton {
-                padding: 8px 12px;
-                border-radius: 10px;
-                border: 1px solid #e5e7eb;
-                background: #ffffff;
-                color: #111827;
-            }
-            QPushButton:hover { background: #f9fafb; }
-            QPushButton:disabled { color: #9ca3af; background: #f3f4f6; }
-
-            QPushButton#Primary {
-                background: #111827;
-                border: 1px solid #111827;
-                color: white;
-                font-weight: 600;
-            }
-            QPushButton#Primary:hover { background: #0b1220; }
-
-            QFrame#Card {
-                background: #ffffff;
-                border: 1px solid #e5e7eb;
-                border-radius: 14px;
-            }
-
-            QLabel#H1 { font-size: 22px; font-weight: 800; color: #111827; }
-            QLabel#Muted { color: #6b7280; }
-
-            /* Tabs */
-            QTabWidget::pane {
-                border: 1px solid #e5e7eb;
-                border-radius: 12px;
-                background: #ffffff;
-            }
-            QTabBar::tab {
-                padding: 8px 14px;
-                background: #f9fafb;
-                border: 1px solid #e5e7eb;
-                border-bottom: none;
-                border-top-left-radius: 10px;
-                border-top-right-radius: 10px;
-                margin-right: 6px;
-                color: #374151;
-            }
-            QTabBar::tab:selected {
-                background: #ffffff;
-                color: #111827;
-                font-weight: 600;
-            }
-
-            QTableView {
-                border: 1px solid #e5e7eb;
-                border-radius: 12px;
-                background: #ffffff;
-                gridline-color: #eef2f7;
-            }
-            QHeaderView::section {
-                padding: 8px 6px;
-                border: none;
-                border-bottom: 1px solid #e5e7eb;
-                background: #fafafa;
-                color: #374151;
-                font-weight: 800;
-            }
-        """)
-
         # ---------------- HERO ----------------
         hero = QFrame()
         hero.setObjectName("Card")
@@ -908,7 +826,7 @@ class RegistryPage(QWidget):
 
         hdr2 = QHBoxLayout()
         self.lbl_analyst_title = QLabel("Analyst summary")
-        self.lbl_analyst_title.setStyleSheet("font-size:14px;font-weight:900;color:#111827;")
+        self.lbl_analyst_title.setStyleSheet("font-size:14px;font-weight:900;color:#f8fafc;")
         hdr2.addWidget(self.lbl_analyst_title)
         hdr2.addStretch()
         al.addLayout(hdr2)
@@ -916,7 +834,7 @@ class RegistryPage(QWidget):
         # Risk row: label + progress
         risk_row = QHBoxLayout()
         self.lbl_risk = QLabel("Risk score: —")
-        self.lbl_risk.setStyleSheet("color:#111827;font-weight:700;")
+        self.lbl_risk.setStyleSheet("color:#e5e7eb;font-weight:700;")
         risk_row.addWidget(self.lbl_risk, 0)
 
         self.risk_bar = QProgressBar()
@@ -927,15 +845,15 @@ class RegistryPage(QWidget):
         self.risk_bar.setFixedHeight(18)
         self.risk_bar.setStyleSheet("""
             QProgressBar {
-                border: 1px solid #e5e7eb;
+                border: 1px solid #475569;
                 border-radius: 9px;
-                background: #f3f4f6;
+                background: #1f2937;
                 text-align: center;
                 font-weight: 700;
-                color: #111827;
+                color: #e5e7eb;
             }
             QProgressBar::chunk {
-                background: #111827;
+                background: #3b82f6;
                 border-radius: 9px;
             }
         """)
@@ -946,27 +864,27 @@ class RegistryPage(QWidget):
         self.lbl_analyst_body = QLabel("")
         self.lbl_analyst_body.setTextFormat(Qt.RichText)
         self.lbl_analyst_body.setWordWrap(True)
-        self.lbl_analyst_body.setStyleSheet("color:#374151;")
+        self.lbl_analyst_body.setStyleSheet("color:#cbd5e1;")
         self.lbl_analyst_body.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
         al.addWidget(self.lbl_analyst_body)
 
         self.lbl_day_section = QLabel("")
         self.lbl_day_section.setTextFormat(Qt.RichText)
         self.lbl_day_section.setWordWrap(True)
-        self.lbl_day_section.setStyleSheet("color:#374151;")
+        self.lbl_day_section.setStyleSheet("color:#cbd5e1;")
         al.addWidget(self.lbl_day_section)
 
         self.lbl_activity_text = QLabel("")
         self.lbl_activity_text.setTextFormat(Qt.RichText)
         self.lbl_activity_text.setWordWrap(True)
-        self.lbl_activity_text.setStyleSheet("color:#374151;")
+        self.lbl_activity_text.setStyleSheet("color:#cbd5e1;")
         al.addWidget(self.lbl_activity_text)
         al.addSpacing(4)
 
         hist_hdr = QHBoxLayout()
 
         self.lbl_hist_title = QLabel("Activity by bytes")
-        self.lbl_hist_title.setStyleSheet("color:#374151;font-size:12px;font-weight:700;")
+        self.lbl_hist_title.setStyleSheet("color:#cbd5e1;font-size:12px;font-weight:700;")
         hist_hdr.addWidget(self.lbl_hist_title)
 
         hist_hdr.addStretch()
@@ -987,7 +905,7 @@ class RegistryPage(QWidget):
         self.lbl_dir_text = QLabel("")
         self.lbl_dir_text.setTextFormat(Qt.RichText)
         self.lbl_dir_text.setWordWrap(True)
-        self.lbl_dir_text.setStyleSheet("color:#374151;")
+        self.lbl_dir_text.setStyleSheet("color:#cbd5e1;")
         al.addWidget(self.lbl_dir_text)
 
         # OUT vs IN bar widget
@@ -1005,7 +923,7 @@ class RegistryPage(QWidget):
 
         hdr = QHBoxLayout()
         lbl_ins = QLabel("Insights (Top 15)")
-        lbl_ins.setStyleSheet("font-size:14px;font-weight:900;color:#111827;")
+        lbl_ins.setStyleSheet("font-size:14px;font-weight:900;color:#f8fafc;")
         hdr.addWidget(lbl_ins)
         hdr.addStretch()
         il.addLayout(hdr)
@@ -1056,14 +974,14 @@ class RegistryPage(QWidget):
         nl.setSpacing(6)
 
         lbl = QLabel("Note")
-        lbl.setStyleSheet("font-size:14px;font-weight:900;color:#111827;")
+        lbl.setStyleSheet("font-size:14px;font-weight:900;color:#f8fafc;")
         nl.addWidget(lbl)
 
         self.txt_note = QLabel(
             "Passive analysis only. Findings are indicative and based on metadata "
             "(IP, protocol, app, timing, volume)."
         )
-        self.txt_note.setStyleSheet("color:#374151;")
+        self.txt_note.setStyleSheet("color:#cbd5e1;")
         self.txt_note.setWordWrap(True)
         nl.addWidget(self.txt_note)
 
@@ -1073,7 +991,7 @@ class RegistryPage(QWidget):
         # ---------------- Dataset content ----------------
         top = QHBoxLayout()
         lbl_full = QLabel("Full dataset")
-        lbl_full.setStyleSheet("font-size:14px;font-weight:900;color:#111827;")
+        lbl_full.setStyleSheet("font-size:14px;font-weight:900;color:#f8fafc;")
 
         self.lbl_full_hint = QLabel("")
         self.lbl_full_hint.setObjectName("Muted")
@@ -1110,6 +1028,9 @@ class RegistryPage(QWidget):
         dp.addWidget(self.table, 1)
 
         # initial states
+        self._hist_mode = "bytes"
+        self._hour_filter = None
+        self._last_activity = {}
         self.btn_export.setEnabled(False)
         self.model.set_data([], [])
         self._render_empty()
@@ -1129,7 +1050,7 @@ class RegistryPage(QWidget):
         t.setStyleSheet("font-size:12px;")
 
         v = QLabel(value)
-        v.setStyleSheet("font-size:22px;font-weight:900;color:#111827;")
+        v.setStyleSheet("font-size:22px;font-weight:900;color:#f8fafc;")
         v.setProperty("stat_value", True)
 
         l.addWidget(t)
@@ -1194,6 +1115,23 @@ class RegistryPage(QWidget):
         self._set_stat(self.card_bytes, "—")
         self.pairs_model.set_rows([], headers=("Item", "Value"))
         self._fit_pairs_height(0)
+        self.lbl_risk.setText("Risk score: —")
+        self.risk_bar.setValue(0)
+        self.lbl_analyst_body.setText("")
+        self.lbl_day_section.setText("")
+        self.lbl_activity_text.setText("")
+        self.lbl_dir_text.setText("")
+        self.dir_bar.set_pcts(0.0, 0.0)
+
+        self._hist_mode = "bytes"
+        self._hour_filter = None
+        self._last_activity = {}
+        self.hist24.set_mode("bytes")
+        self.hist24.set_quiet_hours([])
+        self.hist24.set_values([0] * 24)
+
+        self.lbl_dataset_disabled.setVisible(True)
+        self.table.setVisible(False)
 
     def _render_meta(self):
         if not self._folder:
@@ -1218,9 +1156,9 @@ class RegistryPage(QWidget):
                 "<span style="
                 "'display:inline-block;margin:0 10px 8px 0;"
                 "padding:6px 10px;border-radius:999px;"
-                "background:#f3f4f6;border:1px solid #e5e7eb;"
-                "color:#374151;font-size:12px;'>"
-                f"<b style='color:#111827;'>{ll}:</b> {vv}"
+                "background:#334155;border:1px solid #475569;"
+                "color:#cbd5e1;font-size:12px;'>"
+                f"<b style='color:#f8fafc;'>{ll}:</b> {vv}"
                 "</span>"
             )
 
@@ -1264,6 +1202,12 @@ class RegistryPage(QWidget):
             self.lbl_dir_text.setText("")
             self.dir_bar.set_pcts(0.0, 0.0)
             self._last_activity = {}
+            self.pairs_model.set_rows([], headers=("Item", "Value"))
+            self._fit_pairs_height(0)
+
+            self._hist_mode = "bytes"
+            self._hour_filter = None
+            self._last_activity = {}
             self.hist24.set_mode("bytes")
             self.hist24.set_quiet_hours([])
             self.hist24.set_values([0] * 24)
@@ -1295,7 +1239,7 @@ class RegistryPage(QWidget):
         dom_text = (
             f"<b>Dominant app:</b> {html.escape(str(dom_b.get('name','—')))} "
             f"({float(dom_b.get('share_pct',0.0)):.1f}% bytes) "
-            f"<span style='color:#6b7280'>(count: {html.escape(str(dom_c.get('name','—')))}, "
+            f"<span style='color:#94a3b8'>(count: {html.escape(str(dom_c.get('name','—')))}, "
             f"{float(dom_c.get('share_pct',0.0)):.1f}%)</span>"
         )
 
@@ -1381,11 +1325,11 @@ class RegistryPage(QWidget):
             "<table style='width:100%;border-collapse:collapse;' cellspacing='0' cellpadding='0'>"
             "<tr>"
             "<td style='width:50%;vertical-align:top;padding-right:8px;'>"
-            "<div style='font-weight:700;color:#111827;margin-bottom:6px;'>Activity by day</div>"
+            "<div style='font-weight:700;color:#f8fafc;margin-bottom:6px;'>Activity by day</div>"
             f"{recent_html}"
             "</td>"
             "<td style='width:50%;vertical-align:top;padding-left:8px;'>"
-            "<div style='font-weight:700;color:#111827;margin-bottom:6px;'>Top active days</div>"
+            "<div style='font-weight:700;color:#f8fafc;margin-bottom:6px;'>Top active days</div>"
             f"{top_html}"
             "</td>"
             "</tr>"
@@ -1872,7 +1816,7 @@ class RegistryPage(QWidget):
           border:1px solid var(--border);
           border-radius:999px;
           padding:6px 10px;
-          color:#374151;
+          color:#cbd5e1;
         }
 
         .chip b{

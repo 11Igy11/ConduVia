@@ -17,7 +17,7 @@ from PySide6.QtWidgets import (
     QTextEdit, QTabWidget, QTableView, QLineEdit,
     QSplitter, QFormLayout, QGroupBox,
     QListWidget, QListWidgetItem, QMessageBox, QInputDialog,
-    QComboBox, QMenu, QFrame, QSizePolicy, QScrollArea
+    QComboBox, QMenu, QFrame, QSizePolicy, QScrollArea, QHeaderView
 )
 
 from core.loader import load_folder
@@ -66,11 +66,11 @@ def normalize_tags(tags: str) -> str:
 class FlowTableModel(QAbstractTableModel):
     COLUMNS = [
         ("src_ip", "Source IP"),
-        ("src_port", "Src Port"),
-        ("dst_ip", "Dest IP"),
-        ("dst_port", "Dst Port"),
-        ("protocol", "Proto"),
-        ("application_name", "App"),
+        ("src_port", "Source Port"),
+        ("dst_ip", "Destination IP"),
+        ("dst_port", "Destination Port"),
+        ("protocol", "Protocol"),
+        ("application_name", "Application"),
         ("bidirectional_bytes", "Bytes"),
         ("bidirectional_duration_ms", "Duration(ms)"),
         ("requested_server_name", "SNI"),
@@ -490,6 +490,7 @@ class App(QWidget):
         fp.jumpRequested.connect(self.jump_to_selected_finding)
         fp.editRequested.connect(self.edit_selected_finding)
         fp.deleteRequested.connect(self.delete_selected_finding)
+        fp.aiRequested.connect(self.explain_selected_finding)
         fp.doubleClickedFinding.connect(self.jump_to_selected_finding)
 
         fp.btn_find_clear.clicked.connect(self.clear_findings_filters)
@@ -789,46 +790,59 @@ class App(QWidget):
 
         flows_tab = QWidget()
         flows_tab_layout = QVBoxLayout(flows_tab)
+        flows_tab_layout.setContentsMargins(8, 8, 8, 8)
+        flows_tab_layout.setSpacing(8)
 
-        # ----- FLOW TOOLBAR -----
-        toolbar = QHBoxLayout()
-        toolbar.setSpacing(6)
+        # ----- FLOW TOOLBAR -----        
+        toolbar_wrap = QFrame()
+        toolbar_wrap.setObjectName("FlowToolbarCard")
 
-        self.btn_copy_src = QPushButton("Copy Src IP")
-        self.btn_copy_dst = QPushButton("Copy Dst IP")
+        toolbar = QHBoxLayout(toolbar_wrap)
+        toolbar.setContentsMargins(10, 10, 10, 10)
+        toolbar.setSpacing(10)
+
+        left_actions = QHBoxLayout()
+        left_actions.setSpacing(8)
+
+        right_actions = QHBoxLayout()
+        right_actions.setSpacing(8)
+
+        self.btn_copy_src = QPushButton("Copy source IP")
+        self.btn_copy_dst = QPushButton("Copy destination IP")
         self.btn_copy_sni = QPushButton("Copy SNI")
 
-        self.btn_filter_src = QPushButton("Filter Src")
-        self.btn_filter_dst = QPushButton("Filter Dst")
+        self.btn_filter_src = QPushButton("Filter source")
+        self.btn_filter_dst = QPushButton("Filter destination")
 
         self.btn_toggle_conv = QPushButton("Conversation: OFF")
         self.btn_mark_finding = QPushButton("Mark as Finding")
         self.btn_ai_explain = QPushButton("Explain with AI")
 
-        # sizes (important!)
         for b in (
             self.btn_copy_src, self.btn_copy_dst, self.btn_copy_sni,
             self.btn_filter_src, self.btn_filter_dst,
             self.btn_toggle_conv, self.btn_mark_finding, self.btn_ai_explain
         ):
-            b.setFixedHeight(32)
+            b.setFixedHeight(34)
 
-        toolbar.addWidget(self.btn_copy_src)
-        toolbar.addWidget(self.btn_copy_dst)
-        toolbar.addWidget(self.btn_copy_sni)
+        self.btn_toggle_conv.setObjectName("Primary")
 
-        toolbar.addSpacing(10)
+        left_actions.addWidget(self.btn_copy_src)
+        left_actions.addWidget(self.btn_copy_dst)
+        left_actions.addWidget(self.btn_copy_sni)
+        left_actions.addSpacing(6)
+        left_actions.addWidget(self.btn_filter_src)
+        left_actions.addWidget(self.btn_filter_dst)
 
-        toolbar.addWidget(self.btn_filter_src)
-        toolbar.addWidget(self.btn_filter_dst)
+        right_actions.addWidget(self.btn_toggle_conv)
+        right_actions.addWidget(self.btn_mark_finding)
+        right_actions.addWidget(self.btn_ai_explain)
 
+        toolbar.addLayout(left_actions)
         toolbar.addStretch()
+        toolbar.addLayout(right_actions)
 
-        toolbar.addWidget(self.btn_toggle_conv)
-        toolbar.addWidget(self.btn_mark_finding)
-        toolbar.addWidget(self.btn_ai_explain)
-
-        flows_tab_layout.addLayout(toolbar)
+        flows_tab_layout.addWidget(toolbar_wrap)
         self.splitter = QSplitter(Qt.Horizontal)
 
         self.table = QTableView()
@@ -836,29 +850,54 @@ class App(QWidget):
         self.table.setAlternatingRowColors(True)
         self.table.setSelectionBehavior(QTableView.SelectRows)
         self.table.setSelectionMode(QTableView.SingleSelection)
-        self.table.horizontalHeader().setStretchLastSection(True)
-        self.table.verticalHeader().setVisible(False)
         self.table.setWordWrap(False)
+        self.table.setShowGrid(False)
+        self.table.setCornerButtonEnabled(False)
+        self.table.setEditTriggers(QTableView.NoEditTriggers)
+        self.table.setFocusPolicy(Qt.StrongFocus)
+
+        self.table.verticalHeader().setVisible(False)
+        self.table.verticalHeader().setDefaultSectionSize(34)
+
+        header = self.table.horizontalHeader()
+        header.setStretchLastSection(False)
+        header.setMinimumSectionSize(70)
+        header.setDefaultAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        header.setSectionResizeMode(QHeaderView.Interactive)
 
         self.model = FlowTableModel([])
         self.proxy = NumericSortProxy()
         self.proxy.setSourceModel(self.model)
         self.table.setModel(self.proxy)
 
+        header = self.table.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.ResizeToContents)   # Source IP
+        header.setSectionResizeMode(1, QHeaderView.ResizeToContents)   # Source Port
+        header.setSectionResizeMode(2, QHeaderView.ResizeToContents)   # Destination IP
+        header.setSectionResizeMode(3, QHeaderView.ResizeToContents)   # Destination Port
+        header.setSectionResizeMode(4, QHeaderView.ResizeToContents)   # Protocol
+        header.setSectionResizeMode(5, QHeaderView.ResizeToContents)   # App
+        header.setSectionResizeMode(6, QHeaderView.ResizeToContents)   # Bytes
+        header.setSectionResizeMode(7, QHeaderView.ResizeToContents)   # Duration
+        header.setSectionResizeMode(8, QHeaderView.Stretch)            # SNI
+
         self.splitter.addWidget(self.table)
 
         details_panel = QWidget()
-        details_panel.setMinimumWidth(460)
+        details_panel.setMinimumWidth(430)
+        details_panel.setMaximumWidth(520)
+
         details_layout = QVBoxLayout(details_panel)
-        details_layout.setSpacing(8)
+        details_layout.setContentsMargins(0, 0, 0, 0)
+        details_layout.setSpacing(10)
 
         grp = QGroupBox("Flow details")
-        form = QFormLayout(grp)
-        form.setContentsMargins(12, 12, 12, 12)
-        form.setHorizontalSpacing(14)
-        form.setVerticalSpacing(10)
-        form.setLabelAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-        form.setFormAlignment(Qt.AlignTop)
+        grp.setObjectName("FlowDetailsCard")
+
+        details_grid = QGridLayout(grp)
+        details_grid.setContentsMargins(14, 14, 14, 14)
+        details_grid.setHorizontalSpacing(14)
+        details_grid.setVerticalSpacing(12)
 
         self.d_src = QLabel("-"); self.d_src.setTextInteractionFlags(Qt.TextSelectableByMouse)
         self.d_dst = QLabel("-"); self.d_dst.setTextInteractionFlags(Qt.TextSelectableByMouse)
@@ -870,32 +909,67 @@ class App(QWidget):
         self.d_sni = QLabel("-"); self.d_sni.setTextInteractionFlags(Qt.TextSelectableByMouse)
 
         for w in (self.d_src, self.d_dst, self.d_proto, self.d_app, self.d_bytes, self.d_packets, self.d_duration, self.d_sni):
-            w.setMinimumHeight(18)
-            w.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+            w.setWordWrap(True)
+            w.setMinimumHeight(36)
+            w.setAlignment(Qt.AlignLeft | Qt.AlignTop)
+            w.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
 
-        self.d_sni.setWordWrap(True)
+        self.d_src.setTextFormat(Qt.PlainText)
+        self.d_dst.setTextFormat(Qt.PlainText)
+        self.d_sni.setTextFormat(Qt.PlainText)
 
-        form.addRow("Source:", self.d_src)
-        form.addRow("Destination:", self.d_dst)
-        form.addRow("Protocol:", self.d_proto)
-        form.addRow("Application:", self.d_app)
-        form.addRow("Bytes:", self.d_bytes)
-        form.addRow("Packets:", self.d_packets)
-        form.addRow("Duration (ms):", self.d_duration)
-        form.addRow("SNI:", self.d_sni)
+        lbl_src = QLabel("Source")
+        lbl_dst = QLabel("Destination")
+        lbl_proto = QLabel("Protocol")
+        lbl_app = QLabel("Application")
+        lbl_bytes = QLabel("Bytes")
+        lbl_packets = QLabel("Packets")
+        lbl_duration = QLabel("Duration (ms)")
+        lbl_sni = QLabel("SNI")
 
-        grp.setMinimumHeight(220)
-        grp.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        for lbl in (lbl_src, lbl_dst, lbl_proto, lbl_app, lbl_bytes, lbl_packets, lbl_duration, lbl_sni):
+            lbl.setObjectName("FlowFieldLabel")
+
+        for val in (self.d_src, self.d_dst, self.d_proto, self.d_app, self.d_bytes, self.d_packets, self.d_duration, self.d_sni):
+            val.setObjectName("FlowFieldValue")
+
+        details_grid.addWidget(lbl_src,      0, 0)
+        details_grid.addWidget(lbl_dst,      0, 1)
+        details_grid.addWidget(self.d_src,   1, 0)
+        details_grid.addWidget(self.d_dst,   1, 1)
+
+        details_grid.addWidget(lbl_proto,    2, 0)
+        details_grid.addWidget(lbl_app,      2, 1)
+        details_grid.addWidget(self.d_proto, 3, 0)
+        details_grid.addWidget(self.d_app,   3, 1)
+
+        details_grid.addWidget(lbl_bytes,    4, 0)
+        details_grid.addWidget(lbl_packets,  4, 1)
+        details_grid.addWidget(self.d_bytes, 5, 0)
+        details_grid.addWidget(self.d_packets, 5, 1)
+
+        details_grid.addWidget(lbl_duration,    6, 0)
+        details_grid.addWidget(self.d_duration, 7, 0)
+
+        details_grid.addWidget(lbl_sni,         8, 0, 1, 2)
+        details_grid.addWidget(self.d_sni,      9, 0, 1, 2)
+
+        details_grid.setColumnStretch(0, 1)
+        details_grid.setColumnStretch(1, 1)
+
+        grp.setMinimumHeight(0)
+        grp.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
 
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         scroll.setWidget(grp)
-        details_layout.addWidget(scroll)
+        details_layout.addWidget(scroll, 1)
 
         self.splitter.addWidget(details_panel)
-        self.splitter.setStretchFactor(0, 4)
-        self.splitter.setStretchFactor(1, 3)
+        self.splitter.setStretchFactor(0, 5)
+        self.splitter.setStretchFactor(1, 2)
         self.splitter.setCollapsible(1, False)
 
         flows_tab_layout.addWidget(self.splitter)
@@ -907,6 +981,7 @@ class App(QWidget):
         self.btn_finding_edit = self.findings_page.btn_finding_edit
         self.btn_finding_delete = self.findings_page.btn_finding_delete
         self.btn_finding_jump = self.findings_page.btn_finding_jump
+        self.btn_finding_ai = self.findings_page.btn_finding_ai
 
         self.cmb_find_status = self.findings_page.cmb_find_status
         self.cmb_find_sort = self.findings_page.cmb_find_sort
@@ -970,7 +1045,7 @@ class App(QWidget):
         footer = QHBoxLayout()
         footer.addStretch()
         self.lbl_signature = QLabel("by _Igy_")
-        self.lbl_signature.setStyleSheet("QLabel {color:#444444; font-size:14px; font-style:italic;}")
+        self.lbl_signature.setObjectName("Signature")
         footer.addWidget(self.lbl_signature)
         outer.addLayout(footer)
         
@@ -1292,7 +1367,6 @@ class App(QWidget):
         self.update_load_more_enabled()
 
         self.tabs.setCurrentIndex(1)
-        self.table.resizeColumnsToContents()
         self.splitter.setSizes([920, 420])
         self.update_detail(None)
 
@@ -1402,6 +1476,8 @@ class App(QWidget):
             self.btn_ai_summary.setText("Generate AI Summary")
         elif self._ai_mode == "flow":
             self.btn_ai_explain.setEnabled(True)
+        elif self._ai_mode == "finding":
+            self.btn_finding_ai.setEnabled(True)
 
     def on_ai_task_error(self, message: str):
         self.txt_ai_summary.setPlainText(f"AI error: {message}")
@@ -1411,6 +1487,8 @@ class App(QWidget):
             self.btn_ai_summary.setText("Generate AI Summary")
         elif self._ai_mode == "flow":
             self.btn_ai_explain.setEnabled(True)
+        elif self._ai_mode == "finding":
+            self.btn_finding_ai.setEnabled(True)
 
     def _cleanup_ai_thread(self):
         if self._ai_worker is not None:
@@ -1605,25 +1683,60 @@ class App(QWidget):
         self.set_findings_actions_enabled(True)
 
         lines = []
-        lines.append(f"Finding ID: {row['id']}")
-        lines.append(f"Created: {row['created_at']}")
-        lines.append(f"Status: {status_emoji(row['status'])} {row['status']}")
-        lines.append(f"Tags: {row['tags'] or ''}")
         lines.append(f"Title: {row['title']}")
         lines.append("")
+        lines.append(f"Status: {status_emoji(row['status'])} {row['status']}")
+        lines.append(f"Created: {row['created_at']}")
+        lines.append(f"Tags: {row['tags'] or '-'}")
+        lines.append("")
+        lines.append("Flow")
         lines.append(f"Source: {row['src_ip']}:{row['src_port'] or ''}")
-        lines.append(f"Dest: {row['dst_ip']}:{row['dst_port'] or ''}")
+        lines.append(f"Destination: {row['dst_ip']}:{row['dst_port'] or ''}")
         lines.append(f"Protocol: {row['protocol']}")
-        lines.append(f"App: {row['application_name']}")
-        lines.append(f"SNI: {row['requested_server_name']}")
+        lines.append(f"Application: {row['application_name'] or '-'}")
+        lines.append(f"SNI: {row['requested_server_name'] or '-'}")
         lines.append(f"Bytes: {row['bidirectional_bytes']}")
         lines.append(f"Packets: {row['bidirectional_packets']}")
-        lines.append(f"Duration(ms): {row['bidirectional_duration_ms']}")
+        lines.append(f"Duration (ms): {row['bidirectional_duration_ms']}")
         lines.append("")
-        lines.append("Note:")
-        lines.append(row["note"] or "")
+        lines.append("Note")
+        lines.append(row["note"] or "-")
 
         self.findings_page.show_detail("\n".join(lines))
+
+    def explain_selected_finding(self):
+        fid, row = self._get_selected_finding_row()
+        if fid is None or row is None:
+            QMessageBox.information(self, "AI Assistant", "Select a finding first.")
+            return
+
+        if self._ai_thread is not None:
+            QMessageBox.information(self, "AI Assistant", "Another AI task is already running.")
+            return
+
+        self._ai_mode = "finding"
+        self.txt_ai_summary.setPlainText("Generating AI finding explanation...")
+        self.tabs.setCurrentIndex(0)
+
+        self.btn_finding_ai.setEnabled(False)
+
+        self._ai_thread = QThread()
+        self._ai_worker = AITextWorker(
+            self.ai_service.explain_finding,
+            dict(row),
+        )
+
+        self._ai_worker.moveToThread(self._ai_thread)
+        self._ai_thread.started.connect(self._ai_worker.run)
+        self._ai_worker.finished.connect(self.on_ai_task_finished)
+        self._ai_worker.error.connect(self.on_ai_task_error)
+
+        self._ai_worker.finished.connect(self._ai_thread.quit)
+        self._ai_worker.error.connect(self._ai_thread.quit)
+
+        self._ai_thread.finished.connect(self._cleanup_ai_thread)
+
+        self._ai_thread.start()
 
     def jump_to_selected_finding(self):
         fid, row = self._get_selected_finding_row()

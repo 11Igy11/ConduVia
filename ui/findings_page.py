@@ -13,6 +13,7 @@ class FindingsPage(QWidget):
     jumpRequested = Signal()
     editRequested = Signal()
     deleteRequested = Signal()
+    aiRequested = Signal()
     selectionChanged = Signal()
     doubleClickedFinding = Signal()
     contextMenuRequestedFromList = Signal(object)
@@ -21,19 +22,27 @@ class FindingsPage(QWidget):
         super().__init__(parent)
 
         root = QVBoxLayout(self)
+        root.setContentsMargins(10, 10, 10, 10)
+        root.setSpacing(10)
 
         actions = QHBoxLayout()
+        actions.setSpacing(8)
         self.btn_finding_edit = QPushButton("Edit")
         self.btn_finding_delete = QPushButton("Delete")
         self.btn_finding_jump = QPushButton("Jump to Flow")
+        self.btn_finding_ai = QPushButton("Explain with AI")
+        for b in (self.btn_finding_edit, self.btn_finding_delete, self.btn_finding_jump, self.btn_finding_ai):
+            b.setFixedHeight(34)
 
         actions.addWidget(self.btn_finding_edit)
         actions.addWidget(self.btn_finding_delete)
         actions.addWidget(self.btn_finding_jump)
+        actions.addWidget(self.btn_finding_ai)
         actions.addStretch()
         root.addLayout(actions)
 
         frow = QHBoxLayout()
+        frow.setSpacing(8)
         frow.addWidget(QLabel("Status:"))
 
         self.cmb_find_status = QComboBox()
@@ -73,8 +82,9 @@ class FindingsPage(QWidget):
         self.finding_detail = QTextEdit()
         self.finding_detail.setReadOnly(True)
         self.finding_detail.setPlaceholderText("Select a finding to see details...")
-        self.finding_detail.setMinimumWidth(320)
-        self.finding_detail.setMaximumWidth(420)
+        self.finding_detail.setMinimumWidth(300)
+        self.finding_detail.setMaximumWidth(380)
+        self.finding_detail.setLineWrapMode(QTextEdit.WidgetWidth)
 
         self.findings_split.addWidget(self.findings_list)
         self.findings_split.addWidget(self.finding_detail)
@@ -82,7 +92,7 @@ class FindingsPage(QWidget):
         self.findings_split.setStretchFactor(0, 5)
         self.findings_split.setStretchFactor(1, 2)
         self.findings_split.setCollapsible(1, False)
-        self.findings_split.setSizes([1050, 360])
+        self.findings_split.setSizes([1120, 340])
 
         root.addWidget(self.findings_split, 1)
 
@@ -92,6 +102,7 @@ class FindingsPage(QWidget):
         self.btn_finding_jump.clicked.connect(self.jumpRequested.emit)
         self.btn_finding_edit.clicked.connect(self.editRequested.emit)
         self.btn_finding_delete.clicked.connect(self.deleteRequested.emit)
+        self.btn_finding_ai.clicked.connect(self.aiRequested.emit)
 
         self.findings_list.itemSelectionChanged.connect(self.selectionChanged.emit)
         self.findings_list.itemDoubleClicked.connect(lambda _: self.doubleClickedFinding.emit())
@@ -103,6 +114,7 @@ class FindingsPage(QWidget):
         self.btn_finding_edit.setEnabled(enabled)
         self.btn_finding_delete.setEnabled(enabled)
         self.btn_finding_jump.setEnabled(enabled)
+        self.btn_finding_ai.setEnabled(enabled)
 
     def selected_finding_id(self) -> int | None:
         item = self.findings_list.currentItem()

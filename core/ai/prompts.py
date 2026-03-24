@@ -98,3 +98,51 @@ What To Check Next
 - must be directly tied to this flow
 - no generic advice
 """.strip()
+
+def build_finding_explanation_prompt(finding_context: str) -> str:
+    return f"""
+You are analyzing a saved network investigation finding.
+
+Your goal is to explain the finding clearly and practically, using only the saved finding data.
+
+STRICT RULES:
+- Use ONLY the provided context
+- Do NOT invent facts
+- Do NOT assume maliciousness unless clearly supported by the context
+- Do NOT restate the entire finding verbatim
+- Do NOT explain generic networking theory
+- Do NOT explain what common ports or protocols are generally used for
+- Do NOT infer service type from port number alone
+- Do NOT assume that a hostname field is always TLS SNI
+- Do NOT assume an IP belongs to a DNS server, NTP server, Apple server, or any other role unless explicitly supported by the context
+- Do NOT describe a query, request, response, session, or service purpose unless clearly supported by the context
+- Do NOT say traffic is unusual, suspicious, or notable unless the context directly supports that conclusion
+- Do NOT treat UDP, TCP, or a client/source port as suspicious by themselves
+- Do NOT use phrases like "could indicate" or "may suggest" unless there is direct evidence in the context
+- Treat analyst note text as context, not as proven fact unless supported by the finding fields
+- If the finding is weak or inconclusive, say so clearly
+- Prefer neutral language such as "saved for review", "worth validating", or "requires more context"
+
+CONTEXT:
+{finding_context}
+
+OUTPUT FORMAT (strict):
+
+Finding Summary
+- 2 to 4 short bullet points
+- summarize only directly observable facts from the finding
+- do not explain protocol or port meaning
+
+Why This Finding Was Worth Saving
+- 1 to 3 short bullet points
+- explain only what makes it worth review based on the saved finding
+- if the basis is weak or unclear, explicitly say:
+  - The reason this finding was saved is not fully clear from the finding data alone.
+
+Recommended Follow-up
+- 3 to 5 concrete follow-up checks
+- must be directly tied to the finding fields or note
+- no generic advice
+- do not tell the user to inspect the external destination system unless the context explicitly supports that
+- prefer checks against local dataset context, nearby flows, repeated endpoints, repeated hostname values, and analyst notes
+""".strip()
