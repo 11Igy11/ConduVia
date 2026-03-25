@@ -81,7 +81,7 @@ def _parse_meta_iso_dt(s: Any) -> datetime | None:
     except Exception:
         return None
 
-def _score_level(score: int) -> str:
+def _deviation_level(score: int) -> str:
     if score >= 70:
         return "HIGH"
     if score >= 35:
@@ -157,7 +157,7 @@ def compute_analyst_summary(flows: list[dict[str, Any]], meta: dict[str, Any] | 
       - dominance (top internal src, top dst)
       - activity density (hour histogram raw + normalized, peak/quiet, night share)
       - largest flow shares
-      - risk score 0..100 + level + reasons
+      - behavior deviation score 0..100 + level + reasons
       - top outbound pair (src,dst) by outbound bytes
     Safe defaults if fields are missing.
     """
@@ -405,60 +405,76 @@ def compute_analyst_summary(flows: list[dict[str, Any]], meta: dict[str, Any] | 
     largest_total_share = _pct(largest_total_flow_bytes, total_bytes)
     largest_outbound_share = _pct(largest_outbound_flow_bytes, total_outbound_bytes)
 
-    # ---- risk score (0..100) ----
-    score = 0
-    reasons: list[str] = []
+    # ---- behavior deviation score (0..100) ----
+    deviation_score = 0
+    deviation_reasons: list[str] = []
 
     # S1: outbound ratio
     if outbound_share_total > 60:
-        score += 30
-        reasons.append(f"High outbound ratio: {outbound_share_total:.1f}% of total bytes (private→public).")
+        deviation_score += 30
+        deviation_reasons.append(
+            f"High outbound ratio: {outbound_share_total:.1f}% of total bytes (private→public)."
+        )
     elif outbound_share_total >= 35:
-        score += 15
-        reasons.append(f"Moderate outbound ratio: {outbound_share_total:.1f}% of total bytes (private→public).")
+        deviation_score += 15
+        deviation_reasons.append(
+            f"Moderate outbound ratio: {outbound_share_total:.1f}% of total bytes (private→public)."
+        )
 
     # S2: single internal src dominance (outbound)
     if top_internal_out_share_of_outbound > 70:
-        score += 25
-        reasons.append(
+        deviation_score += 25
+        deviation_reasons.append(
             f"Single internal host dominates outbound: {top_internal_out_ip} = {top_internal_out_share_of_outbound:.1f}% outbound bytes."
         )
     elif top_internal_out_share_of_outbound >= 40:
-        score += 10
-        reasons.append(
+        deviation_score += 10
+        deviation_reasons.append(
             f"Outbound concentrated to one internal host: {top_internal_out_ip} = {top_internal_out_share_of_outbound:.1f}% outbound bytes."
         )
 
     # S3: single destination dominance (outbound)
     if top_dst_share_of_outbound > 70:
-        score += 25
-        reasons.append(f"Single destination dominates outbound: {top_dst_ip} = {top_dst_share_of_outbound:.1f}% outbound bytes.")
+        deviation_score += 25
+        deviation_reasons.append(
+            f"Single destination dominates outbound: {top_dst_ip} = {top_dst_share_of_outbound:.1f}% outbound bytes."
+        )
     elif top_dst_share_of_outbound >= 40:
-        score += 10
-        reasons.append(f"Outbound concentrated to one destination: {top_dst_ip} = {top_dst_share_of_outbound:.1f}% outbound bytes.")
+        deviation_score += 10
+        deviation_reasons.append(
+            f"Outbound concentrated to one destination: {top_dst_ip} = {top_dst_share_of_outbound:.1f}% outbound bytes."
+        )
 
     # S4: night-heavy activity
     if total_timed > 0:
         if night_share >= 60:
-            score += 10
-            reasons.append(f"Night-heavy activity: {night_share:.1f}% of timed flows between 22–06.")
+            deviation_score += 10
+            deviation_reasons.append(
+                f"Night-heavy activity: {night_share:.1f}% of timed flows between 22–06."
+            )
         elif night_share >= 35:
-            score += 5
-            reasons.append(f"Noticeable night activity: {night_share:.1f}% of timed flows between 22–06.")
+            deviation_score += 5
+            deviation_reasons.append(
+                f"Noticeable night activity: {night_share:.1f}% of timed flows between 22–06."
+            )
 
     # S5: single largest outbound flow share
     if total_outbound_bytes > 0:
         if largest_outbound_share >= 35:
-            score += 10
-            reasons.append(f"Bulk outbound transfer: largest outbound flow = {largest_outbound_share:.1f}% of outbound bytes.")
+            deviation_score += 10
+            deviation_reasons.append(
+                f"Bulk outbound transfer: largest outbound flow = {largest_outbound_share:.1f}% of outbound bytes."
+            )
         elif largest_outbound_share >= 15:
-            score += 5
-            reasons.append(f"Larger-than-usual outbound flow: largest outbound flow = {largest_outbound_share:.1f}% of outbound bytes.")
+            deviation_score += 5
+            deviation_reasons.append(
+                f"Larger-than-usual outbound flow: largest outbound flow = {largest_outbound_share:.1f}% of outbound bytes."
+            )
 
-    if score > 100:
-        score = 100
+    if deviation_score > 100:
+        deviation_score = 100
 
-    level = _score_level(score)
+    level = _deviation_level(deviation_score)
 
     # ---- build "largest flow" descriptors (compact) ----
     def _flow_brief(f2: dict[str, Any] | None, *, outbound: bool) -> dict[str, Any] | None:
@@ -557,10 +573,10 @@ def compute_analyst_summary(flows: list[dict[str, Any]], meta: dict[str, Any] | 
             "largest_outbound_flow": _flow_brief(largest_outbound_flow, outbound=True),
             "largest_outbound_share_pct": float(largest_outbound_share),
         },
-        "risk": {
-            "score": int(score),
+        "behavior_deviation": {
+            "score": int(deviation_score),
             "level": level,
-            "reasons": reasons,
+            "reasons": deviation_reasons,
             "top_outbound_pair": top_outbound_pair,
         },
     }

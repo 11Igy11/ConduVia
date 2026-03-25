@@ -700,6 +700,7 @@ class RegistryPage(QWidget):
         self._summary: dict[str, Any] = {}
         self._cols: list[str] = []
         self._analyst: dict[str, Any] = {}
+        self._compare_result: dict[str, Any] | None = None
 
         # ---- base layout ----
         root = QVBoxLayout(self)
@@ -831,19 +832,19 @@ class RegistryPage(QWidget):
         hdr2.addStretch()
         al.addLayout(hdr2)
 
-        # Risk row: label + progress
-        risk_row = QHBoxLayout()
-        self.lbl_risk = QLabel("Risk score: —")
-        self.lbl_risk.setStyleSheet("color:#e5e7eb;font-weight:700;")
-        risk_row.addWidget(self.lbl_risk, 0)
+        # Behavior deviation row: label + progress
+        deviation_row = QHBoxLayout()
+        self.lbl_deviation = QLabel("Behavior deviation: —")
+        self.lbl_deviation.setStyleSheet("color:#e5e7eb;font-weight:700;")
+        deviation_row.addWidget(self.lbl_deviation, 0)
 
-        self.risk_bar = QProgressBar()
-        self.risk_bar.setRange(0, 100)
-        self.risk_bar.setValue(0)
-        self.risk_bar.setTextVisible(True)
-        self.risk_bar.setFormat("%p%")
-        self.risk_bar.setFixedHeight(18)
-        self.risk_bar.setStyleSheet("""
+        self.deviation_bar = QProgressBar()
+        self.deviation_bar.setRange(0, 100)
+        self.deviation_bar.setValue(0)
+        self.deviation_bar.setTextVisible(True)
+        self.deviation_bar.setFormat("%p%")
+        self.deviation_bar.setFixedHeight(18)
+        self.deviation_bar.setStyleSheet("""
             QProgressBar {
                 border: 1px solid #475569;
                 border-radius: 9px;
@@ -857,8 +858,8 @@ class RegistryPage(QWidget):
                 border-radius: 9px;
             }
         """)
-        risk_row.addWidget(self.risk_bar, 1)
-        al.addLayout(risk_row)
+        deviation_row.addWidget(self.deviation_bar, 1)
+        al.addLayout(deviation_row)
 
         # Body text (rich)
         self.lbl_analyst_body = QLabel("")
@@ -1064,11 +1065,16 @@ class RegistryPage(QWidget):
                 return
 
     # ----------------- public API -----------------
-    def set_dataset(self, folder: str | Path, files: list[Path], flows: list[dict[str, Any]]):
+    def set_dataset(self,
+        folder: str | Path,
+        files: list[Path],
+        flows: list[dict[str, Any]],
+        compare_result: dict[str, Any] | None = None,
+    ):
         self._folder = Path(folder)
         self._files = files or []
         self._flows = flows or []
-
+        self._compare_result = compare_result or None
         self._meta = {}
         if self._files:
             try:
@@ -1115,8 +1121,8 @@ class RegistryPage(QWidget):
         self._set_stat(self.card_bytes, "—")
         self.pairs_model.set_rows([], headers=("Item", "Value"))
         self._fit_pairs_height(0)
-        self.lbl_risk.setText("Risk score: —")
-        self.risk_bar.setValue(0)
+        self.lbl_deviation.setText("Behavior deviation: —")
+        self.deviation_bar.setValue(0)
         self.lbl_analyst_body.setText("")
         self.lbl_day_section.setText("")
         self.lbl_activity_text.setText("")
@@ -1132,6 +1138,7 @@ class RegistryPage(QWidget):
 
         self.lbl_dataset_disabled.setVisible(True)
         self.table.setVisible(False)
+        self._compare_result = None
 
     def _render_meta(self):
         if not self._folder:
@@ -1194,7 +1201,7 @@ class RegistryPage(QWidget):
     def _render_analyst(self):
         a = self._analyst or {}
         if not a:
-            self.lbl_risk.setText("Risk score: —")
+            self.lbl_risk.setText("Behavior deviation: —")
             self.risk_bar.setValue(0)
             self.lbl_analyst_body.setText("No analyst summary available.")
             self.lbl_day_section.setText("")
@@ -1213,14 +1220,14 @@ class RegistryPage(QWidget):
             self.hist24.set_values([0] * 24)
             return
 
-        # ---- risk ----
-        risk = a.get("risk", {}) or {}
-        score = int(risk.get("score", 0) or 0)
-        level = str(risk.get("level", "LOW") or "LOW")
-        reasons = list(risk.get("reasons", []) or [])
+        # ---- behavior deviation ----
+        deviation = a.get("behavior_deviation", {}) or {}
+        score = int(deviation.get("score", 0) or 0)
+        level = str(deviation.get("level", "LOW") or "LOW")
+        reasons = list(deviation.get("reasons", []) or [])
 
-        self.lbl_risk.setText(f"Risk score: {score}/100 ({level})")
-        self.risk_bar.setValue(max(0, min(100, score)))
+        self.lbl_deviation.setText(f"Behavior deviation: {score}/100 ({level})")
+        self.deviation_bar.setValue(max(0, min(100, score)))
 
         # ---- dominant app ----
         cov = a.get("coverage", {}) or {}
@@ -1292,9 +1299,9 @@ class RegistryPage(QWidget):
 
         if reasons:
             rs = "".join(f"<li>{html.escape(str(r))}</li>" for r in reasons[:3])
-            reasons_html = f"<b>Top reasons:</b><ul style='margin:4px 0 6px 18px;'>{rs}</ul>"
+            reasons_html = f"<b>Top deviation signals:</b><ul style='margin:4px 0 6px 18px;'>{rs}</ul>"
         else:
-            reasons_html = "<b>Top reasons:</b> —"
+            reasons_html = "<b>Top deviation signals:</b> —"
 
         coverage_html = (
             f"<b>Coverage:</b> " + " | ".join(coverage_parts) + " | "
@@ -1308,9 +1315,55 @@ class RegistryPage(QWidget):
             f"({float(top_dst.get('share_of_outbound_pct',0.0)):.1f}%)"
         )
 
+        compare_html = ""
+        cmp = self._compare_result or {}
+        if cmp:
+            current_unique = int(cmp.get("total_current", 0) or 0)
+            previous_unique = int(cmp.get("total_previous", 0) or 0)
+            new_count = len(cmp.get("new", []) or [])
+            known_count = len(cmp.get("known", []) or [])
+
+            compare_html = (
+                f"<b>Dataset compare:</b> "
+                f"current {current_unique} unique flows | "
+                f"previous {previous_unique} unique flows | "
+                f"new {new_count} | "
+                f"known {known_count}<br>"
+            )
+
+        novelty_html = ""
+
+        if cmp and cmp.get("summary_new"):
+            sn = cmp["summary_new"]
+
+            apps = sn.get("new_apps", [])
+            dsts = sn.get("new_dst_ips", [])
+            domains = sn.get("new_sni", [])
+
+            novelty_html = "<br><b>New indicators:</b><br>"
+
+            if apps:
+                novelty_html += f"• Apps: {', '.join(str(x) for x in apps[:5])}"
+                if len(apps) > 5:
+                    novelty_html += " ..."
+                novelty_html += "<br>"
+
+            if domains:
+                novelty_html += f"• Domains: {', '.join(str(x) for x in domains[:5])}"
+                if len(domains) > 5:
+                    novelty_html += " ..."
+                novelty_html += "<br>"
+
+            if dsts:
+                novelty_html += f"• Dest IPs: {', '.join(str(x) for x in dsts[:5])}"
+                if len(dsts) > 5:
+                    novelty_html += " ..."
+                novelty_html += "<br>"
         analyst_html = (
             f"{reasons_html}"
             f"{coverage_html}<br>"
+            f"{compare_html}"
+            f"{novelty_html}"
             f"{dom_text}<br>"
             f"{dominance_html}"
         )
@@ -1522,10 +1575,10 @@ class RegistryPage(QWidget):
 
         a = self._analyst or {}
 
-        risk = a.get("risk", {}) or {}
-        score = int(risk.get("score", 0) or 0)
-        level = str(risk.get("level", "LOW") or "LOW")
-        reasons = list(risk.get("reasons", []) or [])
+        deviation = a.get("behavior_deviation", {}) or {}
+        score = int(deviation.get("score", 0) or 0)
+        level = str(deviation.get("level", "LOW") or "LOW")
+        reasons = list(deviation.get("reasons", []) or [])
 
         cov = a.get("coverage", {}) or {}
         active_days = int(cov.get("active_days", 0) or 0)
@@ -1644,17 +1697,17 @@ class RegistryPage(QWidget):
         <div class="card analyst">
           <h2>Analyst Summary</h2>
 
-          <div class="analyst-risk">
+        <div class="analyst-risk">
             <div class="risk-line">
-              <span><strong>Risk score:</strong> {_esc(score)}/100 ({_esc(level)})</span>
+              <span><strong>Behavior deviation:</strong> {_esc(score)}/100 ({_esc(level)})</span>
             </div>
             <div class="risk-bar-wrap">
               <div class="risk-bar-fill" style="width:{max(0, min(100, score))}%;"></div>
             </div>
           </div>
 
-          <div class="section-block compact-top">
-            <p><strong>Top reasons:</strong></p>
+            <div class="section-block compact-top">
+            <p><strong>Top deviation signals:</strong></p>
             <ul class="reasons-list">
               {reasons_html}
             </ul>

@@ -1341,11 +1341,39 @@ class App(QWidget):
             QMessageBox.warning(self, "Dataset", f"Folder not found:\n{folder}")
             return
 
+        previous_flows = []
+
+        if self.current_project_id is not None:
+            recent = list_recent_datasets(self.current_project_id, limit=2)
+
+            if len(recent) >= 1:
+                prev_folder = recent[0]
+
+                # ako je isti folder → ignoriraj
+                if str(prev_folder) != str(folder):
+                    try:
+                        _, previous_flows = load_folder(prev_folder)
+                    except Exception:
+                        previous_flows = []
+
         self.current_folder = Path(folder)
         files, flows = load_folder(folder, debug=False)
         self.flows = flows
+
+        from core.compare import compare_flows
+
+        compare_result = None
+        if previous_flows:
+            compare_result = compare_flows(self.flows, previous_flows)
+        from core.compare import summarize_new_flows
+
+        summary_new = None
+        if compare_result:
+            summary_new = summarize_new_flows(compare_result["new"])
+            compare_result["summary_new"] = summary_new
+
         if hasattr(self, "registry_page"):
-            self.registry_page.set_dataset(folder, files, flows)
+            self.registry_page.set_dataset(folder, files, flows, compare_result=compare_result)
 
         self.lbl_path.setText(f"Dataset: {folder}")
         self.lbl_stats.setText(f"JSON files: {len(files)}\nTotal flow records: {len(flows)}")
@@ -1369,7 +1397,7 @@ class App(QWidget):
         self.tabs.setCurrentIndex(1)
         self.splitter.setSizes([920, 420])
         self.update_detail(None)
-
+        
     def render_summary(self):
         if not self.flows:
             self.txt_top_src.setPlainText("No flows loaded.")
