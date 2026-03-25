@@ -456,7 +456,9 @@ class App(QWidget):
         # 7) Explore actions
         self.btn_load.clicked.connect(self.load_dataset_dialog)
         self.btn_ai_summary.clicked.connect(self.generate_ai_summary)
+        self.btn_add_ai_to_notes.clicked.connect(self.add_ai_summary_to_notes)
         self.btn_toggle_conv.clicked.connect(self.toggle_conversation)
+        self.btn_expand_flows.clicked.connect(self.toggle_flows_expanded)
         self.btn_mark_finding.clicked.connect(self.mark_as_finding)
 
         # 7A) AI explain flow
@@ -585,6 +587,7 @@ class App(QWidget):
         self.loaded_flows: list[dict[str, Any]] = []   # currently shown in table
         self._current_flow: dict[str, Any] | None = None
         self._conversation_on = False
+        self._flows_expanded = False
 
         # Paging
         self.PAGE_SIZE = 2000
@@ -697,8 +700,16 @@ class App(QWidget):
         summary_layout.setSpacing(10)
 
         self.btn_ai_summary = QPushButton("Generate AI Summary")
+        self.btn_add_ai_to_notes = QPushButton("Add AI to Notes")
+        self.btn_add_ai_to_notes.setEnabled(True)
 
-        summary_layout.addWidget(self.btn_ai_summary)
+        summary_btn_row = QHBoxLayout()
+        summary_btn_row.setSpacing(8)
+        summary_btn_row.addWidget(self.btn_ai_summary)
+        summary_btn_row.addWidget(self.btn_add_ai_to_notes)
+        summary_btn_row.addStretch()
+
+        summary_layout.addLayout(summary_btn_row)
 
         summary_split = QSplitter(Qt.Horizontal)
 
@@ -815,17 +826,17 @@ class App(QWidget):
         self.btn_filter_dst = QPushButton("Filter destination")
 
         self.btn_toggle_conv = QPushButton("Conversation: OFF")
+        self.btn_expand_flows = QPushButton("Expand Flows")
         self.btn_mark_finding = QPushButton("Mark as Finding")
         self.btn_ai_explain = QPushButton("Explain with AI")
 
         for b in (
             self.btn_copy_src, self.btn_copy_dst, self.btn_copy_sni,
             self.btn_filter_src, self.btn_filter_dst,
-            self.btn_toggle_conv, self.btn_mark_finding, self.btn_ai_explain
+            self.btn_toggle_conv, self.btn_expand_flows,
+            self.btn_mark_finding, self.btn_ai_explain
         ):
             b.setFixedHeight(34)
-
-        self.btn_toggle_conv.setObjectName("Primary")
 
         left_actions.addWidget(self.btn_copy_src)
         left_actions.addWidget(self.btn_copy_dst)
@@ -835,6 +846,7 @@ class App(QWidget):
         left_actions.addWidget(self.btn_filter_dst)
 
         right_actions.addWidget(self.btn_toggle_conv)
+        right_actions.addWidget(self.btn_expand_flows)
         right_actions.addWidget(self.btn_mark_finding)
         right_actions.addWidget(self.btn_ai_explain)
 
@@ -883,7 +895,8 @@ class App(QWidget):
 
         self.splitter.addWidget(self.table)
 
-        details_panel = QWidget()
+        self.details_panel = QWidget()
+        details_panel = self.details_panel
         details_panel.setMinimumWidth(430)
         details_panel.setMaximumWidth(520)
 
@@ -1280,6 +1293,11 @@ class App(QWidget):
             self.leave_conversation(clear_search=True)
             self.update_loaded_label()
             self.update_load_more_enabled()
+            self._flows_expanded = False
+            if hasattr(self, "details_panel"):
+                self.details_panel.show()
+            if hasattr(self, "btn_expand_flows"):
+                self.btn_expand_flows.setText("Expand Flows")
 
             # reset registry page dataset
             if hasattr(self, "registry_page"):
@@ -1395,6 +1413,9 @@ class App(QWidget):
         self.update_load_more_enabled()
 
         self.tabs.setCurrentIndex(1)
+        self._flows_expanded = False
+        self.details_panel.show()
+        self.btn_expand_flows.setText("Expand Flows")
         self.splitter.setSizes([920, 420])
         self.update_detail(None)
         
@@ -1591,6 +1612,18 @@ class App(QWidget):
         src = self.current_value("src_ip")
         dst = self.current_value("dst_ip")
         self.enter_conversation(src, dst)
+
+    def toggle_flows_expanded(self):
+        self._flows_expanded = not self._flows_expanded
+
+        if self._flows_expanded:
+            self.details_panel.hide()
+            self.btn_expand_flows.setText("Collapse Flows")
+            self.splitter.setSizes([1400, 0])
+        else:
+            self.details_panel.show()
+            self.btn_expand_flows.setText("Expand Flows")
+            self.splitter.setSizes([920, 420])
 
     def update_mode_label(self):
         if self._conversation_on and self.proxy.conv_a and self.proxy.conv_b:
@@ -1917,6 +1950,48 @@ class App(QWidget):
 
             self.refresh_findings_ui()
             self.refresh_activity_ui()
+
+    def _make_ai_note_block(self, text: str) -> str:
+        ts = datetime.now().strftime("%d.%m.%Y. %H:%M:%S")
+        body = (text or "").strip()
+
+        if not body:
+            return ""
+
+        return (
+            f"[AI note added: {ts}]\n"
+            f"{body}\n"
+            f"{'-' * 60}\n"
+        )
+
+    def add_ai_summary_to_notes(self):
+        if self.current_project_id is None:
+            QMessageBox.information(self, "Notes", "Open an active project first.")
+            return
+
+        text = (self.txt_ai_summary.toPlainText() or "").strip()
+        if not text:
+            QMessageBox.information(self, "Notes", "There is no AI-generated text to add.")
+            return
+
+        block = self._make_ai_note_block(text)
+        if not block:
+            return
+
+        existing = self.txt_notes.toPlainText() or ""
+
+        if existing.strip():
+            if not existing.endswith("\n"):
+                existing += "\n"
+            new_text = existing + "\n" + block
+        else:
+            new_text = block
+
+        self.txt_notes.setPlainText(new_text)
+        self._notes_dirty = True
+        self._flush_notes()
+
+        self.tabs.setCurrentIndex(3)  # Notes tab
 
     # ---------- Notes ----------
     def refresh_notes_ui(self):
