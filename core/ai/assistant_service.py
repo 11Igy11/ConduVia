@@ -8,6 +8,7 @@ from core.ai.context_builder import (
     build_finding_context,
 )
 from core.ai.prompts import (
+    SYSTEM_PROMPT,
     build_dataset_summary_prompt,
     build_flow_explanation_prompt,
     build_finding_explanation_prompt,
@@ -23,17 +24,16 @@ class AIAssistantService:
         if not flows:
             return "No dataset loaded."
 
-        total_flows = len(flows)
-        sampled_flows = flows[:1000]
+        total_flows = len(flows)        
 
         context = build_dataset_context(
-            flows=sampled_flows,
-            project_name=project_name,
-            dataset_path=dataset_path,
-            total_flows=total_flows,
-        )
+        flows=flows,
+        project_name=project_name,
+        dataset_path=dataset_path,
+        total_flows=total_flows,
+    )
 
-        prompt = build_dataset_summary_prompt(context)
+        prompt = SYSTEM_PROMPT + "\n\n" + build_dataset_summary_prompt(context)
 
         try:
             response = requests.post(
@@ -60,7 +60,7 @@ class AIAssistantService:
             return "No flow selected."
 
         context = build_flow_context(flow)
-        prompt = build_flow_explanation_prompt(context)
+        prompt = SYSTEM_PROMPT + "\n\n" + build_flow_explanation_prompt(context)
 
         try:
             response = requests.post(
@@ -87,7 +87,7 @@ class AIAssistantService:
             return "No finding selected."
 
         context = build_finding_context(finding)
-        prompt = build_finding_explanation_prompt(context)
+        prompt = SYSTEM_PROMPT + "\n\n" + build_finding_explanation_prompt(context)
 
         try:
             response = requests.post(

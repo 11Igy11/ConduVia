@@ -807,10 +807,13 @@ class App(QWidget):
         # ----- FLOW TOOLBAR -----        
         toolbar_wrap = QFrame()
         toolbar_wrap.setObjectName("FlowToolbarCard")
+        toolbar_wrap.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        toolbar_wrap.setFixedHeight(68)
 
         toolbar = QHBoxLayout(toolbar_wrap)
         toolbar.setContentsMargins(10, 10, 10, 10)
         toolbar.setSpacing(10)
+        toolbar.setAlignment(Qt.AlignVCenter)
 
         left_actions = QHBoxLayout()
         left_actions.setSpacing(8)
@@ -837,6 +840,7 @@ class App(QWidget):
             self.btn_mark_finding, self.btn_ai_explain
         ):
             b.setFixedHeight(34)
+            b.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
 
         left_actions.addWidget(self.btn_copy_src)
         left_actions.addWidget(self.btn_copy_dst)

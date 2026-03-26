@@ -17,8 +17,8 @@ def build_dataset_context(
 
     lines.append(f"Project: {project_name or '(none)'}")
     lines.append(f"Dataset: {dataset_path or '(none)'}")
-    lines.append(f"Total flows in dataset: {actual_total}")
-    lines.append(f"Flows used for AI summary: {len(flows)}")
+    lines.append("Goal: describe observable device or user communication behavior based on network flow metadata.")
+    lines.append(f"Total flows in dataset: {actual_total}")    
     lines.append("")
 
     lines.append("Top source IPs:")
