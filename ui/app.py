@@ -9,18 +9,19 @@ from typing import Any
 from core.protocols import format_ip_proto
 from ui.findings_page import FindingsPage
 
-from PySide6.QtCore import Qt, QAbstractTableModel, QModelIndex, QSortFilterProxyModel, QTimer, QObject, QThread, Signal
-from PySide6.QtGui import QGuiApplication, QColor, QIcon, QFont, QPixmap
+from PySide6.QtCore import Qt, QAbstractTableModel, QModelIndex, QSortFilterProxyModel, QTimer, QObject, QThread, Signal, QItemSelectionModel
+from PySide6.QtGui import QGuiApplication, QColor, QIcon, QFont, QPixmap, QContextMenuEvent
 from PySide6.QtWidgets import (
     QApplication, QWidget, QHBoxLayout, QVBoxLayout, QGridLayout,
     QPushButton, QLabel, QStackedWidget, QFileDialog,
     QTextEdit, QTabWidget, QTableView, QLineEdit,
     QSplitter, QFormLayout, QGroupBox,
     QListWidget, QListWidgetItem, QMessageBox, QInputDialog,
-    QComboBox, QMenu, QFrame, QSizePolicy, QScrollArea, QHeaderView
+    QComboBox, QMenu, QFrame, QSizePolicy, QScrollArea, QHeaderView,
+    QDialog, QDialogButtonBox, QPlainTextEdit
 )
 
-from core.loader import load_folder
+from core.loader import load_folder, load_json_file
 from core.analyzer import top_src_ips, top_dst_ips, top_applications, top_protocols
 from core.db import (
     init_db, create_project, list_projects, get_project,
@@ -211,6 +212,57 @@ class AITextWorker(QObject):
             self.finished.emit(result)
         except Exception as e:
             self.error.emit(str(e))
+
+class FlowTableView(QTableView):
+    def __init__(self, parent_app, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.parent_app = parent_app
+
+    def contextMenuEvent(self, event: QContextMenuEvent):
+        index = self.indexAt(event.pos())
+        if not index.isValid():
+            event.ignore()
+            return
+
+        self.setCurrentIndex(index)
+        self.selectionModel().select(
+            index,
+            QItemSelectionModel.ClearAndSelect | QItemSelectionModel.Rows
+        )
+        menu = QMenu(self)
+
+        act_copy_value = menu.addAction("Copy value")
+        act_copy_flow = menu.addAction("Copy flow")
+
+        chosen = menu.exec(event.globalPos())
+        if not chosen:
+            return
+
+        if chosen == act_copy_value:
+            value = self.model().data(index, Qt.DisplayRole)
+            if value is not None:
+                self.parent_app.copy_text(str(value))
+            return
+
+        if chosen == act_copy_flow:
+            proxy = self.parent_app.proxy
+            source_index = proxy.mapToSource(index)
+            row = source_index.row()
+
+            if 0 <= row < len(self.parent_app.loaded_flows):
+                flow = self.parent_app.loaded_flows[row]
+                lines = [
+                    f"Source IP: {flow.get('src_ip', '')}",
+                    f"Source Port: {flow.get('src_port', '')}",
+                    f"Destination IP: {flow.get('dst_ip', '')}",
+                    f"Destination Port: {flow.get('dst_port', '')}",
+                    f"Protocol: {format_ip_proto(flow.get('protocol', ''))}",
+                    f"Application: {flow.get('application_name', '')}",
+                    f"Bytes: {flow.get('bidirectional_bytes', '')}",
+                    f"Duration(ms): {flow.get('bidirectional_duration_ms', '')}",
+                    f"SNI: {flow.get('requested_server_name', '')}",
+                ]
+                self.parent_app.copy_text("\n".join(lines))
 
 # ---------- Main App ----------
 class App(QWidget):
@@ -461,17 +513,13 @@ class App(QWidget):
         self.btn_expand_flows.clicked.connect(self.toggle_flows_expanded)
         self.btn_mark_finding.clicked.connect(self.mark_as_finding)
 
-        # 7A) AI explain flow
+        # 8) AI explain flow
         self.btn_ai_explain.clicked.connect(self.explain_selected_flow)
-
-        # 8) Copy buttons
-        self.btn_copy_src.clicked.connect(lambda: self.copy_text(self.current_value("src_ip")))
-        self.btn_copy_dst.clicked.connect(lambda: self.copy_text(self.current_value("dst_ip")))
-        self.btn_copy_sni.clicked.connect(lambda: self.copy_text(self.current_value("requested_server_name")))
-
+        
         # 9) Filter buttons
         self.btn_filter_src.clicked.connect(lambda: self.apply_filter_ip(self.current_value("src_ip")))
         self.btn_filter_dst.clicked.connect(lambda: self.apply_filter_ip(self.current_value("dst_ip")))
+        self.btn_filter_sni.clicked.connect(lambda: self.apply_filter_ip(self.current_value("requested_server_name")))
 
         # 10) Projects page
         self.btn_new_project.clicked.connect(self.create_project_dialog)
@@ -577,6 +625,280 @@ class App(QWidget):
         self.refresh_findings_ui()
         self.refresh_notes_ui()
 
+    def _message_dialog(
+        self,
+        title: str,
+        message: str,
+        details: str = "",
+        width: int = 420,
+    ) -> None:
+        dlg = QDialog(self)
+        dlg.setWindowTitle(title)
+        dlg.setModal(True)
+        dlg.setFixedWidth(width)
+
+        layout = QVBoxLayout(dlg)
+        layout.setContentsMargins(18, 16, 18, 16)
+        layout.setSpacing(14)
+
+        lbl_message = QLabel(message)
+        lbl_message.setWordWrap(True)
+        lbl_message.setTextFormat(Qt.PlainText)
+        lbl_message.setStyleSheet("font-size: 15px; font-weight: 600; color: #f3f4f6;")
+        layout.addWidget(lbl_message)
+
+        if details:
+            lbl_details = QLabel(details)
+            lbl_details.setWordWrap(True)
+            lbl_details.setTextFormat(Qt.PlainText)
+            lbl_details.setStyleSheet("font-size: 13px; color: #d1d5db;")
+            layout.addWidget(lbl_details)
+
+        buttons = QDialogButtonBox()
+        btn_ok = buttons.addButton("OK", QDialogButtonBox.AcceptRole)
+        btn_ok.setFixedHeight(36)
+        btn_ok.setMinimumWidth(110)
+
+        buttons.accepted.connect(dlg.accept)
+        layout.addWidget(buttons)
+
+        dlg.exec()
+
+    def _choice_dialog(
+        self,
+        title: str,
+        message: str,
+        choices: list[str],
+        width: int = 360,
+    ) -> str | None:
+        dlg = QDialog(self)
+        dlg.setWindowTitle(title)
+        dlg.setModal(True)
+        dlg.setFixedWidth(width)
+
+        layout = QVBoxLayout(dlg)
+        layout.setContentsMargins(18, 16, 18, 16)
+        layout.setSpacing(14)
+
+        lbl = QLabel(message)
+        lbl.setWordWrap(True)
+        lbl.setTextFormat(Qt.PlainText)
+        lbl.setStyleSheet("font-size: 15px; font-weight: 600; color: #f3f4f6;")
+        layout.addWidget(lbl)
+
+        result = {"value": None}
+
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(10)
+
+        for choice in choices:
+            btn = QPushButton(choice)
+            btn.setFixedHeight(36)
+            btn.setMinimumWidth(110)
+
+            def _make_handler(c=choice):
+                def handler():
+                    result["value"] = c
+                    dlg.accept()
+                return handler
+
+            btn.clicked.connect(_make_handler())
+            btn_row.addWidget(btn)
+
+        cancel_btn = QPushButton("Cancel")
+        cancel_btn.setFixedHeight(36)
+        cancel_btn.setMinimumWidth(110)
+        cancel_btn.clicked.connect(dlg.reject)
+        btn_row.addWidget(cancel_btn)
+
+        layout.addLayout(btn_row)
+
+        ok = dlg.exec() == QDialog.Accepted
+        return result["value"] if ok else None
+
+
+    def _text_input_dialog(
+        self,
+        title: str,
+        label: str,
+        text: str = "",
+        width: int = 420,
+    ):
+        dlg = QDialog(self)
+        dlg.setWindowTitle(title)
+        dlg.setModal(True)
+        dlg.setFixedWidth(width)
+
+        layout = QVBoxLayout(dlg)
+        layout.setContentsMargins(18, 16, 18, 16)
+        layout.setSpacing(12)
+
+        lbl = QLabel(label)
+        lbl.setWordWrap(True)
+        lbl.setTextFormat(Qt.PlainText)
+        layout.addWidget(lbl)
+
+        edit = QLineEdit()
+        edit.setText(text)
+        edit.selectAll()
+        edit.setMinimumHeight(38)
+        layout.addWidget(edit)
+
+        buttons = QDialogButtonBox()
+        btn_ok = buttons.addButton("OK", QDialogButtonBox.AcceptRole)
+        btn_cancel = buttons.addButton("Cancel", QDialogButtonBox.RejectRole)
+
+        btn_ok.setFixedHeight(36)
+        btn_cancel.setFixedHeight(36)
+        btn_ok.setMinimumWidth(110)
+        btn_cancel.setMinimumWidth(110)
+
+        buttons.accepted.connect(dlg.accept)
+        buttons.rejected.connect(dlg.reject)
+
+        layout.addWidget(buttons)
+
+        ok = dlg.exec() == QDialog.Accepted
+        return edit.text(), ok
+
+    def _multiline_input_dialog(
+        self,
+        title: str,
+        label: str,
+        text: str = "",
+        width: int = 480,
+        height: int = 260,
+    ):
+        dlg = QDialog(self)
+        dlg.setWindowTitle(title)
+        dlg.setModal(True)
+        dlg.resize(width, height)
+        dlg.setMinimumWidth(width)
+
+        layout = QVBoxLayout(dlg)
+        layout.setContentsMargins(18, 16, 18, 16)
+        layout.setSpacing(12)
+
+        lbl = QLabel(label)
+        lbl.setWordWrap(True)
+        lbl.setTextFormat(Qt.PlainText)
+        layout.addWidget(lbl)
+
+        edit = QPlainTextEdit()
+        edit.setPlainText(text)
+        layout.addWidget(edit, 1)
+
+        buttons = QDialogButtonBox()
+        btn_ok = buttons.addButton("OK", QDialogButtonBox.AcceptRole)
+        btn_cancel = buttons.addButton("Cancel", QDialogButtonBox.RejectRole)
+
+        btn_ok.setFixedHeight(36)
+        btn_cancel.setFixedHeight(36)
+        btn_ok.setMinimumWidth(110)
+        btn_cancel.setMinimumWidth(110)
+
+        buttons.accepted.connect(dlg.accept)
+        buttons.rejected.connect(dlg.reject)
+
+        layout.addWidget(buttons)
+
+        ok = dlg.exec() == QDialog.Accepted
+        return edit.toPlainText(), ok
+
+    def _item_choice_dialog(
+        self,
+        title: str,
+        label: str,
+        items: list[str],
+        current_index: int = 0,
+        width: int = 420,
+    ):
+        dlg = QDialog(self)
+        dlg.setWindowTitle(title)
+        dlg.setModal(True)
+        dlg.setFixedWidth(width)
+
+        layout = QVBoxLayout(dlg)
+        layout.setContentsMargins(18, 16, 18, 16)
+        layout.setSpacing(12)
+
+        lbl = QLabel(label)
+        lbl.setWordWrap(True)
+        layout.addWidget(lbl)
+
+        combo = QComboBox()
+        combo.addItems(items)
+        combo.setCurrentIndex(max(0, min(current_index, len(items) - 1)))
+        combo.setMinimumHeight(38)
+        layout.addWidget(combo)
+
+        buttons = QDialogButtonBox()
+        btn_ok = buttons.addButton("OK", QDialogButtonBox.AcceptRole)
+        btn_cancel = buttons.addButton("Cancel", QDialogButtonBox.RejectRole)
+
+        btn_ok.setFixedHeight(36)
+        btn_cancel.setFixedHeight(36)
+        btn_ok.setMinimumWidth(110)
+        btn_cancel.setMinimumWidth(110)
+
+        buttons.accepted.connect(dlg.accept)
+        buttons.rejected.connect(dlg.reject)
+
+        layout.addWidget(buttons)
+
+        ok = dlg.exec() == QDialog.Accepted
+        return combo.currentText(), ok
+
+    def _confirm_dialog(
+        self,
+        title: str,
+        message: str,
+        details: str = "",
+        ok_text: str = "OK",
+        cancel_text: str = "Cancel",
+        width: int = 420,
+        destructive: bool = False,
+    ) -> bool:
+        dlg = QDialog(self)
+        dlg.setWindowTitle(title)
+        dlg.setModal(True)
+        dlg.setFixedWidth(width)
+
+        layout = QVBoxLayout(dlg)
+        layout.setContentsMargins(18, 16, 18, 16)
+        layout.setSpacing(14)
+
+        lbl_message = QLabel(message)
+        lbl_message.setWordWrap(True)
+        lbl_message.setStyleSheet("font-size: 15px; font-weight: 600; color: #f3f4f6;")
+        layout.addWidget(lbl_message)
+
+        if details:
+            lbl_details = QLabel(details)
+            lbl_details.setWordWrap(True)
+            lbl_details.setTextFormat(Qt.PlainText)
+            lbl_details.setStyleSheet("font-size: 13px; color: #d1d5db;")
+            layout.addWidget(lbl_details)
+
+        buttons = QDialogButtonBox()
+        btn_ok = buttons.addButton(ok_text, QDialogButtonBox.AcceptRole)
+        btn_cancel = buttons.addButton(cancel_text, QDialogButtonBox.RejectRole)
+
+        btn_ok.setFixedHeight(36)
+        btn_cancel.setFixedHeight(36)
+        btn_ok.setMinimumWidth(110)
+        btn_cancel.setMinimumWidth(110)
+
+        if destructive:
+            btn_ok.setObjectName("DangerButton")
+
+        buttons.accepted.connect(dlg.accept)
+        buttons.rejected.connect(dlg.reject)
+
+        layout.addWidget(buttons)
+
+        return dlg.exec() == QDialog.Accepted
+
     def _init_state(self) -> None:
         # State
         self.current_project_id: int | None = None
@@ -631,7 +953,7 @@ class App(QWidget):
 
         btn_row = QHBoxLayout()
         self.btn_new_project = QPushButton("New project")
-        self.btn_open_project = QPushButton("Open selected")
+        self.btn_open_project = QPushButton("Open project")
         self.btn_refresh_projects = QPushButton("Refresh")
         self.btn_delete_project = QPushButton("Delete selected")
         btn_row.addWidget(self.btn_new_project)
@@ -642,6 +964,7 @@ class App(QWidget):
         self.projects_list = QListWidget()
         self.projects_info = QTextEdit()
         self.projects_info.setReadOnly(True)
+        self.projects_info.setPlaceholderText("Select a project to see details.")
 
         self.lbl_recent = QLabel("Recent datasets:")
         self.recent_list = QListWidget()
@@ -653,9 +976,20 @@ class App(QWidget):
 
         projects_layout.addWidget(self.lbl_active_project)
         projects_layout.addLayout(btn_row)
-        projects_layout.addWidget(QLabel("Projects:"))
-        projects_layout.addWidget(self.projects_list, 2)
-        projects_layout.addWidget(self.projects_info, 1)
+        middle_row = QHBoxLayout()
+
+        left_col = QVBoxLayout()
+        left_col.addWidget(QLabel("Recent Projects:"))
+        left_col.addWidget(self.projects_list, 1)
+
+        right_col = QVBoxLayout()
+        right_col.addWidget(QLabel("Details:"))
+        right_col.addWidget(self.projects_info, 1)
+
+        middle_row.addLayout(left_col, 2)
+        middle_row.addLayout(right_col, 3)
+
+        projects_layout.addLayout(middle_row, 1)
         projects_layout.addWidget(self.lbl_recent)
         projects_layout.addWidget(self.recent_list, 1)
         projects_layout.addLayout(recent_btn_row)
@@ -665,29 +999,69 @@ class App(QWidget):
         explore_layout = QVBoxLayout(explore_container)
 
         self.lbl_project_banner = QLabel("Project: (none)")
-        self.btn_load = QPushButton("Load dataset folder")
+        self.lbl_project_banner.setObjectName("HeaderProjectLabel")
+
+        self.btn_load = QPushButton("Load dataset")
+
         self.lbl_path = QLabel("No dataset loaded")
+        self.lbl_path.setObjectName("HeaderPathLabel")
+        self.lbl_path.setWordWrap(True)
+
         self.lbl_stats = QLabel("")
+        self.lbl_stats.setObjectName("HeaderStatLabel")
+
+        self.lbl_loaded = QLabel("")
+        self.lbl_loaded.setObjectName("HeaderStatLabel")
+
         self.lbl_showing = QLabel("")
+        self.lbl_showing.setObjectName("HeaderStatLabel")
+
         self.lbl_mode = QLabel("")
         self.lbl_mode.hide()
 
         self.lbl_conv_summary = QLabel("")
         self.lbl_conv_summary.hide()
 
-        paging_row = QHBoxLayout()
-        self.lbl_loaded = QLabel("")
         self.btn_load_more = QPushButton("Load next")
         self.btn_load_more.setEnabled(False)
 
-        paging_row.addWidget(self.lbl_loaded)
-        paging_row.addStretch()
-        paging_row.addWidget(QLabel("Page size:"))
         self.cmb_page_size = QComboBox()
         self.cmb_page_size.addItems(["1000", "2000", "5000", "10000"])
         self.cmb_page_size.setCurrentText("2000")
-        paging_row.addWidget(self.cmb_page_size)
-        paging_row.addWidget(self.btn_load_more)
+
+        header_card = QFrame()
+        header_card.setObjectName("ExploreHeaderCard")
+
+        header_layout = QVBoxLayout(header_card)
+        header_layout.setContentsMargins(14, 14, 14, 14)
+        header_layout.setSpacing(10)
+
+        # row 1
+        header_top = QHBoxLayout()
+        header_top.setSpacing(12)
+
+        header_top.addWidget(self.lbl_project_banner)
+        header_top.addStretch()
+        header_top.addWidget(QLabel("Page size:"))
+        header_top.addWidget(self.cmb_page_size)
+        header_top.addWidget(self.btn_load_more)
+        
+        # row 2
+        header_mid = QHBoxLayout()
+        header_mid.setSpacing(8)
+        header_mid.addWidget(self.lbl_path, 1)
+
+        # row 3
+        header_bottom = QHBoxLayout()
+        header_bottom.setSpacing(18)
+        header_bottom.addWidget(self.lbl_stats)
+        header_bottom.addWidget(self.lbl_loaded)
+        header_bottom.addWidget(self.lbl_showing)
+        header_bottom.addStretch()
+
+        header_layout.addLayout(header_top)
+        header_layout.addLayout(header_mid)
+        header_layout.addLayout(header_bottom)
 
         self.search = QLineEdit()
         self.search.setPlaceholderText("Search IP / SNI / app...")
@@ -731,37 +1105,120 @@ class App(QWidget):
         self.box_top_src = QGroupBox("Top source IPs")
         self.box_top_src.setObjectName("SummaryCard")
         box_top_src_layout = QVBoxLayout(self.box_top_src)
-        self.txt_top_src = QTextEdit()
-        self.txt_top_src.setReadOnly(True)
-        self.txt_top_src.setObjectName("SummaryTextBox")
-        box_top_src_layout.addWidget(self.txt_top_src)
+
+        self.txt_top_src_left = QLabel()
+        self.txt_top_src_right = QLabel()
+
+        for w in (self.txt_top_src_left, self.txt_top_src_right):
+            w.setTextInteractionFlags(Qt.TextSelectableByMouse)
+            w.setWordWrap(False)
+            w.setObjectName("SummaryTextBox")
+
+        self.txt_top_src_left.setAlignment(Qt.AlignTop | Qt.AlignLeft)
+        self.txt_top_src_right.setAlignment(Qt.AlignTop | Qt.AlignRight)
+
+        src_grid = QGridLayout()
+        src_grid.setContentsMargins(6, 0, 6, 0)
+        src_grid.setHorizontalSpacing(18)
+        src_grid.setVerticalSpacing(0)
+        src_grid.addWidget(self.txt_top_src_left, 0, 0)
+        src_grid.addWidget(self.txt_top_src_right, 0, 1)
+        src_grid.setColumnStretch(0, 1)
+        src_grid.setColumnStretch(1, 0)
+
+        box_top_src_layout.addLayout(src_grid)
 
         # Top destination IPs
         self.box_top_dst = QGroupBox("Top destination IPs")
         self.box_top_dst.setObjectName("SummaryCard")
         box_top_dst_layout = QVBoxLayout(self.box_top_dst)
-        self.txt_top_dst = QTextEdit()
-        self.txt_top_dst.setReadOnly(True)
-        self.txt_top_dst.setObjectName("SummaryTextBox")
-        box_top_dst_layout.addWidget(self.txt_top_dst)
+
+        self.txt_top_dst_left = QLabel()
+        self.txt_top_dst_right = QLabel()
+
+        for w in (self.txt_top_dst_left, self.txt_top_dst_right):
+            w.setTextInteractionFlags(Qt.TextSelectableByMouse)
+            w.setWordWrap(False)
+            w.setObjectName("SummaryTextBox")
+
+        self.txt_top_dst_left.setAlignment(Qt.AlignTop | Qt.AlignLeft)
+        self.txt_top_dst_right.setAlignment(Qt.AlignTop | Qt.AlignRight)
+
+        dst_grid = QGridLayout()
+        dst_grid.setContentsMargins(6, 0, 6, 0)
+        dst_grid.setHorizontalSpacing(18)
+        dst_grid.setVerticalSpacing(0)
+        dst_grid.addWidget(self.txt_top_dst_left, 0, 0)
+        dst_grid.addWidget(self.txt_top_dst_right, 0, 1)
+        dst_grid.setColumnStretch(0, 1)
+        dst_grid.setColumnStretch(1, 0)
+
+        box_top_dst_layout.addLayout(dst_grid)
 
         # Top protocols
         self.box_top_proto = QGroupBox("Top protocols")
         self.box_top_proto.setObjectName("SummaryCard")
         box_top_proto_layout = QVBoxLayout(self.box_top_proto)
-        self.txt_top_proto = QTextEdit()
-        self.txt_top_proto.setReadOnly(True)
-        self.txt_top_proto.setObjectName("SummaryTextBox")
-        box_top_proto_layout.addWidget(self.txt_top_proto)
+
+        self.txt_top_proto_left = QLabel()
+        self.txt_top_proto_right = QLabel()
+
+        for w in (self.txt_top_proto_left, self.txt_top_proto_right):
+            w.setTextInteractionFlags(Qt.TextSelectableByMouse)
+            w.setWordWrap(False)
+            w.setObjectName("SummaryTextBox")
+
+        self.txt_top_proto_left.setAlignment(Qt.AlignTop | Qt.AlignLeft)
+        self.txt_top_proto_right.setAlignment(Qt.AlignTop | Qt.AlignRight)
+
+        proto_grid = QGridLayout()
+        proto_grid.setContentsMargins(6, 0, 6, 0)
+        proto_grid.setHorizontalSpacing(18)
+        proto_grid.setVerticalSpacing(0)
+        proto_grid.addWidget(self.txt_top_proto_left, 0, 0)
+        proto_grid.addWidget(self.txt_top_proto_right, 0, 1)
+        proto_grid.setColumnStretch(0, 1)
+        proto_grid.setColumnStretch(1, 0)
+
+        box_top_proto_layout.addLayout(proto_grid)
 
         # Top applications
         self.box_top_apps = QGroupBox("Top applications")
         self.box_top_apps.setObjectName("SummaryCard")
         box_top_apps_layout = QVBoxLayout(self.box_top_apps)
-        self.txt_top_apps = QTextEdit()
-        self.txt_top_apps.setReadOnly(True)
-        self.txt_top_apps.setObjectName("SummaryTextBox")
-        box_top_apps_layout.addWidget(self.txt_top_apps)
+
+        self.txt_top_apps_left = QLabel()
+        self.txt_top_apps_right = QLabel()
+
+        for w in (self.txt_top_apps_left, self.txt_top_apps_right):
+            w.setTextInteractionFlags(Qt.TextSelectableByMouse)
+            w.setWordWrap(False)
+            w.setObjectName("SummaryTextBox")
+
+        self.txt_top_apps_left.setAlignment(Qt.AlignTop | Qt.AlignLeft)
+        self.txt_top_apps_right.setAlignment(Qt.AlignTop | Qt.AlignRight)
+
+        apps_grid = QGridLayout()
+        apps_grid.setContentsMargins(6, 0, 6, 0)
+        apps_grid.setHorizontalSpacing(18)
+        apps_grid.setVerticalSpacing(0)
+        apps_grid.addWidget(self.txt_top_apps_left, 0, 0)
+        apps_grid.addWidget(self.txt_top_apps_right, 0, 1)
+        apps_grid.setColumnStretch(0, 1)
+        apps_grid.setColumnStretch(1, 0)
+
+        box_top_apps_layout.addLayout(apps_grid)
+
+        summary_font = QFont("Consolas", 10)
+        summary_font.setStyleHint(QFont.Monospace)
+
+        for w in (
+            self.txt_top_src_left, self.txt_top_src_right,
+            self.txt_top_dst_left, self.txt_top_dst_right,
+            self.txt_top_proto_left, self.txt_top_proto_right,
+            self.txt_top_apps_left, self.txt_top_apps_right,
+        ):
+            w.setFont(summary_font)
 
         dataset_grid.addWidget(self.box_top_src, 0, 0)
         dataset_grid.addWidget(self.box_top_dst, 0, 1)
@@ -821,12 +1278,10 @@ class App(QWidget):
         right_actions = QHBoxLayout()
         right_actions.setSpacing(8)
 
-        self.btn_copy_src = QPushButton("Copy source IP")
-        self.btn_copy_dst = QPushButton("Copy destination IP")
-        self.btn_copy_sni = QPushButton("Copy SNI")
-
         self.btn_filter_src = QPushButton("Filter source")
         self.btn_filter_dst = QPushButton("Filter destination")
+        self.btn_filter_sni = QPushButton("Filter SNI")
+        self.btn_load.setFixedHeight(34)
 
         self.btn_toggle_conv = QPushButton("Conversation: OFF")
         self.btn_expand_flows = QPushButton("Expand Flows")
@@ -834,20 +1289,19 @@ class App(QWidget):
         self.btn_ai_explain = QPushButton("Explain with AI")
 
         for b in (
-            self.btn_copy_src, self.btn_copy_dst, self.btn_copy_sni,
             self.btn_filter_src, self.btn_filter_dst,
+            self.btn_filter_sni,
             self.btn_toggle_conv, self.btn_expand_flows,
             self.btn_mark_finding, self.btn_ai_explain
         ):
             b.setFixedHeight(34)
             b.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
-
-        left_actions.addWidget(self.btn_copy_src)
-        left_actions.addWidget(self.btn_copy_dst)
-        left_actions.addWidget(self.btn_copy_sni)
+        
         left_actions.addSpacing(6)
+        left_actions.addWidget(self.btn_load)
         left_actions.addWidget(self.btn_filter_src)
         left_actions.addWidget(self.btn_filter_dst)
+        left_actions.addWidget(self.btn_filter_sni)
 
         right_actions.addWidget(self.btn_toggle_conv)
         right_actions.addWidget(self.btn_expand_flows)
@@ -861,7 +1315,7 @@ class App(QWidget):
         flows_tab_layout.addWidget(toolbar_wrap)
         self.splitter = QSplitter(Qt.Horizontal)
 
-        self.table = QTableView()
+        self.table = FlowTableView(self)
         self.table.setSortingEnabled(True)
         self.table.setAlternatingRowColors(True)
         self.table.setSelectionBehavior(QTableView.SelectRows)
@@ -871,7 +1325,7 @@ class App(QWidget):
         self.table.setCornerButtonEnabled(False)
         self.table.setEditTriggers(QTableView.NoEditTriggers)
         self.table.setFocusPolicy(Qt.StrongFocus)
-
+        
         self.table.verticalHeader().setVisible(False)
         self.table.verticalHeader().setDefaultSectionSize(34)
 
@@ -1033,12 +1487,7 @@ class App(QWidget):
         self.tabs.addTab(notes_tab, "Notes")
 
         # Explore layout
-        explore_layout.addWidget(self.lbl_project_banner)
-        explore_layout.addWidget(self.btn_load)
-        explore_layout.addWidget(self.lbl_path)
-        explore_layout.addWidget(self.lbl_stats)
-        explore_layout.addLayout(paging_row)
-        explore_layout.addWidget(self.lbl_showing)
+        explore_layout.addWidget(header_card)
         explore_layout.addWidget(self.lbl_mode)
         explore_layout.addWidget(self.lbl_conv_summary)
         explore_layout.addWidget(self.search)
@@ -1065,6 +1514,16 @@ class App(QWidget):
         self.lbl_signature.setObjectName("Signature")
         footer.addWidget(self.lbl_signature)
         outer.addLayout(footer)
+
+    def _split_ranked_lines(self, items):
+        left_lines = []
+        right_lines = []
+
+        for i, (name, count) in enumerate(items, start=1):
+            left_lines.append(f"{i}. {name}")
+            right_lines.append(str(count))
+
+        return "\n".join(left_lines), "\n".join(right_lines)
         
     def _set_active_nav(self, active: QPushButton):
         for b in (self._nav_projects, self._nav_explore, self._nav_registry):
@@ -1171,20 +1630,24 @@ class App(QWidget):
     def refresh_projects(self):
         self.projects_list.clear()
         projects = list_projects()
+
         for p in projects:
-            item = QListWidgetItem(f"{p.name} (id={p.id})")
+            item = QListWidgetItem(p.name)
             item.setData(Qt.UserRole, p.id)
             self.projects_list.addItem(item)
 
+        self.projects_info.setText("Select a project to see details.")
+        self.recent_list.clear()
+
     def create_project_dialog(self):
-        name, ok = QInputDialog.getText(self, "New project", "Project name:")
+        name, ok = self._text_input_dialog("New project", "Project name:", width=420)
         if not ok:
             return
         name = (name or "").strip()
         if not name:
             return
 
-        desc, ok2 = QInputDialog.getMultiLineText(self, "New project", "Description (optional):")
+        desc, ok2 = self._multiline_input_dialog("New project", "Description (optional):", width=460, height=260)
         if not ok2:
             desc = ""
 
@@ -1194,7 +1657,7 @@ class App(QWidget):
         try:
             pid = create_project(name=name, description=desc, base_folder=base)
         except Exception as e:
-            QMessageBox.critical(self, "Error", str(e))
+            self._message_dialog("Error", "Project creation failed.", str(e), width=440)
             return
 
         self.set_active_project(pid)
@@ -1203,10 +1666,23 @@ class App(QWidget):
         self.refresh_findings_ui()
         self.refresh_notes_ui()
 
+        should_open = self._confirm_dialog(
+            title="Open dataset",
+            message="Project created successfully.",
+            details="Do you want to open a dataset now?",
+            ok_text="Yes",
+            cancel_text="No",
+            width=420,
+        )
+
+        if should_open:
+            self.load_dataset_dialog()
+            self.go_page(self.IDX_EXPLORE, self._nav_explore)
+
     def on_project_selected_preview(self):
         item = self.projects_list.currentItem()
         if not item:
-            self.projects_info.setText("")
+            self.projects_info.setText("Select a project to see details.")
             self.recent_list.clear()
             return
 
@@ -1242,34 +1718,33 @@ class App(QWidget):
         project_id = int(item.data(Qt.UserRole))
         project = get_project(project_id)
         if not project:
-            QMessageBox.warning(self, "Delete project", "Project not found.")
+            self._message_dialog("Delete project", "Project not found.", width=400)
             return
 
-        msg = QMessageBox(self)
-        msg.setIcon(QMessageBox.Warning)
-        msg.setWindowTitle("Delete project")
-        msg.setText("Delete selected project?")
-        msg.setInformativeText(
-            f"{project.name} (id={project.id})\n\n"
-            "This will permanently delete:\n"
-            "• project\n"
-            "• loaded datasets\n"
-            "• findings\n"
-            "• activity log"
+        confirmed = self._confirm_dialog(
+            title="Delete project",
+            message="Delete selected project?",
+            details=(
+                f"{project.name} (id={project.id})\n\n"
+                "This will permanently delete:\n"
+                "• project\n"
+                "• loaded datasets\n"
+                "• findings\n"
+                "• activity log"
+            ),
+            ok_text="Delete",
+            cancel_text="Cancel",
+            width=430,
+            destructive=True,
         )
 
-        btn_delete = msg.addButton("Delete", QMessageBox.DestructiveRole)
-        msg.addButton(QMessageBox.Cancel)
-        msg.setDefaultButton(QMessageBox.Cancel)
-
-        msg.exec()
-        if msg.clickedButton() != btn_delete:
+        if not confirmed:
             return
 
         try:
             delete_project(project_id)
         except Exception as e:
-            QMessageBox.critical(self, "Delete project failed", str(e))
+            self._message_dialog("Delete project failed", str(e), width=440)
             return
 
         if self.current_project_id == project_id:
@@ -1285,10 +1760,17 @@ class App(QWidget):
             # reset dataset UI
             self.lbl_path.setText("No dataset loaded")
             self.lbl_stats.setText("")
-            self.txt_top_src.setPlainText("No flows loaded.")
-            self.txt_top_dst.setPlainText("No flows loaded.")
-            self.txt_top_proto.setPlainText("No flows loaded.")
-            self.txt_top_apps.setPlainText("No flows loaded.")
+            self.txt_top_src_left.setText("No flows loaded.")
+            self.txt_top_src_right.setText("")
+
+            self.txt_top_dst_left.setText("No flows loaded.")
+            self.txt_top_dst_right.setText("")
+
+            self.txt_top_proto_left.setText("No flows loaded.")
+            self.txt_top_proto_right.setText("")
+
+            self.txt_top_apps_left.setText("No flows loaded.")
+            self.txt_top_apps_right.setText("")
             self.txt_ai_summary.clear()
 
             self.flows = []
@@ -1316,14 +1798,14 @@ class App(QWidget):
     def set_active_project(self, project_id: int):
         p = get_project(project_id)
         if not p:
-            QMessageBox.warning(self, "Project", "Project not found.")
+            self._message_dialog("Project", "Project not found.", width=400)
             return
 
         self.current_project_id = p.id
         self.current_project_name = p.name
 
-        self.lbl_active_project.setText(f"Active project: {p.name} (id={p.id})")
-        self.lbl_project_banner.setText(f"Project: {p.name} (id={p.id})")
+        self.lbl_active_project.setText(f"Active project: {p.name}")
+        self.lbl_project_banner.setText(f"Project: {p.name}")
 
         self.refresh_recent_datasets(p.id)
         self.refresh_findings_ui()
@@ -1332,35 +1814,79 @@ class App(QWidget):
     def refresh_recent_datasets(self, project_id: int):
         self.recent_list.clear()
         paths = list_recent_datasets(project_id, limit=15)
+
         if not paths:
             self.recent_list.addItem(QListWidgetItem("(no datasets yet)"))
             return
+
         for fp in paths:
-            item = QListWidgetItem(fp)
-            item.setData(Qt.UserRole, fp)
+            p = Path(str(fp))
+
+            if p.is_file():
+                label = f"[FILE] {p.name}"
+            elif p.is_dir():
+                label = f"[FOLDER] {p.name}"
+            else:
+                label = f"[MISSING] {p.name or str(fp)}"
+
+            item = QListWidgetItem(label)
+            item.setToolTip(str(fp))
+            item.setData(Qt.UserRole, str(fp))
             self.recent_list.addItem(item)
 
     def open_selected_dataset(self):
         item = self.recent_list.currentItem()
         if not item:
             return
+
         fp = item.data(Qt.UserRole)
         if not fp or str(fp).startswith("("):
             return
-        self.load_dataset_path(str(fp))
+
+        p = Path(str(fp))
+
+        if p.is_file():
+            self.load_dataset_file(str(p))
+        elif p.is_dir():
+            self.load_dataset_path(str(p))
+        else:
+            self._message_dialog("Dataset", "Path not found.", str(p), width=460)
+            return
+
         self.go_page(self.IDX_EXPLORE, self._nav_explore)
 
     # ---------- Explore ----------
     def load_dataset_dialog(self):
-        folder = QFileDialog.getExistingDirectory(self, "Select dataset folder")
-        if not folder:
+        choice = self._choice_dialog(
+            title="Open dataset",
+            message="What do you want to open?",
+            choices=["Folder", "JSON file"],
+            width=420,
+        )
+
+        if choice == "Folder":
+            folder = QFileDialog.getExistingDirectory(self, "Select dataset folder")
+            if not folder:
+                return
+            self.load_dataset_path(folder)
             return
-        self.load_dataset_path(folder)
+
+        if choice == "JSON file":
+            file_path, _ = QFileDialog.getOpenFileName(
+                self,
+                "Select JSON file",
+                "",
+                "JSON files (*.json)"
+            )
+            if not file_path:
+                return
+            self.load_dataset_file(file_path)
+            return
 
     def load_dataset_path(self, folder: str):
         folder = str(folder)
         if not Path(folder).exists():
-            QMessageBox.warning(self, "Dataset", f"Folder not found:\n{folder}")
+            self._message_dialog("Dataset", "Folder not found.", folder, width=480)
             return
 
         previous_flows = []
@@ -1398,7 +1924,7 @@ class App(QWidget):
             self.registry_page.set_dataset(folder, files, flows, compare_result=compare_result)
 
         self.lbl_path.setText(f"Dataset: {folder}")
-        self.lbl_stats.setText(f"JSON files: {len(files)}\nTotal flow records: {len(flows)}")
+        self.lbl_stats.setText(f"JSON files: {len(files)}   |   Total flow records: {len(flows)}")
 
         if self.current_project_id is not None:
             add_dataset_load(self.current_project_id, folder)
@@ -1422,43 +1948,120 @@ class App(QWidget):
         self.btn_expand_flows.setText("Expand Flows")
         self.splitter.setSizes([920, 420])
         self.update_detail(None)
+
+    def load_dataset_file(self, file_path: str):
+        file_path = str(file_path)
+        fp = Path(file_path)
+
+        if not fp.exists() or not fp.is_file():
+            self._message_dialog("Dataset", "File not found.", file_path, width=480)
+            return
+
+        previous_flows = []
+
+        if self.current_project_id is not None:
+            recent = list_recent_datasets(self.current_project_id, limit=2)
+
+            if len(recent) >= 1:
+                prev_path = recent[0]
+
+                if str(prev_path) != str(file_path):
+                    try:
+                        prev_fp = Path(prev_path)
+                        if prev_fp.is_file():
+                            previous_flows = load_json_file(prev_fp, debug=False)
+                        elif prev_fp.is_dir():
+                            _, previous_flows = load_folder(prev_fp, debug=False)
+                    except Exception:
+                        previous_flows = []
+
+        self.current_folder = fp.parent
+        flows = load_json_file(fp, debug=False)
+        files = [fp]
+        self.flows = flows
+
+        from core.compare import compare_flows, summarize_new_flows
+
+        compare_result = None
+        if previous_flows:
+            compare_result = compare_flows(self.flows, previous_flows)
+
+        if compare_result:
+            summary_new = summarize_new_flows(compare_result["new"])
+            compare_result["summary_new"] = summary_new
+
+        if hasattr(self, "registry_page"):
+            self.registry_page.set_dataset(str(fp), files, flows, compare_result=compare_result)
+
+        self.lbl_path.setText(f"Dataset file: {file_path}")
+        self.lbl_stats.setText(f"JSON files: 1   |   Total flow records: {len(flows)}")
+
+        if self.current_project_id is not None:
+            add_dataset_load(self.current_project_id, file_path)
+            self.refresh_recent_datasets(self.current_project_id)
+            self.refresh_activity_ui()
+
+        self.render_summary()
+
+        self.loaded_flows = self.flows[: min(len(self.flows), self.PAGE_SIZE)]
+        self.model.set_flows(self.loaded_flows)
+
+        self.search.setText("")
+        self.leave_conversation(clear_search=False)
+
+        self.update_loaded_label()
+        self.update_load_more_enabled()
+
+        self.tabs.setCurrentIndex(1)
+        self._flows_expanded = False
+        self.details_panel.show()
+        self.btn_expand_flows.setText("Expand Flows")
+        self.splitter.setSizes([920, 420])
+        self.update_detail(None)
         
     def render_summary(self):
         if not self.flows:
-            self.txt_top_src.setPlainText("No flows loaded.")
-            self.txt_top_dst.setPlainText("No flows loaded.")
-            self.txt_top_proto.setPlainText("No flows loaded.")
-            self.txt_top_apps.setPlainText("No flows loaded.")
+            self.txt_top_src_left.setText("No flows loaded.")
+            self.txt_top_src_right.setText("")
+
+            self.txt_top_dst_left.setText("No flows loaded.")
+            self.txt_top_dst_right.setText("")
+
+            self.txt_top_proto_left.setText("No flows loaded.")
+            self.txt_top_proto_right.setText("")
+
+            self.txt_top_apps_left.setText("No flows loaded.")
+            self.txt_top_apps_right.setText("")
             return
 
-        src_lines = []
-        for ip, c in top_src_ips(self.flows, limit=10):
-            src_lines.append(f"{ip:<18} {c:>5}")
+        src_items = top_src_ips(self.flows, limit=5)
+        dst_items = top_dst_ips(self.flows, limit=5)
+        proto_items = [(format_ip_proto(proto), c) for proto, c in top_protocols(self.flows, limit=5)]
+        app_items = top_applications(self.flows, limit=5)
 
-        dst_lines = []
-        for ip, c in top_dst_ips(self.flows, limit=10):
-            dst_lines.append(f"{ip:<18} {c:>5}")
+        left, right = self._split_ranked_lines(src_items)
+        self.txt_top_src_left.setText(left)
+        self.txt_top_src_right.setText(right)
 
-        proto_lines = []
-        for proto, c in top_protocols(self.flows, limit=10):
-            proto_lines.append(f"{format_ip_proto(proto):<18} {c:>5}")
+        left, right = self._split_ranked_lines(dst_items)
+        self.txt_top_dst_left.setText(left)
+        self.txt_top_dst_right.setText(right)
 
-        app_lines = []
-        for app, c in top_applications(self.flows, limit=10):
-            app_lines.append(f"{app:<28} {c:>5}")
+        left, right = self._split_ranked_lines(proto_items)
+        self.txt_top_proto_left.setText(left)
+        self.txt_top_proto_right.setText(right)
 
-        self.txt_top_src.setPlainText("\n".join(src_lines))
-        self.txt_top_dst.setPlainText("\n".join(dst_lines))
-        self.txt_top_proto.setPlainText("\n".join(proto_lines))
-        self.txt_top_apps.setPlainText("\n".join(app_lines))
+        left, right = self._split_ranked_lines(app_items)
+        self.txt_top_apps_left.setText(left)
+        self.txt_top_apps_right.setText(right)
 
     def generate_ai_summary(self):
         if not self.flows:
-            QMessageBox.information(self, "AI Assistant", "Load a dataset first.")
+            self._message_dialog("AI Assistant", "Load a dataset first.", width=400)
             return
 
         if self._ai_thread is not None:
-            QMessageBox.information(self, "AI Assistant", "AI summary is already running.")
+            self._message_dialog("AI Assistant", "AI summary is already running.", width=420)
             return
 
         self.btn_ai_summary.setEnabled(False)
@@ -1491,11 +2094,11 @@ class App(QWidget):
 
     def explain_selected_flow(self):
         if not self._current_flow:
-            QMessageBox.information(self, "AI Assistant", "Select a flow first.")
+            self._message_dialog("AI Assistant", "Select a flow first.", width=400)
             return
 
         if self._ai_thread is not None:
-            QMessageBox.information(self, "AI Assistant", "Another AI task is already running.")
+            self._message_dialog("AI Assistant", "Another AI task is already running.", width=430)
             return
 
         self._ai_mode = "flow"
@@ -1610,7 +2213,7 @@ class App(QWidget):
             return
 
         if not self._current_flow:
-            QMessageBox.information(self, "Conversation", "Select a flow first (Flows tab).")
+            self._message_dialog("Conversation", "Select a flow first (Flows tab).", width=420)
             return
 
         src = self.current_value("src_ip")
@@ -1639,6 +2242,37 @@ class App(QWidget):
             self.lbl_mode.clear()
             self.lbl_mode.hide()
 
+    def copy_selected_cell_value(self):
+        index = self.table.currentIndex()
+        if not index.isValid():
+            return
+
+        value = self.proxy.data(index, Qt.DisplayRole)
+        if value is None:
+            return
+
+        self.copy_text(str(value))
+
+    def copy_current_flow_multiline(self):
+        if not self._current_flow:
+            return
+
+        flow = self._current_flow
+
+        lines = [
+            f"Source IP: {flow.get('src_ip', '')}",
+            f"Source Port: {flow.get('src_port', '')}",
+            f"Destination IP: {flow.get('dst_ip', '')}",
+            f"Destination Port: {flow.get('dst_port', '')}",
+            f"Protocol: {format_ip_proto(flow.get('protocol', ''))}",
+            f"Application: {flow.get('application_name', '')}",
+            f"Bytes: {flow.get('bidirectional_bytes', '')}",
+            f"Duration(ms): {flow.get('bidirectional_duration_ms', '')}",
+            f"SNI: {flow.get('requested_server_name', '')}",
+        ]
+
+        self.copy_text("\n".join(lines))
+
     # ---------- Findings ----------
     def selected_finding_id(self) -> int | None:
         return self.findings_page.selected_finding_id()
@@ -1659,21 +2293,21 @@ class App(QWidget):
 
     def mark_as_finding(self):
         if self.current_project_id is None:
-            QMessageBox.warning(self, "Findings", "Select an active project first (Projects -> Open).")
+            self._message_dialog("Findings", "Select an active project first (Projects -> Open).", width=460)
             return
         if not self._current_flow:
-            QMessageBox.warning(self, "Findings", "Select a flow first.")
+            self._message_dialog("Findings", "Select a flow first.", width=400)
             return
 
         default_title = f"{self.current_value('src_ip')} -> {self.current_value('dst_ip')} ({self.current_value('application_name')})"
-        title, ok = QInputDialog.getText(self, "New finding", "Title:", text=default_title)
+        title, ok = self._text_input_dialog("New finding", "Title:", text=default_title, width=480)
         if not ok:
             return
         title = (title or "").strip()
         if not title:
             return
 
-        note, ok2 = QInputDialog.getMultiLineText(self, "New finding", "Note (optional):")
+        note, ok2 = self._multiline_input_dialog("New finding", "Note (optional):", width=480, height=260)
         if not ok2:
             note = ""
 
@@ -1681,7 +2315,7 @@ class App(QWidget):
             add_finding(self.current_project_id, self._current_flow, title=title, note=note)
             add_activity(self.current_project_id, "finding_created", title)
         except Exception as e:
-            QMessageBox.critical(self, "Findings", str(e))
+            self._message_dialog("Findings", "Failed to create finding.", str(e), width=460)
             return
 
         self.refresh_findings_ui()
@@ -1772,11 +2406,11 @@ class App(QWidget):
     def explain_selected_finding(self):
         fid, row = self._get_selected_finding_row()
         if fid is None or row is None:
-            QMessageBox.information(self, "AI Assistant", "Select a finding first.")
+            self._message_dialog("AI Assistant", "Select a finding first.", width=400)
             return
 
         if self._ai_thread is not None:
-            QMessageBox.information(self, "AI Assistant", "Another AI task is already running.")
+            self._message_dialog("AI Assistant", "Another AI task is already running.", width=430)
             return
 
         self._ai_mode = "finding"
@@ -1823,25 +2457,32 @@ class App(QWidget):
         if fid is None or row is None:
             return
 
-        title, ok = QInputDialog.getText(self, "Edit finding", "Title:", text=row["title"] or "")
+        title, ok = self._text_input_dialog("Edit finding", "Title:", text=row["title"] or "", width=480)
         if not ok:
             return
         title = (title or "").strip()
         if not title:
             return
 
-        note, ok2 = QInputDialog.getMultiLineText(self, "Edit finding", "Note:", text=row["note"] or "")
+        note, ok2 = self._multiline_input_dialog("Edit finding", "Note:", text=row["note"] or "", width=480, height=260)
         if not ok2:
             return
 
         statuses = ["New", "Investigating", "Confirmed", "False Positive"]
         cur = row["status"] if row["status"] in statuses else "New"
         idx = statuses.index(cur)
-        status, ok3 = QInputDialog.getItem(self, "Edit finding", "Status:", statuses, idx, False)
+
+        status, ok3 = self._item_choice_dialog(
+            "Edit finding",
+            "Status:",
+            statuses,
+            current_index=idx,
+            width=420,
+        )
         if not ok3:
             return
 
-        tags, ok4 = QInputDialog.getText(self, "Edit finding", "Tags (comma-separated):", text=row["tags"] or "")
+        tags, ok4 = self._text_input_dialog("Edit finding", "Tags (comma-separated):", text=row["tags"] or "", width=440)
         if not ok4:
             return
 
@@ -1852,7 +2493,7 @@ class App(QWidget):
             if self.current_project_id:
                 add_activity(self.current_project_id, "finding_updated", f"#{fid} {title}")
         except Exception as e:
-            QMessageBox.critical(self, "Findings", str(e))
+            self._message_dialog("Findings", "Failed to update finding.", str(e), width=460)
             return
 
         self.refresh_findings_ui()
@@ -1868,18 +2509,17 @@ class App(QWidget):
         src = f"{row['src_ip']}:{row['src_port'] or ''}"
         dst = f"{row['dst_ip']}:{row['dst_port'] or ''}"
 
-        msg = QMessageBox(self)
-        msg.setIcon(QMessageBox.Warning)
-        msg.setWindowTitle("Delete finding")
-        msg.setText("Delete selected finding?")
-        msg.setInformativeText(f"{title}\n{src} -> {dst}")
+        confirmed = self._confirm_dialog(
+            title="Delete finding",
+            message="Delete selected finding?",
+            details=f"{title}\n{src} -> {dst}",
+            ok_text="Delete",
+            cancel_text="Cancel",
+            width=430,
+            destructive=True,
+        )
 
-        btn_delete = msg.addButton("Delete", QMessageBox.DestructiveRole)
-        msg.addButton(QMessageBox.Cancel)
-        msg.setDefaultButton(QMessageBox.Cancel)
-
-        msg.exec()
-        if msg.clickedButton() != btn_delete:
+        if not confirmed:
             return
 
         try:
@@ -1887,7 +2527,7 @@ class App(QWidget):
             if self.current_project_id:
                 add_activity(self.current_project_id, "finding_deleted", f"#{fid} {title}")
         except Exception as e:
-            QMessageBox.critical(self, "Findings", str(e))
+            self._message_dialog("Findings", "Failed to delete finding.", str(e), width=460)
             return
 
         self.refresh_findings_ui()
@@ -1949,7 +2589,7 @@ class App(QWidget):
                 if self.current_project_id:
                     add_activity(self.current_project_id, "finding_status", f"#{fid} -> {new_status}")
             except Exception as e:
-                QMessageBox.critical(self, "Findings", str(e))
+                self._message_dialog("Findings", "Failed to update finding status.", str(e), width=460)
                 return
 
             self.refresh_findings_ui()
@@ -1970,12 +2610,12 @@ class App(QWidget):
 
     def add_ai_summary_to_notes(self):
         if self.current_project_id is None:
-            QMessageBox.information(self, "Notes", "Open an active project first.")
+            self._message_dialog("Notes", "Open an active project first.", width=420)
             return
 
         text = (self.txt_ai_summary.toPlainText() or "").strip()
         if not text:
-            QMessageBox.information(self, "Notes", "There is no AI-generated text to add.")
+            self._message_dialog("Notes", "There is no AI-generated text to add.", width=440)
             return
 
         block = self._make_ai_note_block(text)

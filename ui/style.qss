@@ -414,3 +414,122 @@ QCheckBox::indicator:unchecked {
     border-radius: 4px;
     background: #1f2937;
 }
+
+QFrame#ExploreHeaderCard {
+    background: #22324a;
+    border: 1px solid #3c4f6b;
+    border-radius: 14px;
+}
+
+QLabel#HeaderProjectLabel {
+    font-size: 18px;
+    font-weight: 600;
+    color: #f4f7fb;
+}
+
+QLabel#HeaderPathLabel {
+    font-size: 14px;
+    color: #d7e3f4;
+}
+
+QLabel#HeaderStatLabel {
+    font-size: 13px;
+    color: #c6d4e8;
+}
+
+/* =========================
+   DIALOGS
+   ========================= */
+
+QDialog {
+    background: #1f2937;
+    color: #e5e7eb;
+}
+
+QMessageBox {
+    background: #1f2937;
+}
+
+QMessageBox QLabel {
+    color: #e5e7eb;
+    font-size: 14px;
+    min-width: 320px;
+}
+
+QMessageBox QPushButton {
+    min-width: 88px;
+    min-height: 36px;
+    padding: 8px 14px;
+}
+
+QInputDialog {
+    background: #1f2937;
+}
+
+QInputDialog QLabel {
+    color: #e5e7eb;
+    font-size: 14px;
+    min-width: 120px;
+}
+
+QInputDialog QLineEdit {
+    min-width: 260px;
+    min-height: 36px;
+    padding: 8px 10px;
+}
+
+QInputDialog QTextEdit,
+QInputDialog QPlainTextEdit {
+    min-width: 320px;
+    min-height: 120px;
+    padding: 8px 10px;
+}
+
+QInputDialog QPushButton {
+    min-width: 88px;
+    min-height: 36px;
+    padding: 8px 14px;
+}
+
+QFileDialog {
+    background: #1f2937;
+    color: #e5e7eb;
+}
+
+QPushButton#DangerButton {
+    background: #b91c1c;
+    border: 1px solid #b91c1c;
+    color: white;
+    font-weight: 600;
+}
+
+QPushButton#DangerButton:hover {
+    background: #dc2626;
+    border: 1px solid #dc2626;
+}
+
+QPushButton#DangerButton:pressed {
+    background: #991b1b;
+    border: 1px solid #991b1b;
+}
+
+QDialog QLabel {
+    background: transparent;
+    color: #e5e7eb;
+    font-size: 14px;
+}
+
+QDialog QLineEdit,
+QDialog QPlainTextEdit,
+QDialog QComboBox {
+    background: #273549;
+    border: 1px solid #475569;
+    border-radius: 10px;
+    padding: 8px 10px;
+    color: #e5e7eb;
+}
+
+QDialog QPushButton {
+    min-width: 110px;
+    min-height: 36px;
+}
