@@ -533,3 +533,21 @@ QDialog QPushButton {
     min-width: 110px;
     min-height: 36px;
 }
+
+/* ---------- Listing header card ---------- */
+#ListingHeaderCard {
+    background: #1f2937;   /* isti dark card kao ostatak appa */
+    border: 1px solid #374151;
+    border-radius: 12px;
+}
+
+/* tekst unutar listinga */
+#ListingHeaderCard QLabel {
+    color: #e5e7eb;
+    font-size: 13px;
+}
+
+/* naslov Listing */
+QLabel {
+    color: #f9fafb;
+}

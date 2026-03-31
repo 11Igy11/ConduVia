@@ -2,6 +2,7 @@ import sys
 from core.ai.assistant_service import AIAssistantService
 import ipaddress
 from ui.registry_page import RegistryPage
+from ui.listing_page import ListingPage
 import html
 from datetime import datetime
 from pathlib import Path
@@ -465,19 +466,22 @@ class App(QWidget):
         self.btn_nav_projects = QPushButton("Projects")
         self.btn_nav_explore = QPushButton("Explore")
         self.btn_nav_registry = QPushButton("Registry")
+        self.btn_nav_listing = QPushButton("Listing")
 
-        for b in (self.btn_nav_projects, self.btn_nav_explore, self.btn_nav_registry):
+        for b in (self.btn_nav_projects, self.btn_nav_explore, self.btn_nav_registry, self.btn_nav_listing):
             b.setObjectName("NavButton")
             b.setFixedHeight(40)
 
-                # aktivni button reference (za highlight)
+        # activ button reference (for highlight)
         self._nav_projects = self.btn_nav_projects
         self._nav_explore = self.btn_nav_explore
         self._nav_registry = self.btn_nav_registry
+        self._nav_listing = self.btn_nav_listing
 
         sidebar.addWidget(self.btn_nav_projects)
         sidebar.addWidget(self.btn_nav_explore)
         sidebar.addWidget(self.btn_nav_registry)
+        sidebar.addWidget(self.btn_nav_listing)
         sidebar.addStretch()
 
         return sidebar
@@ -486,6 +490,7 @@ class App(QWidget):
         self.btn_nav_projects.clicked.connect(lambda: self.go_page(self.IDX_PROJECTS, self._nav_projects))
         self.btn_nav_explore.clicked.connect(lambda: self.go_page(self.IDX_EXPLORE, self._nav_explore))
         self.btn_nav_registry.clicked.connect(lambda: self.go_page(self.IDX_REGISTRY, self._nav_registry))
+        self.btn_nav_listing.clicked.connect(lambda: self.go_page(self.IDX_LISTING, self._nav_listing))
 
     def _wire_ui(self) -> None:
         # 1) sidebar navigation
@@ -944,6 +949,7 @@ class App(QWidget):
         self.IDX_PROJECTS = 0
         self.IDX_EXPLORE = 1
         self.IDX_REGISTRY = 2
+        self.IDX_LISTING = 3
 
         # -------- Projects page --------
         projects_page = QWidget()
@@ -1500,6 +1506,9 @@ class App(QWidget):
         self.registry_page = RegistryPage()
         self.pages.addWidget(self.registry_page)
 
+        self.listing_page = ListingPage()
+        self.pages.addWidget(self.listing_page)
+
         self.pages.setCurrentIndex(self.IDX_PROJECTS)
         self._set_active_nav(self._nav_projects)
 
@@ -1526,7 +1535,7 @@ class App(QWidget):
         return "\n".join(left_lines), "\n".join(right_lines)
         
     def _set_active_nav(self, active: QPushButton):
-        for b in (self._nav_projects, self._nav_explore, self._nav_registry):
+        for b in (self._nav_projects, self._nav_explore, self._nav_registry, self._nav_listing):
             b.setProperty("active", b is active)
             b.style().unpolish(b)
             b.style().polish(b)
@@ -1923,6 +1932,9 @@ class App(QWidget):
         if hasattr(self, "registry_page"):
             self.registry_page.set_dataset(folder, files, flows, compare_result=compare_result)
 
+        if hasattr(self, "listing_page"):
+            self.listing_page.set_dataset(folder, files, flows, compare_result=compare_result)
+
         self.lbl_path.setText(f"Dataset: {folder}")
         self.lbl_stats.setText(f"JSON files: {len(files)}   |   Total flow records: {len(flows)}")
 
@@ -1992,6 +2004,9 @@ class App(QWidget):
 
         if hasattr(self, "registry_page"):
             self.registry_page.set_dataset(str(fp), files, flows, compare_result=compare_result)
+
+        if hasattr(self, "listing_page"):
+            self.listing_page.set_dataset(str(fp), files, flows, compare_result=compare_result)
 
         self.lbl_path.setText(f"Dataset file: {file_path}")
         self.lbl_stats.setText(f"JSON files: 1   |   Total flow records: {len(flows)}")
