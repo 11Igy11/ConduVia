@@ -692,7 +692,7 @@ class ListingPage(QWidget):
         layout.addWidget(lbl)
 
         btn_csv = QPushButton("CSV")
-        btn_excel = QPushButton("Excel (.xlsx)")
+        btn_excel = QPushButton("Excel")
         btn_html = QPushButton("HTML")
 
         result = {"value": None}
