@@ -14,12 +14,15 @@ class FlowController:
 
     def get_loaded(self):
         return self.loaded_flows
+    
+    def get_all(self):
+        return self.flows
 
     def get_total_count(self):
         return len(self.flows)
 
     def get_loaded_count(self):
-        return len(self.loaded_flows)
+        return len(self.loaded_flows)    
 
     # ---------- paging ----------
     def load_next_page(self):

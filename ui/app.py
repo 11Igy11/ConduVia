@@ -523,10 +523,8 @@ class App(QWidget):
         # State
         self.current_project_id: int | None = None
         self.current_project_name: str = ""
-        self.current_folder: Path | None = None
-
-        self.flows: list[dict[str, Any]] = []          # all flows in memory (for now)
-        self.loaded_flows: list[dict[str, Any]] = []   # currently shown in table
+        self.current_folder: Path | None = None        
+        
         self._current_flow: dict[str, Any] | None = None
         self._conversation_on = False
         self._flows_expanded = False
@@ -1235,7 +1233,7 @@ class App(QWidget):
         self.update_showing()
 
     def on_table_scrolled(self, value: int):
-        if not self.flows:
+        if self.flow_controller.get_total_count() == 0:
             return
         if self._conversation_on:
             return
@@ -1243,7 +1241,7 @@ class App(QWidget):
         if bar.maximum() <= 0:
             return
         if value >= int(bar.maximum() * 0.92):
-            if len(self.loaded_flows) < len(self.flows):
+            if self.flow_controller.get_loaded_count() < self.flow_controller.get_total_count():
                 self.load_next_page()
 
     # ---------- Projects ----------
@@ -1391,10 +1389,8 @@ class App(QWidget):
 
             self.txt_top_apps_left.setText("No flows loaded.")
             self.txt_top_apps_right.setText("")
-            self.txt_ai_summary.clear()
-
-            self.flows = []
-            self.loaded_flows = []
+            self.txt_ai_summary.clear()            
+            
             self.model.set_flows([])
             self.leave_conversation(clear_search=True)
             self.update_loaded_label()
@@ -1525,16 +1521,15 @@ class App(QWidget):
                         previous_flows = []
 
         self.current_folder = Path(folder)
-        files, flows = load_folder(folder, debug=False)
-        self.flows = flows
+        files, flows = load_folder(folder, debug=False)        
         self.flow_controller.page_size = self.PAGE_SIZE
-        self.flow_controller.set_flows(self.flows)
+        self.flow_controller.set_flows(flows)
 
         from core.compare import compare_flows
 
         compare_result = None
         if previous_flows:
-            compare_result = compare_flows(self.flows, previous_flows)
+            compare_result = compare_flows(flows, previous_flows)
         from core.compare import summarize_new_flows
 
         summary_new = None
@@ -1601,16 +1596,15 @@ class App(QWidget):
 
         self.current_folder = fp.parent
         flows = load_json_file(fp, debug=False)
-        files = [fp]
-        self.flows = flows
+        files = [fp]        
         self.flow_controller.page_size = self.PAGE_SIZE
-        self.flow_controller.set_flows(self.flows)
+        self.flow_controller.set_flows(flows)
 
         from core.compare import compare_flows, summarize_new_flows
 
         compare_result = None
         if previous_flows:
-            compare_result = compare_flows(self.flows, previous_flows)
+            compare_result = compare_flows(flows, previous_flows)
 
         if compare_result:
             summary_new = summarize_new_flows(compare_result["new"])
@@ -1648,7 +1642,9 @@ class App(QWidget):
         self.update_detail(None)
         
     def render_summary(self):
-        if not self.flows:
+        flows = self.flow_controller.get_all()
+
+        if not flows:
             self.txt_top_src_left.setText("No flows loaded.")
             self.txt_top_src_right.setText("")
 
@@ -1662,10 +1658,10 @@ class App(QWidget):
             self.txt_top_apps_right.setText("")
             return
 
-        src_items = top_src_ips(self.flows, limit=5)
-        dst_items = top_dst_ips(self.flows, limit=5)
-        proto_items = [(format_ip_proto(proto), c) for proto, c in top_protocols(self.flows, limit=5)]
-        app_items = top_applications(self.flows, limit=5)
+        src_items = top_src_ips(flows, limit=5)
+        dst_items = top_dst_ips(flows, limit=5)
+        proto_items = [(format_ip_proto(proto), c) for proto, c in top_protocols(flows, limit=5)]
+        app_items = top_applications(flows, limit=5)
 
         left, right = self._split_ranked_lines(src_items)
         self.txt_top_src_left.setText(left)
@@ -1684,7 +1680,9 @@ class App(QWidget):
         self.txt_top_apps_right.setText(right)
 
     def generate_ai_summary(self):
-        if not self.flows:
+        flows = self.flow_controller.get_all()
+
+        if not flows:
             self._message_dialog("AI Assistant", "Load a dataset first.", width=400)
             return
 
@@ -1703,7 +1701,7 @@ class App(QWidget):
         self._ai_thread = QThread()
         self._ai_worker = AITextWorker(
             self.ai_service.generate_dataset_summary,
-            list(self.flows),
+            list(flows),
             self.current_project_name,
             dataset_path,
         )
