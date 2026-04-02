@@ -1,4 +1,4 @@
-from core.db import list_findings
+from core.db import list_findings, get_finding
 
 
 class FindingsController:
@@ -37,3 +37,13 @@ class FindingsController:
             render_rows.append(rr)
 
         return render_rows
+    
+    def get_selected_row(self, finding_id: int | None):
+        if finding_id is None:
+            return None, None
+
+        row = get_finding(finding_id)
+        if row is None:
+            return finding_id, None
+
+        return finding_id, row

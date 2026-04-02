@@ -1912,14 +1912,7 @@ class App(QWidget):
 
     def _get_selected_finding_row(self):
         fid = self.selected_finding_id()
-        if fid is None:
-            return None, None
-
-        row = get_finding(fid)
-        if row is None:
-            return fid, None
-
-        return fid, row
+        return self.findings_controller.get_selected_row(fid)
 
     def mark_as_finding(self):
         if self.current_project_id is None:
