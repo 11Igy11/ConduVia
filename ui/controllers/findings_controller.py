@@ -27,3 +27,13 @@ class FindingsController:
 
         rows = findings_page.sort_rows(rows, findings_page.cmb_find_sort.currentText())
         return rows
+    
+    def prepare_render_rows(self, rows, status_emoji_fn):
+        render_rows = []
+
+        for r in rows:
+            rr = dict(r)
+            rr["status_emoji"] = status_emoji_fn(r["status"])
+            render_rows.append(rr)
+
+        return render_rows

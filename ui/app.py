@@ -1987,11 +1987,10 @@ class App(QWidget):
             self.findings_page
         )                                   
 
-        render_rows = []
-        for r in rows:
-            rr = dict(r)
-            rr["status_emoji"] = status_emoji(r["status"])
-            render_rows.append(rr)
+        render_rows = self.findings_controller.prepare_render_rows(
+            rows,
+            status_emoji
+        )
 
         self._findings_view_rows = rows
         self.findings_page.render_list(render_rows, self.current_project_id, keep_id)
