@@ -59,8 +59,10 @@ class FlowTableView(QTableView):
             source_index = proxy.mapToSource(index)
             row = source_index.row()
 
-            if 0 <= row < len(self.parent_app.loaded_flows):
-                flow = self.parent_app.loaded_flows[row]
+            flows = self.parent_app.flow_controller.get_loaded()
+
+            if 0 <= row < len(flows):
+                flow = flows[row]
                 lines = [
                     f"Source IP: {flow.get('src_ip', '')}",
                     f"Source Port: {flow.get('src_port', '')}",

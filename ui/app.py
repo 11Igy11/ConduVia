@@ -8,9 +8,11 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 from core.protocols import format_ip_proto
+from ui.controllers.flow_controller import FlowController
 from ui.explore_models import FlowTableModel, NumericSortProxy
 from ui.explore_widgets import AITextWorker, FlowTableView
 from ui.findings_page import FindingsPage
+from ui.controllers.notes_controller import NotesController
 from ui.dialogs import (
     message_dialog,
     choice_dialog,
@@ -181,36 +183,8 @@ class App(QWidget):
     
     def _ensure_pair_loaded(self, src: str, dst: str):
         """Ensure at least one flow for (src,dst) exists in loaded_flows; expand paging if needed."""
-        if not self.flows:
-            return
-        
-        # već učitano? brzo provjeri
-        for f in self.loaded_flows:
-            if not isinstance(f, dict):
-                continue
-            s = str(f.get("src_ip") or "")
-            d = str(f.get("dst_ip") or "")
-            if (s == src and d == dst) or (s == dst and d == src):
-                return
-
-        # nađi prvi match u cijelom datasetu
-        hit_idx = -1
-        for i, f in enumerate(self.flows):
-            if not isinstance(f, dict):
-                continue
-            s = str(f.get("src_ip") or "")
-            d = str(f.get("dst_ip") or "")
-            if (s == src and d == dst) or (s == dst and d == src):
-                hit_idx = i
-                break
-
-        if hit_idx < 0:
-            return
-
-        # proširi loaded_flows do tog indexa (uz mali buffer)
-        end = min(len(self.flows), max(hit_idx + 1, len(self.loaded_flows)) + self.PAGE_SIZE)
-        self.loaded_flows = self.flows[:end]
-        self.model.set_flows(self.loaded_flows)
+        flows = self.flow_controller.ensure_pair_loaded(src, dst)
+        self.model.set_flows(flows)
         self.update_loaded_label()
         self.update_load_more_enabled()
         self.update_showing()
@@ -426,6 +400,8 @@ class App(QWidget):
         self._init_state()
 
         self.ai_service = AIAssistantService()
+        self.notes_controller = NotesController()
+        self.flow_controller = FlowController()
 
         self._build_ui()
         self._wire_ui()
@@ -437,7 +413,7 @@ class App(QWidget):
         self.update_mode_label()
         self.refresh_findings_ui()
         self.refresh_notes_ui()
-
+        
     def _message_dialog(
         self,
         title: str,
@@ -1230,30 +1206,27 @@ class App(QWidget):
             self.PAGE_SIZE = max(250, int(txt))
         except Exception:
             self.PAGE_SIZE = 2000
+
+        self.flow_controller.page_size = self.PAGE_SIZE
         self.update_loaded_label()
         self.update_load_more_enabled()
 
     def update_loaded_label(self):
-        total = len(self.flows)
-        loaded = len(self.loaded_flows)
+        total = self.flow_controller.get_total_count()
+        loaded = self.flow_controller.get_loaded_count()
         if total:
             self.lbl_loaded.setText(f"Loaded: {loaded} / {total}")
         else:
             self.lbl_loaded.setText("")
 
     def update_load_more_enabled(self):
-        self.btn_load_more.setEnabled(bool(self.flows) and len(self.loaded_flows) < len(self.flows))
+        self.btn_load_more.setEnabled(
+            self.flow_controller.get_loaded_count() < self.flow_controller.get_total_count()
+        )
 
     def load_next_page(self):
-        if not self.flows:
-            return
-        start = len(self.loaded_flows)
-        end = min(len(self.flows), start + self.PAGE_SIZE)
-        if start >= end:
-            return
-
-        self.loaded_flows = self.flows[:end]
-        self.model.set_flows(self.loaded_flows)
+        flows = self.flow_controller.load_next_page()
+        self.model.set_flows(flows)
         self.update_loaded_label()
         self.update_load_more_enabled()
         self.update_showing()
@@ -1551,6 +1524,8 @@ class App(QWidget):
         self.current_folder = Path(folder)
         files, flows = load_folder(folder, debug=False)
         self.flows = flows
+        self.flow_controller.page_size = self.PAGE_SIZE
+        self.flow_controller.set_flows(self.flows)
 
         from core.compare import compare_flows
 
@@ -1580,8 +1555,7 @@ class App(QWidget):
 
         self.render_summary()
 
-        self.loaded_flows = self.flows[: min(len(self.flows), self.PAGE_SIZE)]
-        self.model.set_flows(self.loaded_flows)
+        self.model.set_flows(self.flow_controller.get_loaded())
 
         self.search.setText("")
         self.leave_conversation(clear_search=False)
@@ -1626,6 +1600,8 @@ class App(QWidget):
         flows = load_json_file(fp, debug=False)
         files = [fp]
         self.flows = flows
+        self.flow_controller.page_size = self.PAGE_SIZE
+        self.flow_controller.set_flows(self.flows)
 
         from core.compare import compare_flows, summarize_new_flows
 
@@ -1653,8 +1629,7 @@ class App(QWidget):
 
         self.render_summary()
 
-        self.loaded_flows = self.flows[: min(len(self.flows), self.PAGE_SIZE)]
-        self.model.set_flows(self.loaded_flows)
+        self.model.set_flows(self.flow_controller.get_loaded())
 
         self.search.setText("")
         self.leave_conversation(clear_search=False)
@@ -1808,7 +1783,7 @@ class App(QWidget):
         self._ai_mode = None
 
     def update_showing(self):
-        total = len(self.model._flows)
+        total = self.flow_controller.get_loaded_count()
         shown = self.proxy.rowCount()
         self.lbl_showing.setText(f"Showing: {shown} / {total} (loaded)" if total else "")
 
@@ -1823,8 +1798,10 @@ class App(QWidget):
         source_index = self.proxy.mapToSource(proxy_index)
         row = source_index.row()
 
-        if 0 <= row < len(self.loaded_flows):
-            self.update_detail(self.loaded_flows[row])
+        flows = self.flow_controller.get_loaded()
+
+        if 0 <= row < len(flows):
+            self.update_detail(flows[row])
         else:
             self.update_detail(None)
 
@@ -2302,7 +2279,8 @@ class App(QWidget):
 
         self.txt_notes.setEnabled(True)
         self.txt_notes.setPlaceholderText("Write case notes here… (autosave)")
-        self.txt_notes.setPlainText(get_project_notes(self.current_project_id) or "")
+        notes = self.notes_controller.load_notes(self.current_project_id)
+        self.txt_notes.setPlainText(notes)
         self.txt_notes.blockSignals(False)
 
         self.refresh_activity_ui()
@@ -2313,7 +2291,7 @@ class App(QWidget):
             self.lst_activity.addItem(QListWidgetItem("(no active project)"))
             return
 
-        rows = list_activity(self.current_project_id, limit=200)
+        rows = self.notes_controller.load_activity(self.current_project_id)
         if not rows:
             self.lst_activity.addItem(QListWidgetItem("(no activity yet)"))
             return
@@ -2334,7 +2312,10 @@ class App(QWidget):
         if not self._notes_dirty or self.current_project_id is None:
             return
         try:
-            set_project_notes(self.current_project_id, self.txt_notes.toPlainText())
+            self.notes_controller.save_notes(
+            self.current_project_id,
+            self.txt_notes.toPlainText()
+        )
         except Exception:
             return
         self._notes_dirty = False
