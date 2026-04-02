@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 from core.protocols import format_ip_proto
 from ui.explore_models import FlowTableModel, NumericSortProxy
+from ui.explore_widgets import AITextWorker
 from ui.findings_page import FindingsPage
 from ui.dialogs import (
     message_dialog,
@@ -72,23 +73,6 @@ def normalize_tags(tags: str) -> str:
         parts.append(t)
     return ", ".join(parts)
     
-class AITextWorker(QObject):
-    finished = Signal(str)
-    error = Signal(str)
-
-    def __init__(self, fn, *args, **kwargs):
-        super().__init__()
-        self.fn = fn
-        self.args = args
-        self.kwargs = kwargs
-
-    def run(self):
-        try:
-            result = self.fn(*self.args, **self.kwargs)
-            self.finished.emit(result)
-        except Exception as e:
-            self.error.emit(str(e))
-
 class FlowTableView(QTableView):
     def __init__(self, parent_app, *args, **kwargs):
         super().__init__(*args, **kwargs)
