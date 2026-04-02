@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 from core.protocols import format_ip_proto
 from ui.controllers.flow_controller import FlowController
+from ui.controllers.findings_controller import FindingsController
 from ui.explore_models import FlowTableModel, NumericSortProxy
 from ui.explore_widgets import AITextWorker, FlowTableView
 from ui.findings_page import FindingsPage
@@ -402,6 +403,7 @@ class App(QWidget):
         self.ai_service = AIAssistantService()
         self.notes_controller = NotesController()
         self.flow_controller = FlowController()
+        self.findings_controller = FindingsController()
 
         self._build_ui()
         self._wire_ui()
@@ -413,6 +415,8 @@ class App(QWidget):
         self.update_mode_label()
         self.refresh_findings_ui()
         self.refresh_notes_ui()
+       
+        
         
     def _message_dialog(
         self,
@@ -536,8 +540,7 @@ class App(QWidget):
         self._notes_timer.setSingleShot(True)
         self._notes_timer.timeout.connect(self._flush_notes)
 
-        # Findings in-memory cache (for filter/sort)
-        self._findings_rows: list[Any] = []
+        # Findings in-memory cache (for filter/sort)        
         self._findings_view_rows: list[Any] = []
 
         # AI background worker
@@ -1957,7 +1960,7 @@ class App(QWidget):
         self.apply_findings_filter()
     
     def refresh_findings_ui(self):
-        self._findings_rows = []
+        self.findings_controller.rows = []
         self._findings_view_rows = []
 
         if self.current_project_id is None:
@@ -1966,8 +1969,7 @@ class App(QWidget):
             self.findings_page.clear_detail()
             return
 
-        rows = list_findings(self.current_project_id, limit=500)
-        self._findings_rows = list(rows)
+        rows = self.findings_controller.load_rows(self.current_project_id)        
 
         self.apply_findings_filter()
 
@@ -1978,12 +1980,12 @@ class App(QWidget):
         search = (self.txt_find_search.text() or "").strip().lower()
         tagq = (self.txt_find_tag.text() or "").strip().lower()
 
-        rows = [
-            r for r in self._findings_rows
-            if self.findings_page.matches_filters(r, status_sel, search, tagq)
-        ]
-
-        rows = self.findings_page.sort_rows(rows, self.cmb_find_sort.currentText())
+        rows = self.findings_controller.get_filtered_rows(
+            status_sel,
+            self.txt_find_search.text(),
+            self.txt_find_tag.text(),
+            self.findings_page
+        )                                   
 
         render_rows = []
         for r in rows:
