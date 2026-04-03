@@ -281,7 +281,7 @@ class App(QWidget):
         self._wire_navigation()
 
         # 3) Explore - search filter (debounced)
-        self.search.textChanged.connect(self._schedule_search_filter)
+        self.search.textChanged.connect(self.search_controller.schedule_search_filter)
 
         # 4) Explore - table selection -> details
         self.table.selectionModel().selectionChanged.connect(self.on_row_selected)
@@ -1794,9 +1794,6 @@ class App(QWidget):
         total = self.flow_controller.get_loaded_count()
         shown = self.proxy.rowCount()
         self.lbl_showing.setText(f"Showing: {shown} / {total} (loaded)" if total else "")
-
-    def _schedule_search_filter(self):
-        self._search_timer.start(300)
 
     # ---------- selection -> details ----------
     def on_row_selected(self, *args):

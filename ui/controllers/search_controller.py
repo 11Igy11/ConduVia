@@ -1,8 +1,11 @@
 class SearchController:
-    def __init__(self, app):
-        self.app = app
+    def __init__(self, parent_app):
+        self.parent_app = parent_app
+
+    def schedule_search_filter(self, *_):
+        self.parent_app._search_timer.start(300)
 
     def apply_search_filter(self):
-        text = self.app.search.text()
-        self.app.proxy.set_filter_text(text)
-        self.app.update_showing()
+        text = self.parent_app.search.text()
+        self.parent_app.proxy.set_filter_text(text)
+        self.parent_app.update_showing()
