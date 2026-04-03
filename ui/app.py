@@ -10,6 +10,7 @@ from typing import Any
 from core.protocols import format_ip_proto
 from ui.controllers.flow_controller import FlowController
 from ui.controllers.findings_controller import FindingsController
+from ui.controllers.search_controller import SearchController
 from ui.explore_models import FlowTableModel, NumericSortProxy
 from ui.explore_widgets import AITextWorker, FlowTableView
 from ui.findings_page import FindingsPage
@@ -403,6 +404,9 @@ class App(QWidget):
         self.notes_controller = NotesController()
         self.flow_controller = FlowController()
         self.findings_controller = FindingsController()
+        self.search_controller = SearchController(self)
+
+        self._search_timer.timeout.connect(self.search_controller.apply_search_filter)        
 
         self._build_ui()
         self._wire_ui()
@@ -540,8 +544,7 @@ class App(QWidget):
         # Explore search debounce
         self._search_timer = QTimer(self)
         self._search_timer.setSingleShot(True)
-        self._search_timer.timeout.connect(self._apply_search_filter)
-
+        
         # Findings in-memory cache (for filter/sort)        
         self._findings_view_rows: list[Any] = []
 
@@ -1794,11 +1797,6 @@ class App(QWidget):
 
     def _schedule_search_filter(self):
         self._search_timer.start(300)
-
-    def _apply_search_filter(self):
-        text = self.search.text()
-        self.proxy.set_filter_text(text)
-        self.update_showing()
 
     # ---------- selection -> details ----------
     def on_row_selected(self, *args):
