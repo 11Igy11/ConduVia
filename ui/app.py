@@ -279,9 +279,8 @@ class App(QWidget):
         # 1) sidebar navigation
         self._wire_navigation()
 
-        # 3) Explore - search filter
-        self.search.textChanged.connect(self.proxy.set_filter_text)
-        self.search.textChanged.connect(self.update_showing)
+        # 3) Explore - search filter (debounced)
+        self.search.textChanged.connect(self._schedule_search_filter)
 
         # 4) Explore - table selection -> details
         self.table.selectionModel().selectionChanged.connect(self.on_row_selected)
@@ -537,6 +536,11 @@ class App(QWidget):
         self._notes_timer = QTimer(self)
         self._notes_timer.setSingleShot(True)
         self._notes_timer.timeout.connect(self._flush_notes)
+
+        # Explore search debounce
+        self._search_timer = QTimer(self)
+        self._search_timer.setSingleShot(True)
+        self._search_timer.timeout.connect(self._apply_search_filter)
 
         # Findings in-memory cache (for filter/sort)        
         self._findings_view_rows: list[Any] = []
@@ -1787,6 +1791,14 @@ class App(QWidget):
         total = self.flow_controller.get_loaded_count()
         shown = self.proxy.rowCount()
         self.lbl_showing.setText(f"Showing: {shown} / {total} (loaded)" if total else "")
+
+    def _schedule_search_filter(self):
+        self._search_timer.start(300)
+
+    def _apply_search_filter(self):
+        text = self.search.text()
+        self.proxy.set_filter_text(text)
+        self.update_showing()
 
     # ---------- selection -> details ----------
     def on_row_selected(self, *args):
