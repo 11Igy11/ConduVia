@@ -1809,12 +1809,8 @@ class App(QWidget):
         source_index = self.proxy.mapToSource(proxy_index)
         row = source_index.row()
 
-        flows = self.flow_controller.get_loaded()
-
-        if 0 <= row < len(flows):
-            self.update_detail(flows[row])
-        else:
-            self.update_detail(None)
+        flow = self.flow_controller.get_flow_by_row(row)
+        self.update_detail(flow)
 
     def update_detail(self, flow: dict[str, Any] | None):
         self._current_flow = flow

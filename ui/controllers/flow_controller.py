@@ -67,3 +67,8 @@ class FlowController:
         self.loaded_flows = self.flows[:end]
 
         return self.loaded_flows
+    
+    def get_flow_by_row(self, row: int):
+        if row < 0 or row >= len(self.loaded_flows):
+            return None
+        return self.loaded_flows[row]
