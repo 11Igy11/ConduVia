@@ -8,4 +8,4 @@ class SearchController:
     def apply_search_filter(self):
         text = self.parent_app.search.text()
         self.parent_app.proxy.set_filter_text(text)
-        self.parent_app.update_showing()
+        self.parent_app.explore_ui_controller.update_showing()

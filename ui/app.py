@@ -319,42 +319,6 @@ class App(QWidget):
     def _post_init(self) -> None:
         pass
     
-    def update_conversation_summary(self):
-        if not self._conversation_on:
-            self.lbl_conv_summary.clear()
-            self.lbl_conv_summary.hide()
-            return
-
-        rows = self.proxy.rowCount()
-        if rows == 0:
-            self.lbl_conv_summary.clear()
-            self.lbl_conv_summary.hide()
-            return
-
-        total_bytes = 0
-        apps = {}
-
-        for r in range(rows):
-            idx_bytes = self.proxy.index(r, 6)
-            idx_app = self.proxy.index(r, 5)
-
-            b = self.proxy.data(idx_bytes, Qt.DisplayRole)
-            app = self.proxy.data(idx_app, Qt.DisplayRole) or ""
-
-            try:
-                total_bytes += int(b)
-            except Exception:
-                pass
-
-            apps[app] = apps.get(app, 0) + 1
-
-        top_app = max(apps, key=apps.get) if apps else "-"
-
-        self.lbl_conv_summary.setText(
-            f"Conversation summary — Flows: {rows} | Bytes: {total_bytes:,} | Top app: {top_app}"
-        )
-        self.lbl_conv_summary.show()
-
     def _open_from_registry_search(self, q: str):
         self.go_to_explore_flows()
         self.explore_ui_controller.leave_conversation(clear_search=False)
