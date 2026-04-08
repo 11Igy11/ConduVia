@@ -11,6 +11,8 @@ from core.protocols import format_ip_proto
 from ui.controllers.flow_controller import FlowController
 from ui.controllers.findings_controller import FindingsController
 from ui.controllers.search_controller import SearchController
+from ui.controllers.projects_ui_controller import ProjectsUIController
+from ui.controllers.dataset_controller import DatasetController
 from ui.explore_models import FlowTableModel, NumericSortProxy
 from ui.explore_widgets import AITextWorker, FlowTableView
 from ui.findings_page import FindingsPage
@@ -27,25 +29,18 @@ from PySide6.QtCore import Qt, QTimer, QThread
 from PySide6.QtGui import QGuiApplication, QIcon, QFont, QPixmap
 from PySide6.QtWidgets import (
     QApplication, QWidget, QHBoxLayout, QVBoxLayout, QGridLayout,
-    QPushButton, QLabel, QStackedWidget, QFileDialog,
+    QPushButton, QLabel, QStackedWidget,
     QTextEdit, QTabWidget, QLineEdit,
     QSplitter, QGroupBox,
     QListWidget, QListWidgetItem,
     QComboBox, QFrame, QSizePolicy, QScrollArea, QHeaderView,
     QTableView, QMenu
 )
-
-from core.loader import load_folder, load_json_file
-from core.analyzer import top_src_ips, top_dst_ips, top_applications, top_protocols
 from core.db import (
-    init_db, create_project, list_projects, get_project,
-    delete_project, add_dataset_load, list_recent_datasets,
-    add_finding, list_findings, get_finding,
+    init_db, add_finding, get_finding,
     update_finding, delete_finding,
-    get_project_notes, set_project_notes,
-    list_activity, add_activity
+    add_activity
 )
-
 # ---------- helpers ----------
 def is_private_ip(ip: str) -> bool:
     try:
@@ -294,7 +289,7 @@ class App(QWidget):
         self.cmb_page_size.currentTextChanged.connect(self.on_page_size_changed)
 
         # 7) Explore actions
-        self.btn_load.clicked.connect(self.load_dataset_dialog)
+        self.btn_load.clicked.connect(self.dataset_controller.load_dataset_dialog)
         self.btn_ai_summary.clicked.connect(self.generate_ai_summary)
         self.btn_add_ai_to_notes.clicked.connect(self.add_ai_summary_to_notes)
         self.btn_toggle_conv.clicked.connect(self.toggle_conversation)
@@ -310,16 +305,16 @@ class App(QWidget):
         self.btn_filter_sni.clicked.connect(lambda: self.apply_filter_ip(self.current_value("requested_server_name")))
 
         # 10) Projects page
-        self.btn_new_project.clicked.connect(self.create_project_dialog)
-        self.btn_refresh_projects.clicked.connect(self.refresh_projects)
-        self.btn_open_project.clicked.connect(self.open_selected_project)
-        self.btn_delete_project.clicked.connect(self.delete_selected_project)
-        self.projects_list.itemSelectionChanged.connect(self.on_project_selected_preview)
-        self.btn_open_dataset.clicked.connect(self.open_selected_dataset)
+        self.btn_new_project.clicked.connect(self.projects_ui_controller.create_project_dialog)
+        self.btn_refresh_projects.clicked.connect(self.projects_ui_controller.refresh_projects)
+        self.btn_open_project.clicked.connect(self.projects_ui_controller.open_selected_project)
+        self.btn_delete_project.clicked.connect(self.projects_ui_controller.delete_selected_project)
+        self.projects_list.itemSelectionChanged.connect(self.projects_ui_controller.on_project_selected_preview)
+        self.btn_open_dataset.clicked.connect(self.projects_ui_controller.open_selected_dataset)
 
         # 10b) Double click shortcuts
-        self.projects_list.itemDoubleClicked.connect(lambda _: self.open_selected_project())
-        self.recent_list.itemDoubleClicked.connect(lambda _: self.open_selected_dataset())
+        self.projects_list.itemDoubleClicked.connect(lambda _: self.projects_ui_controller.open_selected_project())
+        self.recent_list.itemDoubleClicked.connect(lambda _: self.projects_ui_controller.open_selected_dataset())
 
         # 11) Findings page
         fp = self.findings_page
@@ -405,6 +400,8 @@ class App(QWidget):
         self.flow_controller = FlowController()
         self.findings_controller = FindingsController()
         self.search_controller = SearchController(self)
+        self.projects_ui_controller = ProjectsUIController(self)
+        self.dataset_controller = DatasetController(self)
 
         self._search_timer.timeout.connect(self.search_controller.apply_search_filter)        
 
@@ -413,7 +410,7 @@ class App(QWidget):
         self._post_init()
 
         # init
-        self.refresh_projects()
+        self.projects_ui_controller.refresh_projects()
         self.update_detail(None)
         self.update_mode_label()
         self.refresh_findings_ui()
@@ -1142,17 +1139,7 @@ class App(QWidget):
         self.lbl_signature.setObjectName("Signature")
         footer.addWidget(self.lbl_signature)
         outer.addLayout(footer)
-
-    def _split_ranked_lines(self, items):
-        left_lines = []
-        right_lines = []
-
-        for i, (name, count) in enumerate(items, start=1):
-            left_lines.append(f"{i}. {name}")
-            right_lines.append(str(count))
-
-        return "\n".join(left_lines), "\n".join(right_lines)
-        
+          
     def _set_active_nav(self, active: QPushButton):
         for b in (self._nav_projects, self._nav_explore, self._nav_registry, self._nav_listing):
             b.setProperty("active", b is active)
@@ -1182,7 +1169,7 @@ class App(QWidget):
             return
 
         if mods & Qt.ControlModifier and key == Qt.Key_L:
-            self.load_dataset_dialog()
+            self.dataset_controller.load_dataset_dialog()
             event.accept()
             return
 
@@ -1250,442 +1237,7 @@ class App(QWidget):
         if value >= int(bar.maximum() * 0.92):
             if self.flow_controller.get_loaded_count() < self.flow_controller.get_total_count():
                 self.load_next_page()
-
-    # ---------- Projects ----------
-    def refresh_projects(self):
-        self.projects_list.clear()
-        projects = list_projects()
-
-        for p in projects:
-            item = QListWidgetItem(p.name)
-            item.setData(Qt.UserRole, p.id)
-            self.projects_list.addItem(item)
-
-        self.projects_info.setText("Select a project to see details.")
-        self.recent_list.clear()
-
-    def create_project_dialog(self):
-        name, ok = self._text_input_dialog("New project", "Project name:", width=420)
-        if not ok:
-            return
-        name = (name or "").strip()
-        if not name:
-            return
-
-        desc, ok2 = self._multiline_input_dialog("New project", "Description (optional):", width=460, height=260)
-        if not ok2:
-            desc = ""
-
-        base = QFileDialog.getExistingDirectory(self, "Select project base folder (optional)")
-        base = base or ""
-
-        try:
-            pid = create_project(name=name, description=desc, base_folder=base)
-        except Exception as e:
-            self._message_dialog("Error", "Project creation failed.", str(e), width=440)
-            return
-
-        self.set_active_project(pid)
-        self.refresh_projects()
-        self.refresh_recent_datasets(pid)
-        self.refresh_findings_ui()
-        self.refresh_notes_ui()
-
-        should_open = self._confirm_dialog(
-            title="Open dataset",
-            message="Project created successfully.",
-            details="Do you want to open a dataset now?",
-            ok_text="Yes",
-            cancel_text="No",
-            width=420,
-        )
-
-        if should_open:
-            self.load_dataset_dialog()
-            self.go_page(self.IDX_EXPLORE, self._nav_explore)
-
-    def on_project_selected_preview(self):
-        item = self.projects_list.currentItem()
-        if not item:
-            self.projects_info.setText("Select a project to see details.")
-            self.recent_list.clear()
-            return
-
-        pid = int(item.data(Qt.UserRole))
-        p = get_project(pid)
-        if not p:
-            return
-
-        info = []
-        info.append(f"Name: {p.name}")
-        info.append(f"ID: {p.id}")
-        info.append(f"Base folder: {p.base_folder or '-'}")
-        info.append(f"Created: {p.created_at}")
-        info.append(f"Updated: {p.updated_at}")
-        info.append("")
-        info.append(p.description or "")
-        self.projects_info.setText("\n".join(info))
-
-        self.refresh_recent_datasets(pid)
-
-    def open_selected_project(self):
-        item = self.projects_list.currentItem()
-        if not item:
-            return
-        pid = int(item.data(Qt.UserRole))
-        self.set_active_project(pid)
-    
-    def delete_selected_project(self):
-        item = self.projects_list.currentItem()
-        if not item:
-            return
-
-        project_id = int(item.data(Qt.UserRole))
-        project = get_project(project_id)
-        if not project:
-            self._message_dialog("Delete project", "Project not found.", width=400)
-            return
-
-        confirmed = self._confirm_dialog(
-            title="Delete project",
-            message="Delete selected project?",
-            details=(
-                f"{project.name} (id={project.id})\n\n"
-                "This will permanently delete:\n"
-                "• project\n"
-                "• loaded datasets\n"
-                "• findings\n"
-                "• activity log"
-            ),
-            ok_text="Delete",
-            cancel_text="Cancel",
-            width=430,
-            destructive=True,
-        )
-
-        if not confirmed:
-            return
-
-        try:
-            delete_project(project_id)
-        except Exception as e:
-            self._message_dialog("Delete project failed", str(e), width=440)
-            return
-
-        if self.current_project_id == project_id:
-            # reset state
-            self.current_project_id = None
-            self.current_project_name = ""
-            self.current_folder = None
-
-            # reset banners
-            self.lbl_active_project.setText("Active project: (none)")
-            self.lbl_project_banner.setText("Project: (none)")
-
-            # reset dataset UI
-            self.lbl_path.setText("No dataset loaded")
-            self.lbl_stats.setText("")
-            self.txt_top_src_left.setText("No flows loaded.")
-            self.txt_top_src_right.setText("")
-
-            self.txt_top_dst_left.setText("No flows loaded.")
-            self.txt_top_dst_right.setText("")
-
-            self.txt_top_proto_left.setText("No flows loaded.")
-            self.txt_top_proto_right.setText("")
-
-            self.txt_top_apps_left.setText("No flows loaded.")
-            self.txt_top_apps_right.setText("")
-            self.txt_ai_summary.clear()            
-            
-            self.model.set_flows([])
-            self.leave_conversation(clear_search=True)
-            self.update_loaded_label()
-            self.update_load_more_enabled()
-            self._flows_expanded = False
-            if hasattr(self, "details_panel"):
-                self.details_panel.show()
-            if hasattr(self, "btn_expand_flows"):
-                self.btn_expand_flows.setText("Expand Flows")
-
-            # reset registry page dataset
-            if hasattr(self, "registry_page"):
-                self.registry_page.set_dataset("", [], [])
-
-            # reset findings + notes UI
-            self.refresh_findings_ui()
-            self.refresh_notes_ui()
-
-        self.refresh_projects()
-
-    def set_active_project(self, project_id: int):
-        p = get_project(project_id)
-        if not p:
-            self._message_dialog("Project", "Project not found.", width=400)
-            return
-
-        self.current_project_id = p.id
-        self.current_project_name = p.name
-
-        self.lbl_active_project.setText(f"Active project: {p.name}")
-        self.lbl_project_banner.setText(f"Project: {p.name}")
-
-        self.refresh_recent_datasets(p.id)
-        self.refresh_findings_ui()
-        self.refresh_notes_ui()
-
-    def refresh_recent_datasets(self, project_id: int):
-        self.recent_list.clear()
-        paths = list_recent_datasets(project_id, limit=15)
-
-        if not paths:
-            self.recent_list.addItem(QListWidgetItem("(no datasets yet)"))
-            return
-
-        for fp in paths:
-            p = Path(str(fp))
-
-            if p.is_file():
-                label = f"[FILE] {p.name}"
-            elif p.is_dir():
-                label = f"[FOLDER] {p.name}"
-            else:
-                label = f"[MISSING] {p.name or str(fp)}"
-
-            item = QListWidgetItem(label)
-            item.setToolTip(str(fp))
-            item.setData(Qt.UserRole, str(fp))
-            self.recent_list.addItem(item)
-
-    def open_selected_dataset(self):
-        item = self.recent_list.currentItem()
-        if not item:
-            return
-
-        fp = item.data(Qt.UserRole)
-        if not fp or str(fp).startswith("("):
-            return
-
-        p = Path(str(fp))
-
-        if p.is_file():
-            self.load_dataset_file(str(p))
-        elif p.is_dir():
-            self.load_dataset_path(str(p))
-        else:
-            self._message_dialog("Dataset", "Path not found.", str(p), width=460)
-            return
-
-        self.go_page(self.IDX_EXPLORE, self._nav_explore)
-
-    # ---------- Explore ----------
-    def load_dataset_dialog(self):
-        choice = self._choice_dialog(
-            title="Open dataset",
-            message="What do you want to open?",
-            choices=["Folder", "JSON file"],
-            width=420,
-        )
-
-        if choice == "Folder":
-            folder = QFileDialog.getExistingDirectory(self, "Select dataset folder")
-            if not folder:
-                return
-            self.load_dataset_path(folder)
-            return
-
-        if choice == "JSON file":
-            file_path, _ = QFileDialog.getOpenFileName(
-                self,
-                "Select JSON file",
-                "",
-                "JSON files (*.json)"
-            )
-            if not file_path:
-                return
-            self.load_dataset_file(file_path)
-            return
-
-    def load_dataset_path(self, folder: str):
-        folder = str(folder)
-        if not Path(folder).exists():
-            self._message_dialog("Dataset", "Folder not found.", folder, width=480)
-            return
-
-        previous_flows = []
-
-        if self.current_project_id is not None:
-            recent = list_recent_datasets(self.current_project_id, limit=2)
-
-            if len(recent) >= 1:
-                prev_folder = recent[0]
-
-                # ako je isti folder → ignoriraj
-                if str(prev_folder) != str(folder):
-                    try:
-                        _, previous_flows = load_folder(prev_folder)
-                    except Exception:
-                        previous_flows = []
-
-        self.current_folder = Path(folder)
-        files, flows = load_folder(folder, debug=False)        
-        self.flow_controller.page_size = self.PAGE_SIZE
-        self.flow_controller.set_flows(flows)
-
-        from core.compare import compare_flows
-
-        compare_result = None
-        if previous_flows:
-            compare_result = compare_flows(flows, previous_flows)
-        from core.compare import summarize_new_flows
-
-        summary_new = None
-        if compare_result:
-            summary_new = summarize_new_flows(compare_result["new"])
-            compare_result["summary_new"] = summary_new
-
-        if hasattr(self, "registry_page"):
-            self.registry_page.set_dataset(folder, files, flows, compare_result=compare_result)
-
-        if hasattr(self, "listing_page"):
-            self.listing_page.set_dataset(folder, files, flows, compare_result=compare_result)
-
-        self.lbl_path.setText(f"Dataset: {folder}")
-        self.lbl_stats.setText(f"JSON files: {len(files)}   |   Total flow records: {len(flows)}")
-
-        if self.current_project_id is not None:
-            add_dataset_load(self.current_project_id, folder)
-            self.refresh_recent_datasets(self.current_project_id)
-            self.refresh_activity_ui()
-
-        self.render_summary()
-
-        self.model.set_flows(self.flow_controller.get_loaded())
-
-        self.search.setText("")
-        self.leave_conversation(clear_search=False)
-
-        self.update_loaded_label()
-        self.update_load_more_enabled()
-
-        self.tabs.setCurrentIndex(1)
-        self._flows_expanded = False
-        self.details_panel.show()
-        self.btn_expand_flows.setText("Expand Flows")
-        self.splitter.setSizes([920, 420])
-        self.update_detail(None)
-
-    def load_dataset_file(self, file_path: str):
-        file_path = str(file_path)
-        fp = Path(file_path)
-
-        if not fp.exists() or not fp.is_file():
-            self._message_dialog("Dataset", "File not found.", file_path, width=480)
-            return
-
-        previous_flows = []
-
-        if self.current_project_id is not None:
-            recent = list_recent_datasets(self.current_project_id, limit=2)
-
-            if len(recent) >= 1:
-                prev_path = recent[0]
-
-                if str(prev_path) != str(file_path):
-                    try:
-                        prev_fp = Path(prev_path)
-                        if prev_fp.is_file():
-                            previous_flows = load_json_file(prev_fp, debug=False)
-                        elif prev_fp.is_dir():
-                            _, previous_flows = load_folder(prev_fp, debug=False)
-                    except Exception:
-                        previous_flows = []
-
-        self.current_folder = fp.parent
-        flows = load_json_file(fp, debug=False)
-        files = [fp]        
-        self.flow_controller.page_size = self.PAGE_SIZE
-        self.flow_controller.set_flows(flows)
-
-        from core.compare import compare_flows, summarize_new_flows
-
-        compare_result = None
-        if previous_flows:
-            compare_result = compare_flows(flows, previous_flows)
-
-        if compare_result:
-            summary_new = summarize_new_flows(compare_result["new"])
-            compare_result["summary_new"] = summary_new
-
-        if hasattr(self, "registry_page"):
-            self.registry_page.set_dataset(str(fp), files, flows, compare_result=compare_result)
-
-        if hasattr(self, "listing_page"):
-            self.listing_page.set_dataset(str(fp), files, flows, compare_result=compare_result)
-
-        self.lbl_path.setText(f"Dataset file: {file_path}")
-        self.lbl_stats.setText(f"JSON files: 1   |   Total flow records: {len(flows)}")
-
-        if self.current_project_id is not None:
-            add_dataset_load(self.current_project_id, file_path)
-            self.refresh_recent_datasets(self.current_project_id)
-            self.refresh_activity_ui()
-
-        self.render_summary()
-
-        self.model.set_flows(self.flow_controller.get_loaded())
-
-        self.search.setText("")
-        self.leave_conversation(clear_search=False)
-
-        self.update_loaded_label()
-        self.update_load_more_enabled()
-
-        self.tabs.setCurrentIndex(1)
-        self._flows_expanded = False
-        self.details_panel.show()
-        self.btn_expand_flows.setText("Expand Flows")
-        self.splitter.setSizes([920, 420])
-        self.update_detail(None)
-        
-    def render_summary(self):
-        flows = self.flow_controller.get_all()
-
-        if not flows:
-            self.txt_top_src_left.setText("No flows loaded.")
-            self.txt_top_src_right.setText("")
-
-            self.txt_top_dst_left.setText("No flows loaded.")
-            self.txt_top_dst_right.setText("")
-
-            self.txt_top_proto_left.setText("No flows loaded.")
-            self.txt_top_proto_right.setText("")
-
-            self.txt_top_apps_left.setText("No flows loaded.")
-            self.txt_top_apps_right.setText("")
-            return
-
-        src_items = top_src_ips(flows, limit=5)
-        dst_items = top_dst_ips(flows, limit=5)
-        proto_items = [(format_ip_proto(proto), c) for proto, c in top_protocols(flows, limit=5)]
-        app_items = top_applications(flows, limit=5)
-
-        left, right = self._split_ranked_lines(src_items)
-        self.txt_top_src_left.setText(left)
-        self.txt_top_src_right.setText(right)
-
-        left, right = self._split_ranked_lines(dst_items)
-        self.txt_top_dst_left.setText(left)
-        self.txt_top_dst_right.setText(right)
-
-        left, right = self._split_ranked_lines(proto_items)
-        self.txt_top_proto_left.setText(left)
-        self.txt_top_proto_right.setText(right)
-
-        left, right = self._split_ranked_lines(app_items)
-        self.txt_top_apps_left.setText(left)
-        self.txt_top_apps_right.setText(right)
-
+       
     def generate_ai_summary(self):
         flows = self.flow_controller.get_all()
 
