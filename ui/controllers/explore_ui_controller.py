@@ -84,3 +84,95 @@ class ExploreUIController:
         self.app.d_packets.setText(str(flow.get("bidirectional_packets", "")))
         self.app.d_duration.setText(str(flow.get("bidirectional_duration_ms", "")))
         self.app.d_sni.setText(str(flow.get("requested_server_name", "")))
+
+    def enter_conversation(self, src: str, dst: str):
+        if not src or not dst:
+            return
+
+        self.app._ensure_pair_loaded(src, dst)
+
+        self.app.proxy.set_conversation(src, dst)
+        self.app._conversation_on = True
+
+        self.app.btn_toggle_conv.setText("Conversation: ON")
+
+        self.update_mode_label()
+        self.app.update_showing()
+        self.update_conversation_summary()
+
+        self.app.proxy.invalidate()
+
+    def leave_conversation(self, clear_search: bool = False):
+        self.app.proxy.clear_conversation()
+        self.app._conversation_on = False
+
+        self.app.btn_toggle_conv.setText("Conversation: OFF")
+
+        self.update_mode_label()
+        self.update_conversation_summary()
+
+        if clear_search:
+            self.app.search.setText("")
+
+        self.app.update_showing()
+
+    def toggle_conversation(self):
+        if self.app._conversation_on:
+            self.leave_conversation()
+            return
+
+        if not self.app._current_flow:
+            self.app._message_dialog("Conversation", "Select a flow first (Flows tab).", width=420)
+            return
+
+        src = self.app.current_value("src_ip")
+        dst = self.app.current_value("dst_ip")
+
+        self.enter_conversation(src, dst)
+
+    def update_mode_label(self):
+        if self.app._conversation_on and self.app.proxy.conv_a and self.app.proxy.conv_b:
+            a = self.app.proxy.conv_a
+            b = self.app.proxy.conv_b
+
+            self.app.lbl_mode.setText(f"Mode: Conversation between {a} ⇄ {b}")
+            self.app.lbl_mode.show()
+        else:
+            self.app.lbl_mode.clear()
+            self.app.lbl_mode.hide()
+
+    def update_conversation_summary(self):
+        if not self.app._conversation_on:
+            self.app.lbl_conv_summary.clear()
+            self.app.lbl_conv_summary.hide()
+            return
+
+        rows = self.app.proxy.rowCount()
+        if rows == 0:
+            self.app.lbl_conv_summary.clear()
+            self.app.lbl_conv_summary.hide()
+            return
+
+        total_bytes = 0
+        apps = {}
+
+        for r in range(rows):
+            idx_bytes = self.app.proxy.index(r, 6)
+            idx_app = self.app.proxy.index(r, 5)
+
+            b = self.app.proxy.data(idx_bytes)
+            app = self.app.proxy.data(idx_app) or ""
+
+            try:
+                total_bytes += int(b)
+            except Exception:
+                pass
+
+            apps[app] = apps.get(app, 0) + 1
+
+        top_app = max(apps, key=apps.get) if apps else "-"
+
+        self.app.lbl_conv_summary.setText(
+            f"Conversation — Flows: {rows} | Bytes: {total_bytes:,} | Top app: {top_app}"
+        )
+        self.app.lbl_conv_summary.show()

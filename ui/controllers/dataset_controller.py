@@ -142,7 +142,7 @@ class DatasetController:
         self.app.model.set_flows(self.app.flow_controller.get_loaded())
 
         self.app.search.setText("")
-        self.app.leave_conversation(clear_search=False)
+        self.app.explore_ui_controller.leave_conversation(clear_search=False)
 
         self.app.explore_ui_controller.update_loaded_label()
         self.app.explore_ui_controller.update_load_more_enabled()
@@ -215,7 +215,7 @@ class DatasetController:
         self.app.model.set_flows(self.app.flow_controller.get_loaded())
 
         self.app.search.setText("")
-        self.app.leave_conversation(clear_search=False)
+        self.app.explore_ui_controller.leave_conversation(clear_search=False)
 
         self.app.explore_ui_controller.update_loaded_label()
         self.app.explore_ui_controller.update_load_more_enabled()

@@ -216,31 +216,6 @@ class App(QWidget):
         self.go_page(self.IDX_EXPLORE, self._nav_explore)
         self.tabs.setCurrentIndex(1)
 
-    def leave_conversation(self, clear_search: bool = False):
-        self.proxy.clear_conversation()
-        self._conversation_on = False
-        self.btn_toggle_conv.setText("Conversation: OFF")
-        self.update_mode_label()
-        self.update_conversation_summary()
-
-        if clear_search:
-            self.search.setText("")
-
-        self.update_showing()
-
-    def enter_conversation(self, src: str, dst: str):
-        if not src or not dst:
-            return
-
-        self._ensure_pair_loaded(src, dst)
-        self.proxy.set_conversation(src, dst)
-        self._conversation_on = True
-        self.btn_toggle_conv.setText("Conversation: ON")
-        self.update_mode_label()
-        self.update_showing()
-        self.update_conversation_summary()
-        self.proxy.invalidate()
-
     def _build_sidebar(self) -> QVBoxLayout:
         sidebar = QVBoxLayout()
 
@@ -294,7 +269,7 @@ class App(QWidget):
         self.btn_load.clicked.connect(self.dataset_controller.load_dataset_dialog)
         self.btn_ai_summary.clicked.connect(self.generate_ai_summary)
         self.btn_add_ai_to_notes.clicked.connect(self.add_ai_summary_to_notes)
-        self.btn_toggle_conv.clicked.connect(self.toggle_conversation)
+        self.btn_toggle_conv.clicked.connect(self.explore_ui_controller.toggle_conversation)
         self.btn_expand_flows.clicked.connect(self.toggle_flows_expanded)
         self.btn_mark_finding.clicked.connect(self.mark_as_finding)
 
@@ -382,7 +357,7 @@ class App(QWidget):
 
     def _open_from_registry_search(self, q: str):
         self.go_to_explore_flows()
-        self.leave_conversation(clear_search=False)
+        self.explore_ui_controller.leave_conversation(clear_search=False)
         self.search.setText(q or "")
         self.search.setFocus()
         self.update_showing()
@@ -415,7 +390,7 @@ class App(QWidget):
         # init
         self.projects_ui_controller.refresh_projects()
         self.explore_ui_controller.update_detail(None)
-        self.update_mode_label()
+        self.explore_ui_controller.update_mode_label()
         self.refresh_findings_ui()
         self.refresh_notes_ui()
        
@@ -1157,7 +1132,7 @@ class App(QWidget):
     def _open_from_registry(self, src: str, dst: str):
         self.go_to_explore_flows()
         self.search.setText("")
-        self.enter_conversation(src, dst)
+        self.explore_ui_controller.enter_conversation(src, dst)
 
         # ---------- Keyboard shortcuts ----------
     def keyPressEvent(self, event):
@@ -1177,7 +1152,7 @@ class App(QWidget):
             return
 
         if key == Qt.Key_Escape:
-            self.leave_conversation(clear_search=True)
+            self.explore_ui_controller.leave_conversation(clear_search=True)
             event.accept()
             return
 
@@ -1314,19 +1289,6 @@ class App(QWidget):
         self.search.setText(ip)
         self.search.setFocus()
 
-    def toggle_conversation(self):
-        if self._conversation_on:
-            self.leave_conversation()
-            return
-
-        if not self._current_flow:
-            self._message_dialog("Conversation", "Select a flow first (Flows tab).", width=420)
-            return
-
-        src = self.current_value("src_ip")
-        dst = self.current_value("dst_ip")
-        self.enter_conversation(src, dst)
-
     def toggle_flows_expanded(self):
         self._flows_expanded = not self._flows_expanded
 
@@ -1338,16 +1300,6 @@ class App(QWidget):
             self.details_panel.show()
             self.btn_expand_flows.setText("Expand Flows")
             self.splitter.setSizes([920, 420])
-
-    def update_mode_label(self):
-        if self._conversation_on and self.proxy.conv_a and self.proxy.conv_b:
-            a = self.proxy.conv_a
-            b = self.proxy.conv_b
-            self.lbl_mode.setText(f"Mode: Conversation between {a} ⇄ {b}")
-            self.lbl_mode.show()
-        else:
-            self.lbl_mode.clear()
-            self.lbl_mode.hide()
 
     def copy_selected_cell_value(self):
         index = self.table.currentIndex()
@@ -1545,8 +1497,8 @@ class App(QWidget):
 
         self.go_to_explore_flows()
         self.search.setText("")
-        self.leave_conversation(clear_search=False)
-        self.enter_conversation(src, dst)
+        self.explore_ui_controller.leave_conversation(clear_search=False)
+        self.explore_ui_controller.enter_conversation(src, dst)
 
         QTimer.singleShot(0, lambda: self._select_flow_pair(src, dst))
 
