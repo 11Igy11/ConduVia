@@ -144,8 +144,8 @@ class DatasetController:
         self.app.search.setText("")
         self.app.leave_conversation(clear_search=False)
 
-        self.app.update_loaded_label()
-        self.app.update_load_more_enabled()
+        self.app.explore_ui_controller.update_loaded_label()
+        self.app.explore_ui_controller.update_load_more_enabled()
 
         self.app.tabs.setCurrentIndex(1)
         self.app._flows_expanded = False
@@ -217,8 +217,8 @@ class DatasetController:
         self.app.search.setText("")
         self.app.leave_conversation(clear_search=False)
 
-        self.app.update_loaded_label()
-        self.app.update_load_more_enabled()
+        self.app.explore_ui_controller.update_loaded_label()
+        self.app.explore_ui_controller.update_load_more_enabled()
 
         self.app.tabs.setCurrentIndex(1)
         self.app._flows_expanded = False

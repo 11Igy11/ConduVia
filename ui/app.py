@@ -13,6 +13,8 @@ from ui.controllers.findings_controller import FindingsController
 from ui.controllers.search_controller import SearchController
 from ui.controllers.projects_ui_controller import ProjectsUIController
 from ui.controllers.dataset_controller import DatasetController
+from ui.controllers.explore_ui_controller import ExploreUIController
+
 from ui.explore_models import FlowTableModel, NumericSortProxy
 from ui.explore_widgets import AITextWorker, FlowTableView
 from ui.findings_page import FindingsPage
@@ -182,8 +184,8 @@ class App(QWidget):
         """Ensure at least one flow for (src,dst) exists in loaded_flows; expand paging if needed."""
         flows = self.flow_controller.ensure_pair_loaded(src, dst)
         self.model.set_flows(flows)
-        self.update_loaded_label()
-        self.update_load_more_enabled()
+        self.explore_ui_controller.update_loaded_label()
+        self.explore_ui_controller.update_load_more_enabled()
         self.update_showing()
 
     def _scroll_to_flow_pair(self, src: str, dst: str):
@@ -282,11 +284,11 @@ class App(QWidget):
         self.table.selectionModel().selectionChanged.connect(self.on_row_selected)
 
         # 5) Explore - scrolling auto paging
-        self.table.verticalScrollBar().valueChanged.connect(self.on_table_scrolled)
+        self.table.verticalScrollBar().valueChanged.connect(self.explore_ui_controller.on_table_scrolled)
 
         # 6) Paging controls
-        self.btn_load_more.clicked.connect(self.load_next_page)
-        self.cmb_page_size.currentTextChanged.connect(self.on_page_size_changed)
+        self.btn_load_more.clicked.connect(self.explore_ui_controller.load_next_page)
+        self.cmb_page_size.currentTextChanged.connect(self.explore_ui_controller.on_page_size_changed)
 
         # 7) Explore actions
         self.btn_load.clicked.connect(self.dataset_controller.load_dataset_dialog)
@@ -402,6 +404,7 @@ class App(QWidget):
         self.search_controller = SearchController(self)
         self.projects_ui_controller = ProjectsUIController(self)
         self.dataset_controller = DatasetController(self)
+        self.explore_ui_controller = ExploreUIController(self)
 
         self._search_timer.timeout.connect(self.search_controller.apply_search_filter)        
 
@@ -1194,50 +1197,7 @@ class App(QWidget):
                 return
 
         super().keyPressEvent(event)
-
-    # ---------- Paging ----------
-    def on_page_size_changed(self, txt: str):
-        try:
-            self.PAGE_SIZE = max(250, int(txt))
-        except Exception:
-            self.PAGE_SIZE = 2000
-
-        self.flow_controller.page_size = self.PAGE_SIZE
-        self.update_loaded_label()
-        self.update_load_more_enabled()
-
-    def update_loaded_label(self):
-        total = self.flow_controller.get_total_count()
-        loaded = self.flow_controller.get_loaded_count()
-        if total:
-            self.lbl_loaded.setText(f"Loaded: {loaded} / {total}")
-        else:
-            self.lbl_loaded.setText("")
-
-    def update_load_more_enabled(self):
-        self.btn_load_more.setEnabled(
-            self.flow_controller.get_loaded_count() < self.flow_controller.get_total_count()
-        )
-
-    def load_next_page(self):
-        flows = self.flow_controller.load_next_page()
-        self.model.set_flows(flows)
-        self.update_loaded_label()
-        self.update_load_more_enabled()
-        self.update_showing()
-
-    def on_table_scrolled(self, value: int):
-        if self.flow_controller.get_total_count() == 0:
-            return
-        if self._conversation_on:
-            return
-        bar = self.table.verticalScrollBar()
-        if bar.maximum() <= 0:
-            return
-        if value >= int(bar.maximum() * 0.92):
-            if self.flow_controller.get_loaded_count() < self.flow_controller.get_total_count():
-                self.load_next_page()
-       
+          
     def generate_ai_summary(self):
         flows = self.flow_controller.get_all()
 

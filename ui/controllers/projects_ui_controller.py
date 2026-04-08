@@ -73,7 +73,7 @@ class ProjectsUIController:
         )
 
         if should_open:
-            self.app.load_dataset_dialog()
+            self.app.dataset_controller.load_dataset_dialog()
             self.app.go_page(self.app.IDX_EXPLORE, self.app._nav_explore)
 
     def on_project_selected_preview(self):
@@ -169,8 +169,8 @@ class ProjectsUIController:
 
             self.app.model.set_flows([])
             self.app.leave_conversation(clear_search=True)
-            self.app.update_loaded_label()
-            self.app.update_load_more_enabled()
+            self.app.explore_ui_controller.update_loaded_label()
+            self.app.explore_ui_controller.update_load_more_enabled()
             self.app._flows_expanded = False
 
             if hasattr(self.app, "details_panel"):
