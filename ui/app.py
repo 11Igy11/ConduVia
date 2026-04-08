@@ -238,16 +238,22 @@ class App(QWidget):
         self.btn_ai_summary.clicked.connect(self.generate_ai_summary)
         self.btn_add_ai_to_notes.clicked.connect(self.add_ai_summary_to_notes)
         self.btn_toggle_conv.clicked.connect(self.explore_ui_controller.toggle_conversation)
-        self.btn_expand_flows.clicked.connect(self.toggle_flows_expanded)
+        self.btn_expand_flows.clicked.connect(self.explore_ui_controller.toggle_flows_expanded)
         self.btn_mark_finding.clicked.connect(self.mark_as_finding)
 
         # 8) AI explain flow
         self.btn_ai_explain.clicked.connect(self.explain_selected_flow)
         
         # 9) Filter buttons
-        self.btn_filter_src.clicked.connect(lambda: self.apply_filter_ip(self.current_value("src_ip")))
-        self.btn_filter_dst.clicked.connect(lambda: self.apply_filter_ip(self.current_value("dst_ip")))
-        self.btn_filter_sni.clicked.connect(lambda: self.apply_filter_ip(self.current_value("requested_server_name")))
+        self.btn_filter_src.clicked.connect(
+            lambda: self.explore_ui_controller.apply_filter_ip(self.current_value("src_ip"))
+        )
+        self.btn_filter_dst.clicked.connect(
+            lambda: self.explore_ui_controller.apply_filter_ip(self.current_value("dst_ip"))
+        )
+        self.btn_filter_sni.clicked.connect(
+            lambda: self.explore_ui_controller.apply_filter_ip(self.current_value("requested_server_name"))
+        )
 
         # 10) Projects page
         self.btn_new_project.clicked.connect(self.projects_ui_controller.create_project_dialog)
@@ -1207,26 +1213,7 @@ class App(QWidget):
             self._ai_thread.deleteLater()
             self._ai_thread = None
 
-        self._ai_mode = None
-
-    # ---------- Filter / Conversation ----------
-    def apply_filter_ip(self, ip: str):
-        if not ip:
-            return
-        self.search.setText(ip)
-        self.search.setFocus()
-
-    def toggle_flows_expanded(self):
-        self._flows_expanded = not self._flows_expanded
-
-        if self._flows_expanded:
-            self.details_panel.hide()
-            self.btn_expand_flows.setText("Collapse Flows")
-            self.splitter.setSizes([1400, 0])
-        else:
-            self.details_panel.show()
-            self.btn_expand_flows.setText("Expand Flows")
-            self.splitter.setSizes([920, 420])
+        self._ai_mode = None    
 
     def copy_selected_cell_value(self):
         index = self.table.currentIndex()

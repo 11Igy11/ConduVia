@@ -219,3 +219,22 @@ class ExploreUIController:
         self.app.table.selectRow(r_idx)
         self.update_showing()
         return True
+    
+    def apply_filter_ip(self, ip: str):
+        if not ip:
+            return
+
+        self.app.search.setText(ip)
+        self.app.search.setFocus()
+
+    def toggle_flows_expanded(self):
+        self.app._flows_expanded = not self.app._flows_expanded
+
+        if self.app._flows_expanded:
+            self.app.details_panel.hide()
+            self.app.btn_expand_flows.setText("Collapse Flows")
+            self.app.splitter.setSizes([1400, 0])
+        else:
+            self.app.details_panel.show()
+            self.app.btn_expand_flows.setText("Expand Flows")
+            self.app.splitter.setSizes([920, 420])
