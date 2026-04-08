@@ -281,7 +281,7 @@ class App(QWidget):
         self.search.textChanged.connect(self.search_controller.schedule_search_filter)
 
         # 4) Explore - table selection -> details
-        self.table.selectionModel().selectionChanged.connect(self.on_row_selected)
+        self.table.selectionModel().selectionChanged.connect(self.explore_ui_controller.on_row_selected)
 
         # 5) Explore - scrolling auto paging
         self.table.verticalScrollBar().valueChanged.connect(self.explore_ui_controller.on_table_scrolled)
@@ -414,7 +414,7 @@ class App(QWidget):
 
         # init
         self.projects_ui_controller.refresh_projects()
-        self.update_detail(None)
+        self.explore_ui_controller.update_detail(None)
         self.update_mode_label()
         self.refresh_findings_ui()
         self.refresh_notes_ui()
@@ -1306,42 +1306,6 @@ class App(QWidget):
         total = self.flow_controller.get_loaded_count()
         shown = self.proxy.rowCount()
         self.lbl_showing.setText(f"Showing: {shown} / {total} (loaded)" if total else "")
-
-    # ---------- selection -> details ----------
-    def on_row_selected(self, *args):
-        sel = self.table.selectionModel().selectedRows()
-        if not sel:
-            self.update_detail(None)
-            return
-
-        proxy_index = sel[0]
-        source_index = self.proxy.mapToSource(proxy_index)
-        row = source_index.row()
-
-        flow = self.flow_controller.get_flow_by_row(row)
-        self.update_detail(flow)
-
-    def update_detail(self, flow: dict[str, Any] | None):
-        self._current_flow = flow
-        if not flow:
-            self.d_src.setText("-")
-            self.d_dst.setText("-")
-            self.d_proto.setText("-")
-            self.d_app.setText("-")
-            self.d_bytes.setText("-")
-            self.d_packets.setText("-")
-            self.d_duration.setText("-")
-            self.d_sni.setText("-")
-            return
-
-        self.d_src.setText(f"{flow.get('src_ip','')}:{flow.get('src_port','')}")
-        self.d_dst.setText(f"{flow.get('dst_ip','')}:{flow.get('dst_port','')}")
-        self.d_proto.setText(format_ip_proto(flow.get("protocol", "")))
-        self.d_app.setText(str(flow.get("application_name", "")))
-        self.d_bytes.setText(str(flow.get("bidirectional_bytes", "")))
-        self.d_packets.setText(str(flow.get("bidirectional_packets", "")))
-        self.d_duration.setText(str(flow.get("bidirectional_duration_ms", "")))
-        self.d_sni.setText(str(flow.get("requested_server_name", "")))
 
     # ---------- Filter / Conversation ----------
     def apply_filter_ip(self, ip: str):

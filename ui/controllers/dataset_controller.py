@@ -152,7 +152,7 @@ class DatasetController:
         self.app.details_panel.show()
         self.app.btn_expand_flows.setText("Expand Flows")
         self.app.splitter.setSizes([920, 420])
-        self.app.update_detail(None)
+        self.app.explore_ui_controller.update_detail(None)
 
     def load_dataset_file(self, file_path: str):
         file_path = str(file_path)
@@ -225,4 +225,4 @@ class DatasetController:
         self.app.details_panel.show()
         self.app.btn_expand_flows.setText("Expand Flows")
         self.app.splitter.setSizes([920, 420])
-        self.app.update_detail(None)
+        self.app.explore_ui_controller.update_detail(None)
