@@ -178,39 +178,7 @@ class App(QWidget):
         layout.addWidget(card)
         layout.addStretch()
 
-        return page
-    
-    def _ensure_pair_loaded(self, src: str, dst: str):
-        """Ensure at least one flow for (src,dst) exists in loaded_flows; expand paging if needed."""
-        flows = self.flow_controller.ensure_pair_loaded(src, dst)
-        self.model.set_flows(flows)
-        self.explore_ui_controller.update_loaded_label()
-        self.explore_ui_controller.update_load_more_enabled()
-        self.explore_ui_controller.update_showing()
-
-    def _scroll_to_flow_pair(self, src: str, dst: str):
-        for r_idx in range(self.proxy.rowCount()):
-            idx0 = self.proxy.index(r_idx, 0)
-            src_ip = self.proxy.data(idx0, Qt.DisplayRole)
-            dst_ip = self.proxy.data(self.proxy.index(r_idx, 2), Qt.DisplayRole)
-
-            if (src_ip == src and dst_ip == dst) or (src_ip == dst and dst_ip == src):
-                self.table.scrollTo(idx0, QTableView.PositionAtCenter)
-                return idx0, r_idx
-
-        return None, None
-
-    def _select_flow_pair(self, src: str, dst: str):
-        self.table.clearSelection()
-
-        idx0, r_idx = self._scroll_to_flow_pair(src, dst)
-        if idx0 is None:
-            return False
-
-        self.table.setCurrentIndex(idx0)
-        self.table.selectRow(r_idx)
-        self.explore_ui_controller.update_showing()
-        return True
+        return page    
 
     def go_to_explore_flows(self):
         self.go_page(self.IDX_EXPLORE, self._nav_explore)
@@ -1459,7 +1427,7 @@ class App(QWidget):
         self.explore_ui_controller.leave_conversation(clear_search=False)
         self.explore_ui_controller.enter_conversation(src, dst)
 
-        QTimer.singleShot(0, lambda: self._select_flow_pair(src, dst))
+        QTimer.singleShot(0, lambda: self.explore_ui_controller.select_flow_pair(src, dst))
 
     def edit_selected_finding(self):
         fid, row = self._get_selected_finding_row()

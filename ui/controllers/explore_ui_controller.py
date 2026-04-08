@@ -1,4 +1,6 @@
 from core.protocols import format_ip_proto
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QTableView
 
 class ExploreUIController:
     def __init__(self, app):
@@ -89,7 +91,7 @@ class ExploreUIController:
         if not src or not dst:
             return
 
-        self.app._ensure_pair_loaded(src, dst)
+        self.ensure_pair_loaded(src, dst)
 
         self.app.proxy.set_conversation(src, dst)
         self.app._conversation_on = True
@@ -185,3 +187,35 @@ class ExploreUIController:
             self.app.lbl_showing.setText(f"Showing: {shown} / {total} (loaded)")
         else:
             self.app.lbl_showing.setText("")
+
+    def ensure_pair_loaded(self, src: str, dst: str):
+        """Ensure at least one flow for (src,dst) exists in loaded flows; expand paging if needed."""
+        flows = self.app.flow_controller.ensure_pair_loaded(src, dst)
+        self.app.model.set_flows(flows)
+        self.update_loaded_label()
+        self.update_load_more_enabled()
+        self.update_showing()
+
+    def scroll_to_flow_pair(self, src: str, dst: str):
+        for r_idx in range(self.app.proxy.rowCount()):
+            idx0 = self.app.proxy.index(r_idx, 0)
+            src_ip = self.app.proxy.data(idx0, Qt.DisplayRole)
+            dst_ip = self.app.proxy.data(self.app.proxy.index(r_idx, 2), Qt.DisplayRole)
+
+            if (src_ip == src and dst_ip == dst) or (src_ip == dst and dst_ip == src):
+                self.app.table.scrollTo(idx0, QTableView.PositionAtCenter)
+                return idx0, r_idx
+
+        return None, None
+
+    def select_flow_pair(self, src: str, dst: str):
+        self.app.table.clearSelection()
+
+        idx0, r_idx = self.scroll_to_flow_pair(src, dst)
+        if idx0 is None:
+            return False
+
+        self.app.table.setCurrentIndex(idx0)
+        self.app.table.selectRow(r_idx)
+        self.update_showing()
+        return True
