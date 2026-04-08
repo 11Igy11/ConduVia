@@ -32,7 +32,7 @@ class ExploreUIController:
         self.app.model.set_flows(flows)
         self.update_loaded_label()
         self.update_load_more_enabled()
-        self.app.update_showing()
+        self.update_showing()
 
     def on_table_scrolled(self, value: int):
         if self.app.flow_controller.get_total_count() == 0:
@@ -97,7 +97,7 @@ class ExploreUIController:
         self.app.btn_toggle_conv.setText("Conversation: ON")
 
         self.update_mode_label()
-        self.app.update_showing()
+        self.update_showing()
         self.update_conversation_summary()
 
         self.app.proxy.invalidate()
@@ -114,7 +114,7 @@ class ExploreUIController:
         if clear_search:
             self.app.search.setText("")
 
-        self.app.update_showing()
+        self.update_showing()
 
     def toggle_conversation(self):
         if self.app._conversation_on:
@@ -176,3 +176,12 @@ class ExploreUIController:
             f"Conversation — Flows: {rows} | Bytes: {total_bytes:,} | Top app: {top_app}"
         )
         self.app.lbl_conv_summary.show()
+
+    def update_showing(self):
+        total = self.app.flow_controller.get_loaded_count()
+        shown = self.app.proxy.rowCount()
+
+        if total:
+            self.app.lbl_showing.setText(f"Showing: {shown} / {total} (loaded)")
+        else:
+            self.app.lbl_showing.setText("")

@@ -186,7 +186,7 @@ class App(QWidget):
         self.model.set_flows(flows)
         self.explore_ui_controller.update_loaded_label()
         self.explore_ui_controller.update_load_more_enabled()
-        self.update_showing()
+        self.explore_ui_controller.update_showing()
 
     def _scroll_to_flow_pair(self, src: str, dst: str):
         for r_idx in range(self.proxy.rowCount()):
@@ -209,7 +209,7 @@ class App(QWidget):
 
         self.table.setCurrentIndex(idx0)
         self.table.selectRow(r_idx)
-        self.update_showing()
+        self.explore_ui_controller.update_showing()
         return True
 
     def go_to_explore_flows(self):
@@ -360,7 +360,7 @@ class App(QWidget):
         self.explore_ui_controller.leave_conversation(clear_search=False)
         self.search.setText(q or "")
         self.search.setFocus()
-        self.update_showing()
+        self.explore_ui_controller.update_showing()
         
     def __init__(self):
         super().__init__()
@@ -1276,11 +1276,6 @@ class App(QWidget):
             self._ai_thread = None
 
         self._ai_mode = None
-
-    def update_showing(self):
-        total = self.flow_controller.get_loaded_count()
-        shown = self.proxy.rowCount()
-        self.lbl_showing.setText(f"Showing: {shown} / {total} (loaded)" if total else "")
 
     # ---------- Filter / Conversation ----------
     def apply_filter_ip(self, ip: str):
