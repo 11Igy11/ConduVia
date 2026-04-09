@@ -235,7 +235,7 @@ class App(QWidget):
 
         # 7) Explore actions
         self.btn_load.clicked.connect(self.dataset_controller.load_dataset_dialog)
-        self.btn_ai_summary.clicked.connect(self.generate_ai_summary)
+        self.btn_ai_summary.clicked.connect(self.explore_ui_controller.generate_ai_summary)
         self.btn_add_ai_to_notes.clicked.connect(self.add_ai_summary_to_notes)
         self.btn_toggle_conv.clicked.connect(self.explore_ui_controller.toggle_conversation)
         self.btn_expand_flows.clicked.connect(self.explore_ui_controller.toggle_flows_expanded)
@@ -331,8 +331,6 @@ class App(QWidget):
         self.explore_ui_controller.update_mode_label()
         self.refresh_findings_ui()
         self.refresh_notes_ui()
-       
-        
         
     def _message_dialog(
         self,
@@ -363,7 +361,6 @@ class App(QWidget):
             choices,
             width=width,
         )
-
 
     def _text_input_dialog(
         self,
@@ -1111,45 +1108,6 @@ class App(QWidget):
 
         super().keyPressEvent(event)
           
-    def generate_ai_summary(self):
-        flows = self.flow_controller.get_all()
-
-        if not flows:
-            self._message_dialog("AI Assistant", "Load a dataset first.", width=400)
-            return
-
-        if self._ai_thread is not None:
-            self._message_dialog("AI Assistant", "AI summary is already running.", width=420)
-            return
-
-        self.btn_ai_summary.setEnabled(False)
-        self.txt_ai_summary.setPlainText("Generating AI summary...")
-        self.btn_ai_summary.setText("Generating...")
-        QApplication.processEvents()
-
-        dataset_path = str(self.current_folder) if self.current_folder else ""
-
-        self._ai_mode = "summary"
-        self._ai_thread = QThread()
-        self._ai_worker = AITextWorker(
-            self.ai_service.generate_dataset_summary,
-            list(flows),
-            self.current_project_name,
-            dataset_path,
-        )
-
-        self._ai_worker.moveToThread(self._ai_thread)
-        self._ai_thread.started.connect(self._ai_worker.run)
-        self._ai_worker.finished.connect(self.on_ai_task_finished)
-        self._ai_worker.error.connect(self.on_ai_task_error)
-
-        self._ai_worker.finished.connect(self._ai_thread.quit)
-        self._ai_worker.error.connect(self._ai_thread.quit)
-
-        self._ai_thread.finished.connect(self._cleanup_ai_thread)
-
-        self._ai_thread.start()
-
     def explain_selected_flow(self):
         if not self._current_flow:
             self._message_dialog("AI Assistant", "Select a flow first.", width=400)

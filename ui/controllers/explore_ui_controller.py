@@ -1,4 +1,7 @@
 from core.protocols import format_ip_proto
+from PySide6.QtCore import QThread
+from PySide6.QtWidgets import QApplication
+from ui.explore_widgets import AITextWorker
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QTableView
 
@@ -269,3 +272,42 @@ class ExploreUIController:
         ]
 
         self.app.copy_text("\n".join(lines))
+
+    def generate_ai_summary(self):
+        flows = self.app.flow_controller.get_all()
+
+        if not flows:
+            self.app._message_dialog("AI Assistant", "Load a dataset first.", width=400)
+            return
+
+        if self.app._ai_thread is not None:
+            self.app._message_dialog("AI Assistant", "AI summary is already running.", width=420)
+            return
+
+        self.app.btn_ai_summary.setEnabled(False)
+        self.app.txt_ai_summary.setPlainText("Generating AI summary...")
+        self.app.btn_ai_summary.setText("Generating...")
+        QApplication.processEvents()
+
+        dataset_path = str(self.app.current_folder) if self.app.current_folder else ""
+
+        self.app._ai_mode = "summary"
+        self.app._ai_thread = QThread()
+        self.app._ai_worker = AITextWorker(
+            self.app.ai_service.generate_dataset_summary,
+            list(flows),
+            self.app.current_project_name,
+            dataset_path,
+        )
+
+        self.app._ai_worker.moveToThread(self.app._ai_thread)
+        self.app._ai_thread.started.connect(self.app._ai_worker.run)
+        self.app._ai_worker.finished.connect(self.app.on_ai_task_finished)
+        self.app._ai_worker.error.connect(self.app.on_ai_task_error)
+
+        self.app._ai_worker.finished.connect(self.app._ai_thread.quit)
+        self.app._ai_worker.error.connect(self.app._ai_thread.quit)
+
+        self.app._ai_thread.finished.connect(self.app._cleanup_ai_thread)
+
+        self.app._ai_thread.start()
