@@ -242,7 +242,7 @@ class App(QWidget):
         self.btn_mark_finding.clicked.connect(self.mark_as_finding)
 
         # 8) AI explain flow
-        self.btn_ai_explain.clicked.connect(self.explain_selected_flow)
+        self.btn_ai_explain.clicked.connect(self.explore_ui_controller.explain_selected_flow)
         
         # 9) Filter buttons
         self.btn_filter_src.clicked.connect(
@@ -1108,38 +1108,6 @@ class App(QWidget):
 
         super().keyPressEvent(event)
           
-    def explain_selected_flow(self):
-        if not self._current_flow:
-            self._message_dialog("AI Assistant", "Select a flow first.", width=400)
-            return
-
-        if self._ai_thread is not None:
-            self._message_dialog("AI Assistant", "Another AI task is already running.", width=430)
-            return
-
-        self._ai_mode = "flow"
-        self.btn_ai_explain.setEnabled(False)
-        self.txt_ai_summary.setPlainText("Generating AI flow explanation...")
-        self.tabs.setCurrentIndex(0)
-
-        self._ai_thread = QThread()
-        self._ai_worker = AITextWorker(
-            self.ai_service.explain_flow,
-            dict(self._current_flow),
-        )
-
-        self._ai_worker.moveToThread(self._ai_thread)
-        self._ai_thread.started.connect(self._ai_worker.run)
-        self._ai_worker.finished.connect(self.on_ai_task_finished)
-        self._ai_worker.error.connect(self.on_ai_task_error)
-
-        self._ai_worker.finished.connect(self._ai_thread.quit)
-        self._ai_worker.error.connect(self._ai_thread.quit)
-
-        self._ai_thread.finished.connect(self._cleanup_ai_thread)
-
-        self._ai_thread.start()
-
     def on_ai_task_finished(self, result: str):
         self.txt_ai_summary.setPlainText(result)
 

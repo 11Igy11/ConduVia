@@ -311,3 +311,35 @@ class ExploreUIController:
         self.app._ai_thread.finished.connect(self.app._cleanup_ai_thread)
 
         self.app._ai_thread.start()
+
+    def explain_selected_flow(self):
+        if not self.app._current_flow:
+            self.app._message_dialog("AI Assistant", "Select a flow first.", width=400)
+            return
+
+        if self.app._ai_thread is not None:
+            self.app._message_dialog("AI Assistant", "Another AI task is already running.", width=430)
+            return
+
+        self.app._ai_mode = "flow"
+        self.app.btn_ai_explain.setEnabled(False)
+        self.app.txt_ai_summary.setPlainText("Generating AI flow explanation...")
+        self.app.tabs.setCurrentIndex(0)
+
+        self.app._ai_thread = QThread()
+        self.app._ai_worker = AITextWorker(
+            self.app.ai_service.explain_flow,
+            dict(self.app._current_flow),
+        )
+
+        self.app._ai_worker.moveToThread(self.app._ai_thread)
+        self.app._ai_thread.started.connect(self.app._ai_worker.run)
+        self.app._ai_worker.finished.connect(self.app.on_ai_task_finished)
+        self.app._ai_worker.error.connect(self.app.on_ai_task_error)
+
+        self.app._ai_worker.finished.connect(self.app._ai_thread.quit)
+        self.app._ai_worker.error.connect(self.app._ai_thread.quit)
+
+        self.app._ai_thread.finished.connect(self.app._cleanup_ai_thread)
+
+        self.app._ai_thread.start()
