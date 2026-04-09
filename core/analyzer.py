@@ -1,7 +1,6 @@
 from collections import Counter, defaultdict
 from typing import Any
 
-
 def top_src_ips(flows: list[dict[str, Any]], limit: int = 10) -> list[tuple[str, int]]:
     counter = Counter()
     for flow in flows:
@@ -9,7 +8,6 @@ def top_src_ips(flows: list[dict[str, Any]], limit: int = 10) -> list[tuple[str,
         if ip:
             counter[ip] += 1
     return counter.most_common(limit)
-
 
 def top_dst_ips(flows: list[dict[str, Any]], limit: int = 10) -> list[tuple[str, int]]:
     counter = Counter()
@@ -19,7 +17,6 @@ def top_dst_ips(flows: list[dict[str, Any]], limit: int = 10) -> list[tuple[str,
             counter[ip] += 1
     return counter.most_common(limit)
 
-
 def top_protocols(flows: list[dict[str, Any]], limit: int = 10) -> list[tuple[str, int]]:
     counter = Counter()
     for flow in flows:
@@ -27,7 +24,6 @@ def top_protocols(flows: list[dict[str, Any]], limit: int = 10) -> list[tuple[st
         if proto is not None:
             counter[str(proto)] += 1
     return counter.most_common(limit)
-
 
 def top_applications(flows: list[dict[str, Any]], limit: int = 10) -> list[tuple[str, int]]:
     counter = Counter()
@@ -37,14 +33,12 @@ def top_applications(flows: list[dict[str, Any]], limit: int = 10) -> list[tuple
             counter[str(app)] += 1
     return counter.most_common(limit)
 
-
-# -------- BYTES-BASED (najkorisnije) --------
+# -------- BYTES-BASED --------
 def _as_int(v: Any) -> int:
     try:
         return int(v)
     except Exception:
         return 0
-
 
 def top_src_ips_by_bytes(
     flows: list[dict[str, Any]],
@@ -58,7 +52,6 @@ def top_src_ips_by_bytes(
             totals[ip] += _as_int(f.get(bytes_field))
     return sorted(totals.items(), key=lambda kv: kv[1], reverse=True)[:limit]
 
-
 def top_dst_ips_by_bytes(
     flows: list[dict[str, Any]],
     limit: int = 10,
@@ -71,7 +64,6 @@ def top_dst_ips_by_bytes(
             totals[ip] += _as_int(f.get(bytes_field))
     return sorted(totals.items(), key=lambda kv: kv[1], reverse=True)[:limit]
 
-
 def top_apps_by_bytes(
     flows: list[dict[str, Any]],
     limit: int = 10,
@@ -82,7 +74,6 @@ def top_apps_by_bytes(
         app = f.get("application_name") or "Unknown"
         totals[str(app)] += _as_int(f.get(bytes_field))
     return sorted(totals.items(), key=lambda kv: kv[1], reverse=True)[:limit]
-
 
 def top_sni_by_bytes(
     flows: list[dict[str, Any]],
@@ -96,7 +87,6 @@ def top_sni_by_bytes(
         if sni:
             totals[sni] += _as_int(f.get(bytes_field))
     return sorted(totals.items(), key=lambda kv: kv[1], reverse=True)[:limit]
-
 
 def top_flows_by_bytes(
     flows: list[dict[str, Any]],

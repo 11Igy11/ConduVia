@@ -5,11 +5,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional, Iterable
 
-
 # Project root = parent of /core
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_DB_PATH = PROJECT_ROOT / "cache" / "conduvia.db"
-
 
 @dataclass
 class Project:
@@ -20,18 +18,15 @@ class Project:
     created_at: str
     updated_at: str
 
-
 def _connect(db_path: Path) -> sqlite3.Connection:
     db_path.parent.mkdir(parents=True, exist_ok=True)
     con = sqlite3.connect(db_path)
     con.row_factory = sqlite3.Row
     return con
 
-
 def _column_exists(con: sqlite3.Connection, table: str, col: str) -> bool:
     rows = con.execute(f"PRAGMA table_info({table});").fetchall()
     return any(str(r["name"]) == col for r in rows)
-
 
 def _ensure_columns(con: sqlite3.Connection, table: str, cols: Iterable[tuple[str, str]]) -> None:
     """
@@ -42,7 +37,6 @@ def _ensure_columns(con: sqlite3.Connection, table: str, cols: Iterable[tuple[st
     for col, ddl in cols:
         if not _column_exists(con, table, col):
             con.execute(f"ALTER TABLE {table} ADD COLUMN {col} {ddl};")
-
 
 def init_db(db_path: Path = DEFAULT_DB_PATH) -> None:
     with _connect(db_path) as con:
@@ -142,7 +136,6 @@ def init_db(db_path: Path = DEFAULT_DB_PATH) -> None:
         con.execute("CREATE INDEX IF NOT EXISTS idx_findings_project_created ON findings(project_id, created_at);")
         con.execute("CREATE INDEX IF NOT EXISTS idx_activity_project_created ON activity_log(project_id, created_at);")
 
-
 # ---------------- Projects ----------------
 def create_project(
     name: str,
@@ -163,7 +156,6 @@ def create_project(
             (name, description or "", base_folder or ""),
         )
         return int(cur.lastrowid)
-
 
 def list_projects(db_path: Path = DEFAULT_DB_PATH) -> list[Project]:
     with _connect(db_path) as con:
@@ -186,7 +178,6 @@ def list_projects(db_path: Path = DEFAULT_DB_PATH) -> list[Project]:
         )
         for r in rows
     ]
-
 
 def get_project(project_id: int, db_path: Path = DEFAULT_DB_PATH) -> Optional[Project]:
     with _connect(db_path) as con:
@@ -211,7 +202,6 @@ def get_project(project_id: int, db_path: Path = DEFAULT_DB_PATH) -> Optional[Pr
         updated_at=str(r["updated_at"]),
     )
 
-
 def touch_project(project_id: int, db_path: Path = DEFAULT_DB_PATH) -> None:
     with _connect(db_path) as con:
         con.execute(
@@ -225,12 +215,10 @@ def delete_project(project_id: int, db_path: Path = DEFAULT_DB_PATH) -> None:
         con.execute("PRAGMA foreign_keys=ON;")
         con.execute("DELETE FROM projects WHERE id = ?;", (project_id,))
 
-
 def get_project_notes(project_id: int, db_path: Path = DEFAULT_DB_PATH) -> str:
     with _connect(db_path) as con:
         r = con.execute("SELECT notes FROM projects WHERE id = ?;", (project_id,)).fetchone()
     return str(r["notes"] or "") if r else ""
-
 
 def set_project_notes(project_id: int, notes: str, db_path: Path = DEFAULT_DB_PATH) -> None:
     with _connect(db_path) as con:
@@ -238,7 +226,6 @@ def set_project_notes(project_id: int, notes: str, db_path: Path = DEFAULT_DB_PA
             "UPDATE projects SET notes = ?, updated_at = datetime('now') WHERE id = ?;",
             (notes or "", project_id),
         )
-
 
 # ---------------- Activity log ----------------
 def add_activity(project_id: int, event_type: str, message: str = "", db_path: Path = DEFAULT_DB_PATH) -> None:
@@ -250,7 +237,6 @@ def add_activity(project_id: int, event_type: str, message: str = "", db_path: P
             """,
             (project_id, (event_type or "").strip() or "event", message or ""),
         )
-
 
 def list_activity(project_id: int, limit: int = 200, db_path: Path = DEFAULT_DB_PATH) -> list[sqlite3.Row]:
     with _connect(db_path) as con:
@@ -265,7 +251,6 @@ def list_activity(project_id: int, limit: int = 200, db_path: Path = DEFAULT_DB_
             (project_id, limit),
         ).fetchall()
     return rows
-
 
 # ---------------- Datasets ----------------
 def add_dataset_load(project_id: int, folder_path: str, db_path: Path = DEFAULT_DB_PATH) -> None:
@@ -285,7 +270,6 @@ def add_dataset_load(project_id: int, folder_path: str, db_path: Path = DEFAULT_
     touch_project(project_id, db_path=db_path)
     add_activity(project_id, "dataset_loaded", folder_path, db_path=db_path)
 
-
 def list_recent_datasets(project_id: int, limit: int = 10, db_path: Path = DEFAULT_DB_PATH) -> list[str]:
     with _connect(db_path) as con:
         rows = con.execute(
@@ -299,7 +283,6 @@ def list_recent_datasets(project_id: int, limit: int = 10, db_path: Path = DEFAU
             (project_id, limit),
         ).fetchall()
     return [str(r["folder_path"]) for r in rows]
-
 
 # ---------------- Findings ----------------
 def add_finding(
@@ -358,7 +341,6 @@ def add_finding(
     add_activity(project_id, "finding_created", f"#{fid} {title}", db_path=db_path)
     return fid
 
-
 def list_findings(project_id: int, limit: int = 200, db_path: Path = DEFAULT_DB_PATH) -> list[sqlite3.Row]:
     with _connect(db_path) as con:
         rows = con.execute(
@@ -373,7 +355,6 @@ def list_findings(project_id: int, limit: int = 200, db_path: Path = DEFAULT_DB_
         ).fetchall()
     return rows
 
-
 def get_finding(finding_id: int, db_path: Path = DEFAULT_DB_PATH) -> Optional[sqlite3.Row]:
     with _connect(db_path) as con:
         row = con.execute(
@@ -381,7 +362,6 @@ def get_finding(finding_id: int, db_path: Path = DEFAULT_DB_PATH) -> Optional[sq
             (finding_id,),
         ).fetchone()
     return row
-
 
 def _get_finding_project_and_title(finding_id: int, db_path: Path = DEFAULT_DB_PATH) -> tuple[int | None, str]:
     with _connect(db_path) as con:
@@ -392,7 +372,6 @@ def _get_finding_project_and_title(finding_id: int, db_path: Path = DEFAULT_DB_P
     if not r:
         return None, ""
     return int(r["project_id"]), str(r["title"] or "")
-
 
 def update_finding(
     finding_id: int,
@@ -424,7 +403,6 @@ def update_finding(
     if proj_id is not None:
         touch_project(proj_id, db_path=db_path)
         add_activity(proj_id, "finding_updated", f"#{finding_id} {title}", db_path=db_path)
-
 
 def delete_finding(finding_id: int, db_path: Path = DEFAULT_DB_PATH) -> None:
     proj_id, title = _get_finding_project_and_title(finding_id, db_path=db_path)

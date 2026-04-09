@@ -1,4 +1,5 @@
 from __future__ import annotations
+from core.timeutils import parse_flow_timestamp, date_key, hour_key
 
 import json
 from collections import Counter, defaultdict
@@ -7,7 +8,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-
 PREFERRED_COLUMNS = [
     "src_ip", "src_port", "dst_ip", "dst_port",
     "protocol", "application_name", "requested_server_name",
@@ -15,7 +15,6 @@ PREFERRED_COLUMNS = [
     "bidirectional_duration_ms",
     "bidirectional_packets", "bidirectional_bytes",
 ]
-
 
 def extract_dataset_meta(json_path: str | Path) -> dict[str, Any]:
     """
@@ -47,7 +46,6 @@ def extract_dataset_meta(json_path: str | Path) -> dict[str, Any]:
 
     return meta
 
-
 def build_registry_columns(flows: list[dict[str, Any]]) -> list[str]:
     all_cols: set[str] = set()
     for f in flows:
@@ -66,7 +64,6 @@ def build_registry_columns(flows: list[dict[str, Any]]) -> list[str]:
 
     return cols
 
-
 def _parse_ts_prefix(ts: Any, mode: str) -> str:
     """
     mode: 'date' -> YYYY-MM-DD
@@ -83,7 +80,6 @@ def _parse_ts_prefix(ts: Any, mode: str) -> str:
     if mode == "hour":
         return s[:13]  # YYYY-MM-DD HH
     return ""
-
 
 def compute_registry_summary(flows: list[dict[str, Any]], top_n: int = 10) -> dict[str, Any]:
     src_c = Counter()
@@ -127,13 +123,10 @@ def compute_registry_summary(flows: list[dict[str, Any]], top_n: int = 10) -> di
             app_c[app] += 1
             bytes_by_app[app] += b_int
 
-        ts = f.get("bidirectional_first_seen_ms") or f.get("first_seen") or f.get("timestamp")
-        d = _parse_ts_prefix(ts, "date")
-        h = _parse_ts_prefix(ts, "hour")
-        if d:
-            by_date[d] += 1
-        if h:
-            by_hour[h] += 1
+        dt = parse_flow_timestamp(f)
+        if dt is not None:
+            by_date[date_key(dt)] += 1
+            by_hour[hour_key(dt)] += 1
 
     def top_counter(c: Counter, n: int):
         return c.most_common(n)

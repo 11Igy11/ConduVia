@@ -1,36 +1,48 @@
 import sys
+from core.ai.assistant_service import AIAssistantService
 import ipaddress
 from ui.registry_page import RegistryPage
+from ui.listing_page import ListingPage
 import html
-from ui.live_rtt import LiveRTT
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 from core.protocols import format_ip_proto
+from ui.controllers.flow_controller import FlowController
+from ui.controllers.findings_controller import FindingsController
+from ui.controllers.search_controller import SearchController
+from ui.controllers.projects_ui_controller import ProjectsUIController
+from ui.controllers.dataset_controller import DatasetController
+from ui.controllers.explore_ui_controller import ExploreUIController
 
-from PySide6.QtCore import Qt, QAbstractTableModel, QModelIndex, QSortFilterProxyModel, QTimer
-from PySide6.QtGui import QGuiApplication, QColor, QIcon, QFont, QPixmap
+from ui.explore_models import FlowTableModel, NumericSortProxy
+from ui.explore_widgets import AITextWorker, FlowTableView
+from ui.findings_page import FindingsPage
+from ui.controllers.notes_controller import NotesController
+from ui.dialogs import (
+    message_dialog,
+    choice_dialog,
+    text_input_dialog,
+    multiline_input_dialog,
+    item_choice_dialog,
+    confirm_dialog,
+)
+from PySide6.QtCore import Qt, QTimer, QThread
+from PySide6.QtGui import QGuiApplication, QIcon, QFont, QPixmap
 from PySide6.QtWidgets import (
-    QApplication, QWidget, QHBoxLayout, QVBoxLayout,
-    QPushButton, QLabel, QStackedWidget, QFileDialog,
-    QTextEdit, QTabWidget, QTableView, QLineEdit,
-    QSplitter, QFormLayout, QGroupBox,
-    QListWidget, QListWidgetItem, QMessageBox, QInputDialog,
-    QComboBox, QMenu, QFrame
+    QApplication, QWidget, QHBoxLayout, QVBoxLayout, QGridLayout,
+    QPushButton, QLabel, QStackedWidget,
+    QTextEdit, QTabWidget, QLineEdit,
+    QSplitter, QGroupBox,
+    QListWidget, QListWidgetItem,
+    QComboBox, QFrame, QSizePolicy, QScrollArea, QHeaderView,
+    QTableView, QMenu
 )
-
-from core.loader import load_folder
-from core.analyzer import top_src_ips, top_dst_ips, top_applications, top_protocols
 from core.db import (
-    init_db, create_project, list_projects, get_project,
-    delete_project, add_dataset_load, list_recent_datasets,
-    add_finding, list_findings, get_finding,
+    init_db, add_finding, get_finding,
     update_finding, delete_finding,
-    get_project_notes, set_project_notes,
-    list_activity, add_activity
+    add_activity
 )
-
-
 # ---------- helpers ----------
 def is_private_ip(ip: str) -> bool:
     try:
@@ -38,15 +50,12 @@ def is_private_ip(ip: str) -> bool:
     except Exception:
         return False
 
-
 def status_emoji(status: str) -> str:
     s = (status or "").strip() or "New"
     return {"New": "🆕", "Investigating": "🟡", "Confirmed": "✅", "False Positive": "⚪"}.get(s, "🆕")
 
-
 def esc(s: Any) -> str:
     return html.escape("" if s is None else str(s))
-
 
 def normalize_tags(tags: str) -> str:
     # keep it simple: comma-separated, trim, remove empties, keep order, avoid duplicates
@@ -64,143 +73,7 @@ def normalize_tags(tags: str) -> str:
         seen.add(t.lower())
         parts.append(t)
     return ", ".join(parts)
-
-
-# ---------- Table Model ----------
-class FlowTableModel(QAbstractTableModel):
-    COLUMNS = [
-        ("src_ip", "Source IP"),
-        ("src_port", "Src Port"),
-        ("dst_ip", "Dest IP"),
-        ("dst_port", "Dst Port"),
-        ("protocol", "Proto"),
-        ("application_name", "App"),
-        ("bidirectional_bytes", "Bytes"),
-        ("bidirectional_duration_ms", "Duration(ms)"),
-        ("requested_server_name", "SNI"),
-    ]
-
-    def __init__(self, flows: list[dict[str, Any]] | None = None):
-        super().__init__()
-        self._flows: list[dict[str, Any]] = flows or []
-        self._ip_cache: dict[str, bool] = {}
-        self._bg_private = QColor("#E8F5E9")  # light green
-        self._bg_public = QColor("#FFEBEE")   # light red
-
-    def set_flows(self, flows: list[dict[str, Any]]):
-        self.beginResetModel()
-        self._flows = flows
-        self._ip_cache.clear()
-        self.endResetModel()
-
-    def rowCount(self, parent: QModelIndex = QModelIndex()) -> int:
-        return len(self._flows)
-
-    def columnCount(self, parent: QModelIndex = QModelIndex()) -> int:
-        return len(self.COLUMNS)
-
-    def headerData(self, section: int, orientation: Qt.Orientation, role: int = Qt.DisplayRole):
-        if role != Qt.DisplayRole:
-            return None
-        if orientation == Qt.Horizontal:
-            return self.COLUMNS[section][1]
-        return str(section + 1)
-
-    def _cached_is_private(self, ip: str) -> bool:
-        if ip in self._ip_cache:
-            return self._ip_cache[ip]
-        val = is_private_ip(ip)
-        self._ip_cache[ip] = val
-        return val
-
-    def data(self, index: QModelIndex, role: int = Qt.DisplayRole):
-        if not index.isValid():
-            return None
-
-        flow = self._flows[index.row()]
-        key = self.COLUMNS[index.column()][0]
-
-        if role == Qt.DisplayRole:
-            val = flow.get(key, "")
-            if key == "protocol":
-                return format_ip_proto(val)
-            return "" if val is None else str(val)
-
-        if role == Qt.ToolTipRole:
-            val = flow.get(key, "")
-            if key == "protocol":
-                return format_ip_proto(val)
-            return "" if val is None else str(val)
-
-        if role == Qt.UserRole:
-            val = flow.get(key)
-            if isinstance(val, (int, float)):
-                return val
-            try:
-                return int(val)
-            except Exception:
-                return 0
-
-        if role == Qt.BackgroundRole and key in ("src_ip", "dst_ip"):
-            ip = flow.get(key, "")
-            if not isinstance(ip, str) or not ip:
-                return None
-            return self._bg_private if self._cached_is_private(ip) else self._bg_public
-
-        return None
-
-
-# ---------- Proxy ----------
-class NumericSortProxy(QSortFilterProxyModel):
-    def __init__(self):
-        super().__init__()
-        self.filter_text = ""
-        self.conv_a: str | None = None
-        self.conv_b: str | None = None
-
-    def set_filter_text(self, text: str):
-        self.filter_text = (text or "").lower()
-        self.invalidate()
-
-    def set_conversation(self, a: str | None, b: str | None):
-        self.conv_a = a
-        self.conv_b = b
-        self.invalidate()
-
-    def clear_conversation(self):
-        self.conv_a = None
-        self.conv_b = None
-        self.invalidate()
-
-    def filterAcceptsRow(self, row: int, parent: QModelIndex) -> bool:
-        model = self.sourceModel()
-
-        if self.conv_a and self.conv_b:
-            src_ip = model.data(model.index(row, 0, parent), Qt.DisplayRole) or ""
-            dst_ip = model.data(model.index(row, 2, parent), Qt.DisplayRole) or ""
-            a, b = self.conv_a, self.conv_b
-            if not ((src_ip == a and dst_ip == b) or (src_ip == b and dst_ip == a)):
-                return False
-
-        if not self.filter_text:
-            return True
-
-        for col in range(model.columnCount()):
-            val = model.data(model.index(row, col, parent), Qt.DisplayRole)
-            if val and self.filter_text in str(val).lower():
-                return True
-        return False
-
-    def lessThan(self, left: QModelIndex, right: QModelIndex) -> bool:
-        l = self.sourceModel().data(left, Qt.UserRole)
-        r = self.sourceModel().data(right, Qt.UserRole)
-        if isinstance(l, (int, float)) and isinstance(r, (int, float)):
-            return l < r
-        ls = self.sourceModel().data(left, Qt.DisplayRole) or ""
-        rs = self.sourceModel().data(right, Qt.DisplayRole) or ""
-        return str(ls) < str(rs)
-
-
+    
 # ---------- Main App ----------
 class App(QWidget):
     def build_home_page(self) -> QWidget:
@@ -216,12 +89,11 @@ class App(QWidget):
         logo = QLabel()
         logo.setFixedSize(64, 64)
 
-        icon_path = self.project_dir / "assets" / "ConduVia.ico"  # koristiš ga već u main()
-        if icon_path.exists():
-            pm = QPixmap(str(icon_path))
+        icon_path = self.project_dir / "assets" / "ConduVia.ico"
+        pm = QPixmap(str(icon_path)) if icon_path.exists() else QPixmap()
+
         if not pm.isNull():
             logo.setPixmap(pm.scaled(64, 64, Qt.KeepAspectRatio, Qt.SmoothTransformation))
-        logo.setStyleSheet("border-radius: 10px;")
 
         title_col = QVBoxLayout()
         title_col.setSpacing(2)
@@ -232,7 +104,7 @@ class App(QWidget):
         f.setBold(True)
         title.setFont(f)
 
-        subtitle = QLabel("Network flow analysis & Live RTT correlation")
+        subtitle = QLabel("Network flow analysis")
         subtitle.setStyleSheet("color: #666666; font-size: 14px;")
 
         title_col.addWidget(title)
@@ -242,26 +114,7 @@ class App(QWidget):
         header.addLayout(title_col, 1)
         header.addStretch()
 
-        layout.addLayout(header)
-
-    # ---------- status chip row ----------
-        status = self.live_rtt.get_status()
-        chip = QLabel(
-        f"Live RTT: {'RUNNING' if status.running else 'STOPPED'}   |   "
-        f"UI: {'UP' if status.ui_up else 'DOWN'}   |   "
-        f"Session: {'FOUND' if status.has_session else 'NONE'}"
-    )
-        chip.setStyleSheet("""
-        QLabel {
-            padding: 6px 10px;
-            background: #f3f4f6;
-            border: 1px solid #e5e7eb;
-            border-radius: 999px;
-            color: #333333;
-            font-size: 12px;
-        }
-    """)
-        layout.addWidget(chip, 0)
+        layout.addLayout(header) 
 
     # ---------- main card ----------
         card = QFrame()
@@ -283,8 +136,7 @@ class App(QWidget):
 
         info = QLabel(
         "1) Create/Open a project\n"
-        "2) Load a dataset folder\n"
-        "3) (Optional) Start Live RTT for real-time correlation"
+        "2) Load a dataset folder\n"        
     )
         info.setStyleSheet("color: #374151; font-size: 13px;")
         info.setWordWrap(True)
@@ -293,35 +145,15 @@ class App(QWidget):
         actions = QHBoxLayout()
         actions.setSpacing(10)
 
-        btn_projects = QPushButton("Projects")
-        btn_explore = QPushButton("Explore")
-        btn_live = QPushButton("Live RTT")
-        btn_registry = QPushButton("Registry")
-        btn_open_dash = QPushButton("Open dashboard")
+        self.btn_home_projects = QPushButton("Projects")
+        self.btn_home_explore = QPushButton("Explore")
+        self.btn_home_registry = QPushButton("Registry")
 
-        for b in (btn_projects, btn_explore, btn_registry, btn_live, btn_open_dash):
+        for b in (self.btn_home_projects, self.btn_home_explore, self.btn_home_registry):
             b.setFixedHeight(36)
-
-        btn_projects.clicked.connect(lambda: self.pages.setCurrentIndex(self.IDX_PROJECTS))
-        btn_explore.clicked.connect(lambda: self.pages.setCurrentIndex(self.IDX_EXPLORE))
-        btn_registry.clicked.connect(lambda: self.pages.setCurrentIndex(self.IDX_REGISTRY))
-        btn_live.clicked.connect(self.live_rtt.show_dialog)
-        btn_open_dash.clicked.connect(self.live_rtt.action_open_dashboard)
-        
-
-    # “primary” look for Live RTT button
-        btn_live.setStyleSheet("""
-        QPushButton {
-            background: #111827;
-            color: white;
-            border: 1px solid #111827;
-            border-radius: 8px;
-            padding: 0 12px;
-        }
-        QPushButton:hover { background: #0b1220; }
-    """)
-    # subtle style for others
-        for b in (btn_projects, btn_explore, btn_registry, btn_open_dash):
+                
+        # subtle style for others
+        for b in (self.btn_home_projects, self.btn_home_explore, self.btn_home_registry):
             b.setStyleSheet("""
             QPushButton {
                 background: #ffffff;
@@ -333,10 +165,9 @@ class App(QWidget):
             QPushButton:hover { background: #f9fafb; }
         """)
 
-        actions.addWidget(btn_projects)
-        actions.addWidget(btn_explore)
-        actions.addWidget(btn_live)
-        actions.addWidget(btn_open_dash)
+        actions.addWidget(self.btn_home_projects)
+        actions.addWidget(self.btn_home_explore)
+        actions.addWidget(self.btn_home_registry)
         actions.addStretch()
 
         card_layout.addWidget(qs_title)
@@ -347,9 +178,128 @@ class App(QWidget):
         layout.addWidget(card)
         layout.addStretch()
 
-        return page
-        
+        return page    
 
+    def go_to_explore_flows(self):
+        self.go_page(self.IDX_EXPLORE, self._nav_explore)
+        self.tabs.setCurrentIndex(1)
+
+    def _build_sidebar(self) -> QVBoxLayout:
+        sidebar = QVBoxLayout()
+
+        self.btn_nav_projects = QPushButton("Projects")
+        self.btn_nav_explore = QPushButton("Explore")
+        self.btn_nav_registry = QPushButton("Registry")
+        self.btn_nav_listing = QPushButton("Listing")
+
+        for b in (self.btn_nav_projects, self.btn_nav_explore, self.btn_nav_registry, self.btn_nav_listing):
+            b.setObjectName("NavButton")
+            b.setFixedHeight(40)
+
+        # activ button reference (for highlight)
+        self._nav_projects = self.btn_nav_projects
+        self._nav_explore = self.btn_nav_explore
+        self._nav_registry = self.btn_nav_registry
+        self._nav_listing = self.btn_nav_listing
+
+        sidebar.addWidget(self.btn_nav_projects)
+        sidebar.addWidget(self.btn_nav_explore)
+        sidebar.addWidget(self.btn_nav_registry)
+        sidebar.addWidget(self.btn_nav_listing)
+        sidebar.addStretch()
+
+        return sidebar
+
+    def _wire_navigation(self) -> None:
+        self.btn_nav_projects.clicked.connect(lambda: self.go_page(self.IDX_PROJECTS, self._nav_projects))
+        self.btn_nav_explore.clicked.connect(lambda: self.go_page(self.IDX_EXPLORE, self._nav_explore))
+        self.btn_nav_registry.clicked.connect(lambda: self.go_page(self.IDX_REGISTRY, self._nav_registry))
+        self.btn_nav_listing.clicked.connect(lambda: self.go_page(self.IDX_LISTING, self._nav_listing))
+
+    def _wire_ui(self) -> None:
+        # 1) sidebar navigation
+        self._wire_navigation()
+
+        # 3) Explore - search filter (debounced)
+        self.search.textChanged.connect(self.search_controller.schedule_search_filter)
+
+        # 4) Explore - table selection -> details
+        self.table.selectionModel().selectionChanged.connect(self.explore_ui_controller.on_row_selected)
+
+        # 5) Explore - scrolling auto paging
+        self.table.verticalScrollBar().valueChanged.connect(self.explore_ui_controller.on_table_scrolled)
+
+        # 6) Paging controls
+        self.btn_load_more.clicked.connect(self.explore_ui_controller.load_next_page)
+        self.cmb_page_size.currentTextChanged.connect(self.explore_ui_controller.on_page_size_changed)
+
+        # 7) Explore actions
+        self.btn_load.clicked.connect(self.dataset_controller.load_dataset_dialog)
+        self.btn_ai_summary.clicked.connect(self.explore_ui_controller.generate_ai_summary)
+        self.btn_add_ai_to_notes.clicked.connect(self.add_ai_summary_to_notes)
+        self.btn_toggle_conv.clicked.connect(self.explore_ui_controller.toggle_conversation)
+        self.btn_expand_flows.clicked.connect(self.explore_ui_controller.toggle_flows_expanded)
+        self.btn_mark_finding.clicked.connect(self.mark_as_finding)
+
+        # 8) AI explain flow
+        self.btn_ai_explain.clicked.connect(self.explore_ui_controller.explain_selected_flow)
+        
+        # 9) Filter buttons
+        self.btn_filter_src.clicked.connect(
+            lambda: self.explore_ui_controller.apply_filter_ip(self.current_value("src_ip"))
+        )
+        self.btn_filter_dst.clicked.connect(
+            lambda: self.explore_ui_controller.apply_filter_ip(self.current_value("dst_ip"))
+        )
+        self.btn_filter_sni.clicked.connect(
+            lambda: self.explore_ui_controller.apply_filter_ip(self.current_value("requested_server_name"))
+        )
+
+        # 10) Projects page
+        self.btn_new_project.clicked.connect(self.projects_ui_controller.create_project_dialog)
+        self.btn_refresh_projects.clicked.connect(self.projects_ui_controller.refresh_projects)
+        self.btn_open_project.clicked.connect(self.projects_ui_controller.open_selected_project)
+        self.btn_delete_project.clicked.connect(self.projects_ui_controller.delete_selected_project)
+        self.projects_list.itemSelectionChanged.connect(self.projects_ui_controller.on_project_selected_preview)
+        self.btn_open_dataset.clicked.connect(self.projects_ui_controller.open_selected_dataset)
+
+        # 10b) Double click shortcuts
+        self.projects_list.itemDoubleClicked.connect(lambda _: self.projects_ui_controller.open_selected_project())
+        self.recent_list.itemDoubleClicked.connect(lambda _: self.projects_ui_controller.open_selected_dataset())
+
+        # 11) Findings page
+        fp = self.findings_page
+
+        fp.selectionChanged.connect(self.on_finding_selected)
+        fp.jumpRequested.connect(self.jump_to_selected_finding)
+        fp.editRequested.connect(self.edit_selected_finding)
+        fp.deleteRequested.connect(self.delete_selected_finding)
+        fp.aiRequested.connect(self.explain_selected_finding)
+        fp.doubleClickedFinding.connect(self.jump_to_selected_finding)
+
+        fp.btn_find_clear.clicked.connect(self.clear_findings_filters)
+        fp.cmb_find_status.currentTextChanged.connect(self.apply_findings_filter)
+        fp.cmb_find_sort.currentTextChanged.connect(self.apply_findings_filter)
+        fp.txt_find_search.textChanged.connect(self.apply_findings_filter)
+        fp.txt_find_tag.textChanged.connect(self.apply_findings_filter)
+        fp.contextMenuRequestedFromList.connect(self.on_findings_context_menu)
+
+        # 12) Notes autosave
+        self.txt_notes.textChanged.connect(self.on_notes_changed)
+        # 13) Registry -> Explore routing
+        self.registry_page.openExploreWithConversation.connect(self._open_from_registry)
+        self.registry_page.openExploreWithSearch.connect(self._open_from_registry_search)
+
+    def _post_init(self) -> None:
+        pass
+    
+    def _open_from_registry_search(self, q: str):
+        self.go_to_explore_flows()
+        self.explore_ui_controller.leave_conversation(clear_search=False)
+        self.search.setText(q or "")
+        self.search.setFocus()
+        self.explore_ui_controller.update_showing()
+        
     def __init__(self):
         super().__init__()
         self.setWindowTitle("ConduVia")
@@ -358,20 +308,139 @@ class App(QWidget):
 
         init_db()
         self.project_dir = Path(__file__).resolve().parent.parent
+        self._init_state()
 
+        self.ai_service = AIAssistantService()
+        self.notes_controller = NotesController()
+        self.flow_controller = FlowController()
+        self.findings_controller = FindingsController()
+        self.search_controller = SearchController(self)
+        self.projects_ui_controller = ProjectsUIController(self)
+        self.dataset_controller = DatasetController(self)
+        self.explore_ui_controller = ExploreUIController(self)
 
-        # Live RTT launcher
-        self.live_rtt = LiveRTT(parent=self, qr_timeout_ms=10_000)
+        self._search_timer.timeout.connect(self.search_controller.apply_search_filter)        
 
+        self._build_ui()
+        self._wire_ui()
+        self._post_init()
+
+        # init
+        self.projects_ui_controller.refresh_projects()
+        self.explore_ui_controller.update_detail(None)
+        self.explore_ui_controller.update_mode_label()
+        self.refresh_findings_ui()
+        self.refresh_notes_ui()
+        
+    def _message_dialog(
+        self,
+        title: str,
+        message: str,
+        details: str = "",
+        width: int = 420,
+    ) -> None:
+        return message_dialog(
+            self,
+            title,
+            message,
+            details=details,
+            width=width,
+        )
+
+    def _choice_dialog(
+        self,
+        title: str,
+        message: str,
+        choices: list[str],
+        width: int = 360,
+    ):
+        return choice_dialog(
+            self,
+            title,
+            message,
+            choices,
+            width=width,
+        )
+
+    def _text_input_dialog(
+        self,
+        title: str,
+        label: str,
+        text: str = "",
+        width: int = 420,
+    ):
+        return text_input_dialog(
+            self,
+            title,
+            label,
+            text=text,
+            width=width,
+        )
+
+    def _multiline_input_dialog(
+        self,
+        title: str,
+        label: str,
+        text: str = "",
+        width: int = 480,
+        height: int = 260,
+    ):
+        return multiline_input_dialog(
+            self,
+            title,
+            label,
+            text=text,
+            width=width,
+            height=height,
+        )
+
+    def _item_choice_dialog(
+        self,
+        title: str,
+        label: str,
+        items: list[str],
+        current_index: int = 0,
+        width: int = 420,
+    ):
+        return item_choice_dialog(
+            self,
+            title,
+            label,
+            items,
+            current_index=current_index,
+            width=width,
+        )
+
+    def _confirm_dialog(
+        self,
+        title: str,
+        message: str,
+        details: str = "",
+        ok_text: str = "OK",
+        cancel_text: str = "Cancel",
+        width: int = 420,
+        destructive: bool = False,
+    ) -> bool:
+        return confirm_dialog(
+            self,
+            title,
+            message,
+            details=details,
+            ok_text=ok_text,
+            cancel_text=cancel_text,
+            width=width,
+            destructive=destructive,
+        )
+
+    def _init_state(self) -> None:
         # State
         self.current_project_id: int | None = None
         self.current_project_name: str = ""
-        self.current_folder: Path | None = None
-
-        self.flows: list[dict[str, Any]] = []      # all flows in memory (for now)
-        self.loaded_flows: list[dict[str, Any]] = []  # currently shown in table
+        self.current_folder: Path | None = None        
+        
         self._current_flow: dict[str, Any] | None = None
         self._conversation_on = False
+        self._flows_expanded = False
 
         # Paging
         self.PAGE_SIZE = 2000
@@ -382,43 +451,34 @@ class App(QWidget):
         self._notes_timer.setSingleShot(True)
         self._notes_timer.timeout.connect(self._flush_notes)
 
-        # Findings in-memory cache (for filter/sort)
-        self._findings_rows: list[Any] = []
+        # Explore search debounce
+        self._search_timer = QTimer(self)
+        self._search_timer.setSingleShot(True)
+        
+        # Findings in-memory cache (for filter/sort)        
         self._findings_view_rows: list[Any] = []
 
+        # AI background worker
+        self._ai_thread: QThread | None = None
+        self._ai_worker: AITextWorker | None = None
+        self._ai_mode: str | None = None
+
+    def _build_ui(self) -> None:
         outer = QVBoxLayout(self)
         outer.setContentsMargins(8, 8, 8, 4)
         outer.setSpacing(4)
 
         root = QHBoxLayout()
 
-
         # Sidebar
-        # Sidebar
-        sidebar = QVBoxLayout()
+        sidebar = self._build_sidebar()
 
-        btn_projects = QPushButton("Projects")
-        btn_explore = QPushButton("Explore")
-        btn_registry = QPushButton("Registry")
-        btn_live_rtt = QPushButton("Live RTT")
-
-        for b in (btn_projects, btn_explore, btn_registry, btn_live_rtt):
-            b.setFixedHeight(40)
-
-        sidebar.addWidget(btn_projects)
-        sidebar.addWidget(btn_explore)
-        sidebar.addWidget(btn_registry)
-        sidebar.addWidget(btn_live_rtt)
-        sidebar.addStretch()
-
-        # Pages
+        # Pages + indexes
         self.pages = QStackedWidget()
-                # Page indexes
-        self.IDX_HOME = 0
-        self.IDX_PROJECTS = 1
-        self.IDX_EXPLORE = 2
-        self.IDX_REGISTRY = 3
-
+        self.IDX_PROJECTS = 0
+        self.IDX_EXPLORE = 1
+        self.IDX_REGISTRY = 2
+        self.IDX_LISTING = 3
 
         # -------- Projects page --------
         projects_page = QWidget()
@@ -428,7 +488,7 @@ class App(QWidget):
 
         btn_row = QHBoxLayout()
         self.btn_new_project = QPushButton("New project")
-        self.btn_open_project = QPushButton("Open selected")
+        self.btn_open_project = QPushButton("Open project")
         self.btn_refresh_projects = QPushButton("Refresh")
         self.btn_delete_project = QPushButton("Delete selected")
         btn_row.addWidget(self.btn_new_project)
@@ -437,109 +497,413 @@ class App(QWidget):
         btn_row.addWidget(self.btn_delete_project)
 
         self.projects_list = QListWidget()
-        self.projects_list.itemSelectionChanged.connect(self.on_project_selected_preview)
-        self.projects_list.itemDoubleClicked.connect(lambda _: self.open_selected_project())
-
         self.projects_info = QTextEdit()
         self.projects_info.setReadOnly(True)
+        self.projects_info.setPlaceholderText("Select a project to see details.")
 
         self.lbl_recent = QLabel("Recent datasets:")
         self.recent_list = QListWidget()
-        self.recent_list.itemDoubleClicked.connect(lambda _: self.open_selected_dataset())
 
         recent_btn_row = QHBoxLayout()
         self.btn_open_dataset = QPushButton("Open dataset")
-        self.btn_open_dataset.clicked.connect(self.open_selected_dataset)
         recent_btn_row.addWidget(self.btn_open_dataset)
         recent_btn_row.addStretch()
 
-        self.btn_delete_project.clicked.connect(self.delete_selected_project)
-
         projects_layout.addWidget(self.lbl_active_project)
         projects_layout.addLayout(btn_row)
-        projects_layout.addWidget(QLabel("Projects:"))
-        projects_layout.addWidget(self.projects_list, 2)
-        projects_layout.addWidget(self.projects_info, 1)
+        middle_row = QHBoxLayout()
+
+        left_col = QVBoxLayout()
+        left_col.addWidget(QLabel("Recent Projects:"))
+        left_col.addWidget(self.projects_list, 1)
+
+        right_col = QVBoxLayout()
+        right_col.addWidget(QLabel("Details:"))
+        right_col.addWidget(self.projects_info, 1)
+
+        middle_row.addLayout(left_col, 2)
+        middle_row.addLayout(right_col, 3)
+
+        projects_layout.addLayout(middle_row, 1)
         projects_layout.addWidget(self.lbl_recent)
         projects_layout.addWidget(self.recent_list, 1)
         projects_layout.addLayout(recent_btn_row)
-
-        self.btn_new_project.clicked.connect(self.create_project_dialog)
-        self.btn_open_project.clicked.connect(self.open_selected_project)
-        self.btn_refresh_projects.clicked.connect(self.refresh_projects)
 
         # -------- Explore page --------
         explore_container = QWidget()
         explore_layout = QVBoxLayout(explore_container)
 
         self.lbl_project_banner = QLabel("Project: (none)")
-        self.btn_load = QPushButton("Load dataset folder")
-        self.lbl_path = QLabel("No dataset loaded")
-        self.lbl_stats = QLabel("")
-        self.lbl_showing = QLabel("")
-        self.lbl_mode = QLabel("")
+        self.lbl_project_banner.setObjectName("HeaderProjectLabel")
 
-        # Paging controls
-        paging_row = QHBoxLayout()
+        self.btn_load = QPushButton("Load dataset")
+
+        self.lbl_path = QLabel("No dataset loaded")
+        self.lbl_path.setObjectName("HeaderPathLabel")
+        self.lbl_path.setWordWrap(True)
+
+        self.lbl_stats = QLabel("")
+        self.lbl_stats.setObjectName("HeaderStatLabel")
+
         self.lbl_loaded = QLabel("")
+        self.lbl_loaded.setObjectName("HeaderStatLabel")
+
+        self.lbl_showing = QLabel("")
+        self.lbl_showing.setObjectName("HeaderStatLabel")
+
+        self.lbl_mode = QLabel("")
+        self.lbl_mode.hide()
+
+        self.lbl_conv_summary = QLabel("")
+        self.lbl_conv_summary.hide()
+
         self.btn_load_more = QPushButton("Load next")
-        self.btn_load_more.clicked.connect(self.load_next_page)
         self.btn_load_more.setEnabled(False)
-        paging_row.addWidget(self.lbl_loaded)
-        paging_row.addStretch()
-        paging_row.addWidget(QLabel("Page size:"))
+
         self.cmb_page_size = QComboBox()
         self.cmb_page_size.addItems(["1000", "2000", "5000", "10000"])
         self.cmb_page_size.setCurrentText("2000")
-        self.cmb_page_size.currentTextChanged.connect(self.on_page_size_changed)
-        paging_row.addWidget(self.cmb_page_size)
-        paging_row.addWidget(self.btn_load_more)
+
+        header_card = QFrame()
+        header_card.setObjectName("ExploreHeaderCard")
+
+        header_layout = QVBoxLayout(header_card)
+        header_layout.setContentsMargins(14, 14, 14, 14)
+        header_layout.setSpacing(10)
+
+        # row 1
+        header_top = QHBoxLayout()
+        header_top.setSpacing(12)
+
+        header_top.addWidget(self.lbl_project_banner)
+        header_top.addStretch()
+        header_top.addWidget(QLabel("Page size:"))
+        header_top.addWidget(self.cmb_page_size)
+        header_top.addWidget(self.btn_load_more)
+        
+        # row 2
+        header_mid = QHBoxLayout()
+        header_mid.setSpacing(8)
+        header_mid.addWidget(self.lbl_path, 1)
+
+        # row 3
+        header_bottom = QHBoxLayout()
+        header_bottom.setSpacing(18)
+        header_bottom.addWidget(self.lbl_stats)
+        header_bottom.addWidget(self.lbl_loaded)
+        header_bottom.addWidget(self.lbl_showing)
+        header_bottom.addStretch()
+
+        header_layout.addLayout(header_top)
+        header_layout.addLayout(header_mid)
+        header_layout.addLayout(header_bottom)
 
         self.search = QLineEdit()
         self.search.setPlaceholderText("Search IP / SNI / app...")
 
         self.tabs = QTabWidget()
 
-        # Summary tab
-        self.txt_summary = QTextEdit()
-        self.txt_summary.setReadOnly(True)
-        self.tabs.addTab(self.txt_summary, "Summary")
+        summary_tab = QWidget()
+        summary_layout = QVBoxLayout(summary_tab)
+        summary_layout.setContentsMargins(8, 8, 8, 8)
+        summary_layout.setSpacing(10)
 
-        # Flows tab
+        self.btn_ai_summary = QPushButton("Generate AI Summary")
+        self.btn_add_ai_to_notes = QPushButton("Add AI to Notes")
+        self.btn_add_ai_to_notes.setEnabled(True)
+
+        summary_btn_row = QHBoxLayout()
+        summary_btn_row.setSpacing(8)
+        summary_btn_row.addWidget(self.btn_ai_summary)
+        summary_btn_row.addWidget(self.btn_add_ai_to_notes)
+        summary_btn_row.addStretch()
+
+        summary_layout.addLayout(summary_btn_row)
+
+        summary_split = QSplitter(Qt.Horizontal)
+
+        # ----- Left: Dataset summary -----
+        dataset_panel = QWidget()
+        dataset_layout = QVBoxLayout(dataset_panel)
+        dataset_layout.setContentsMargins(0, 0, 0, 0)
+        dataset_layout.setSpacing(8)
+
+        self.lbl_dataset_summary = QLabel("Dataset summary")
+        self.lbl_dataset_summary.setObjectName("SectionTitle")
+
+        dataset_grid = QGridLayout()
+        dataset_grid.setContentsMargins(0, 0, 0, 0)
+        dataset_grid.setHorizontalSpacing(10)
+        dataset_grid.setVerticalSpacing(10)
+
+        # Top source IPs
+        self.box_top_src = QGroupBox("Top source IPs")
+        self.box_top_src.setObjectName("SummaryCard")
+        box_top_src_layout = QVBoxLayout(self.box_top_src)
+
+        self.txt_top_src_left = QLabel()
+        self.txt_top_src_right = QLabel()
+
+        for w in (self.txt_top_src_left, self.txt_top_src_right):
+            w.setTextInteractionFlags(Qt.TextSelectableByMouse)
+            w.setWordWrap(False)
+            w.setObjectName("SummaryTextBox")
+
+        self.txt_top_src_left.setAlignment(Qt.AlignTop | Qt.AlignLeft)
+        self.txt_top_src_right.setAlignment(Qt.AlignTop | Qt.AlignRight)
+
+        src_grid = QGridLayout()
+        src_grid.setContentsMargins(6, 0, 6, 0)
+        src_grid.setHorizontalSpacing(18)
+        src_grid.setVerticalSpacing(0)
+        src_grid.addWidget(self.txt_top_src_left, 0, 0)
+        src_grid.addWidget(self.txt_top_src_right, 0, 1)
+        src_grid.setColumnStretch(0, 1)
+        src_grid.setColumnStretch(1, 0)
+
+        box_top_src_layout.addLayout(src_grid)
+
+        # Top destination IPs
+        self.box_top_dst = QGroupBox("Top destination IPs")
+        self.box_top_dst.setObjectName("SummaryCard")
+        box_top_dst_layout = QVBoxLayout(self.box_top_dst)
+
+        self.txt_top_dst_left = QLabel()
+        self.txt_top_dst_right = QLabel()
+
+        for w in (self.txt_top_dst_left, self.txt_top_dst_right):
+            w.setTextInteractionFlags(Qt.TextSelectableByMouse)
+            w.setWordWrap(False)
+            w.setObjectName("SummaryTextBox")
+
+        self.txt_top_dst_left.setAlignment(Qt.AlignTop | Qt.AlignLeft)
+        self.txt_top_dst_right.setAlignment(Qt.AlignTop | Qt.AlignRight)
+
+        dst_grid = QGridLayout()
+        dst_grid.setContentsMargins(6, 0, 6, 0)
+        dst_grid.setHorizontalSpacing(18)
+        dst_grid.setVerticalSpacing(0)
+        dst_grid.addWidget(self.txt_top_dst_left, 0, 0)
+        dst_grid.addWidget(self.txt_top_dst_right, 0, 1)
+        dst_grid.setColumnStretch(0, 1)
+        dst_grid.setColumnStretch(1, 0)
+
+        box_top_dst_layout.addLayout(dst_grid)
+
+        # Top protocols
+        self.box_top_proto = QGroupBox("Top protocols")
+        self.box_top_proto.setObjectName("SummaryCard")
+        box_top_proto_layout = QVBoxLayout(self.box_top_proto)
+
+        self.txt_top_proto_left = QLabel()
+        self.txt_top_proto_right = QLabel()
+
+        for w in (self.txt_top_proto_left, self.txt_top_proto_right):
+            w.setTextInteractionFlags(Qt.TextSelectableByMouse)
+            w.setWordWrap(False)
+            w.setObjectName("SummaryTextBox")
+
+        self.txt_top_proto_left.setAlignment(Qt.AlignTop | Qt.AlignLeft)
+        self.txt_top_proto_right.setAlignment(Qt.AlignTop | Qt.AlignRight)
+
+        proto_grid = QGridLayout()
+        proto_grid.setContentsMargins(6, 0, 6, 0)
+        proto_grid.setHorizontalSpacing(18)
+        proto_grid.setVerticalSpacing(0)
+        proto_grid.addWidget(self.txt_top_proto_left, 0, 0)
+        proto_grid.addWidget(self.txt_top_proto_right, 0, 1)
+        proto_grid.setColumnStretch(0, 1)
+        proto_grid.setColumnStretch(1, 0)
+
+        box_top_proto_layout.addLayout(proto_grid)
+
+        # Top applications
+        self.box_top_apps = QGroupBox("Top applications")
+        self.box_top_apps.setObjectName("SummaryCard")
+        box_top_apps_layout = QVBoxLayout(self.box_top_apps)
+
+        self.txt_top_apps_left = QLabel()
+        self.txt_top_apps_right = QLabel()
+
+        for w in (self.txt_top_apps_left, self.txt_top_apps_right):
+            w.setTextInteractionFlags(Qt.TextSelectableByMouse)
+            w.setWordWrap(False)
+            w.setObjectName("SummaryTextBox")
+
+        self.txt_top_apps_left.setAlignment(Qt.AlignTop | Qt.AlignLeft)
+        self.txt_top_apps_right.setAlignment(Qt.AlignTop | Qt.AlignRight)
+
+        apps_grid = QGridLayout()
+        apps_grid.setContentsMargins(6, 0, 6, 0)
+        apps_grid.setHorizontalSpacing(18)
+        apps_grid.setVerticalSpacing(0)
+        apps_grid.addWidget(self.txt_top_apps_left, 0, 0)
+        apps_grid.addWidget(self.txt_top_apps_right, 0, 1)
+        apps_grid.setColumnStretch(0, 1)
+        apps_grid.setColumnStretch(1, 0)
+
+        box_top_apps_layout.addLayout(apps_grid)
+
+        summary_font = QFont("Consolas", 10)
+        summary_font.setStyleHint(QFont.Monospace)
+
+        for w in (
+            self.txt_top_src_left, self.txt_top_src_right,
+            self.txt_top_dst_left, self.txt_top_dst_right,
+            self.txt_top_proto_left, self.txt_top_proto_right,
+            self.txt_top_apps_left, self.txt_top_apps_right,
+        ):
+            w.setFont(summary_font)
+
+        dataset_grid.addWidget(self.box_top_src, 0, 0)
+        dataset_grid.addWidget(self.box_top_dst, 0, 1)
+        dataset_grid.addWidget(self.box_top_proto, 1, 0)
+        dataset_grid.addWidget(self.box_top_apps, 1, 1)
+
+        dataset_layout.addWidget(self.lbl_dataset_summary)
+        dataset_layout.addLayout(dataset_grid, 1)
+
+        # ----- Right: AI assistant output -----
+        ai_panel = QWidget()
+        ai_layout = QVBoxLayout(ai_panel)
+        ai_layout.setContentsMargins(0, 0, 0, 0)
+        ai_layout.setSpacing(6)
+
+        self.lbl_ai_summary = QLabel("AI assistant output")
+        self.lbl_ai_summary.setObjectName("SectionTitle")
+
+        self.txt_ai_summary = QTextEdit()
+        self.txt_ai_summary.setReadOnly(True)
+        self.txt_ai_summary.setPlaceholderText("AI summary will appear here...")
+        self.txt_ai_summary.setMinimumWidth(520)
+
+        ai_layout.addWidget(self.lbl_ai_summary)
+        ai_layout.addWidget(self.txt_ai_summary, 1)
+
+        summary_split.addWidget(dataset_panel)
+        summary_split.addWidget(ai_panel)
+        summary_split.setStretchFactor(0, 4)
+        summary_split.setStretchFactor(1, 5)
+        summary_split.setCollapsible(0, False)
+        summary_split.setCollapsible(1, False)
+
+        summary_layout.addWidget(summary_split, 1)
+
+        self.tabs.addTab(summary_tab, "Summary")
+
         flows_tab = QWidget()
         flows_tab_layout = QVBoxLayout(flows_tab)
+        flows_tab_layout.setContentsMargins(8, 8, 8, 8)
+        flows_tab_layout.setSpacing(8)
+
+        # ----- FLOW TOOLBAR -----        
+        toolbar_wrap = QFrame()
+        toolbar_wrap.setObjectName("FlowToolbarCard")
+        toolbar_wrap.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        toolbar_wrap.setFixedHeight(68)
+
+        toolbar = QHBoxLayout(toolbar_wrap)
+        toolbar.setContentsMargins(10, 10, 10, 10)
+        toolbar.setSpacing(10)
+        toolbar.setAlignment(Qt.AlignVCenter)
+
+        left_actions = QHBoxLayout()
+        left_actions.setSpacing(8)
+
+        right_actions = QHBoxLayout()
+        right_actions.setSpacing(8)
+
+        self.btn_filter_src = QPushButton("Filter source")
+        self.btn_filter_dst = QPushButton("Filter destination")
+        self.btn_filter_sni = QPushButton("Filter SNI")
+        self.btn_load.setFixedHeight(34)
+
+        self.btn_toggle_conv = QPushButton("Conversation: OFF")
+        self.btn_expand_flows = QPushButton("Expand Flows")
+        self.btn_mark_finding = QPushButton("Mark as Finding")
+        self.btn_ai_explain = QPushButton("Explain with AI")
+
+        for b in (
+            self.btn_filter_src, self.btn_filter_dst,
+            self.btn_filter_sni,
+            self.btn_toggle_conv, self.btn_expand_flows,
+            self.btn_mark_finding, self.btn_ai_explain
+        ):
+            b.setFixedHeight(34)
+            b.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        
+        left_actions.addSpacing(6)
+        left_actions.addWidget(self.btn_load)
+        left_actions.addWidget(self.btn_filter_src)
+        left_actions.addWidget(self.btn_filter_dst)
+        left_actions.addWidget(self.btn_filter_sni)
+
+        right_actions.addWidget(self.btn_toggle_conv)
+        right_actions.addWidget(self.btn_expand_flows)
+        right_actions.addWidget(self.btn_mark_finding)
+        right_actions.addWidget(self.btn_ai_explain)
+
+        toolbar.addLayout(left_actions)
+        toolbar.addStretch()
+        toolbar.addLayout(right_actions)
+
+        flows_tab_layout.addWidget(toolbar_wrap)
         self.splitter = QSplitter(Qt.Horizontal)
 
-        self.table = QTableView()
+        self.table = FlowTableView(self)
         self.table.setSortingEnabled(True)
         self.table.setAlternatingRowColors(True)
         self.table.setSelectionBehavior(QTableView.SelectRows)
         self.table.setSelectionMode(QTableView.SingleSelection)
-        self.table.horizontalHeader().setStretchLastSection(True)
-        self.table.verticalHeader().setVisible(False)
         self.table.setWordWrap(False)
+        self.table.setShowGrid(False)
+        self.table.setCornerButtonEnabled(False)
+        self.table.setEditTriggers(QTableView.NoEditTriggers)
+        self.table.setFocusPolicy(Qt.StrongFocus)
+        
+        self.table.verticalHeader().setVisible(False)
+        self.table.verticalHeader().setDefaultSectionSize(34)
+
+        header = self.table.horizontalHeader()
+        header.setStretchLastSection(False)
+        header.setMinimumSectionSize(70)
+        header.setDefaultAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        header.setSectionResizeMode(QHeaderView.Interactive)
 
         self.model = FlowTableModel([])
         self.proxy = NumericSortProxy()
         self.proxy.setSourceModel(self.model)
         self.table.setModel(self.proxy)
 
-        self.search.textChanged.connect(self.proxy.set_filter_text)
-        self.search.textChanged.connect(lambda _: self.update_showing())
-        self.table.selectionModel().selectionChanged.connect(self.on_row_selected)
-
-        # Auto-load on scroll near bottom
-        self.table.verticalScrollBar().valueChanged.connect(self.on_table_scrolled)
+        header = self.table.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.ResizeToContents)   # Source IP
+        header.setSectionResizeMode(1, QHeaderView.ResizeToContents)   # Source Port
+        header.setSectionResizeMode(2, QHeaderView.ResizeToContents)   # Destination IP
+        header.setSectionResizeMode(3, QHeaderView.ResizeToContents)   # Destination Port
+        header.setSectionResizeMode(4, QHeaderView.ResizeToContents)   # Protocol
+        header.setSectionResizeMode(5, QHeaderView.ResizeToContents)   # App
+        header.setSectionResizeMode(6, QHeaderView.ResizeToContents)   # Bytes
+        header.setSectionResizeMode(7, QHeaderView.ResizeToContents)   # Duration
+        header.setSectionResizeMode(8, QHeaderView.Stretch)            # SNI
 
         self.splitter.addWidget(self.table)
 
-        # Details panel
-        details_panel = QWidget()
-        details_panel.setMinimumWidth(420)
+        self.details_panel = QWidget()
+        details_panel = self.details_panel
+        details_panel.setMinimumWidth(430)
+        details_panel.setMaximumWidth(520)
+
         details_layout = QVBoxLayout(details_panel)
+        details_layout.setContentsMargins(0, 0, 0, 0)
+        details_layout.setSpacing(10)
 
         grp = QGroupBox("Flow details")
-        form = QFormLayout(grp)
+        grp.setObjectName("FlowDetailsCard")
+
+        details_grid = QGridLayout(grp)
+        details_grid.setContentsMargins(14, 14, 14, 14)
+        details_grid.setHorizontalSpacing(14)
+        details_grid.setVerticalSpacing(12)
 
         self.d_src = QLabel("-"); self.d_src.setTextInteractionFlags(Qt.TextSelectableByMouse)
         self.d_dst = QLabel("-"); self.d_dst.setTextInteractionFlags(Qt.TextSelectableByMouse)
@@ -550,53 +914,67 @@ class App(QWidget):
         self.d_duration = QLabel("-")
         self.d_sni = QLabel("-"); self.d_sni.setTextInteractionFlags(Qt.TextSelectableByMouse)
 
-        form.addRow("Source:", self.d_src)
-        form.addRow("Destination:", self.d_dst)
-        form.addRow("Protocol:", self.d_proto)
-        form.addRow("Application:", self.d_app)
-        form.addRow("Bytes:", self.d_bytes)
-        form.addRow("Packets:", self.d_packets)
-        form.addRow("Duration (ms):", self.d_duration)
-        form.addRow("SNI:", self.d_sni)
+        for w in (self.d_src, self.d_dst, self.d_proto, self.d_app, self.d_bytes, self.d_packets, self.d_duration, self.d_sni):
+            w.setWordWrap(True)
+            w.setMinimumHeight(36)
+            w.setAlignment(Qt.AlignLeft | Qt.AlignTop)
+            w.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
 
-        details_layout.addWidget(grp)
+        self.d_src.setTextFormat(Qt.PlainText)
+        self.d_dst.setTextFormat(Qt.PlainText)
+        self.d_sni.setTextFormat(Qt.PlainText)
 
-        # Buttons: copy
-        btn_row1 = QHBoxLayout()
-        self.btn_copy_src = QPushButton("Copy Src IP")
-        self.btn_copy_dst = QPushButton("Copy Dst IP")
-        self.btn_copy_sni = QPushButton("Copy SNI")
-        self.btn_copy_src.clicked.connect(lambda: self.copy_text(self.current_value("src_ip")))
-        self.btn_copy_dst.clicked.connect(lambda: self.copy_text(self.current_value("dst_ip")))
-        self.btn_copy_sni.clicked.connect(lambda: self.copy_text(self.current_value("requested_server_name")))
-        btn_row1.addWidget(self.btn_copy_src)
-        btn_row1.addWidget(self.btn_copy_dst)
-        btn_row1.addWidget(self.btn_copy_sni)
-        details_layout.addLayout(btn_row1)
+        lbl_src = QLabel("Source")
+        lbl_dst = QLabel("Destination")
+        lbl_proto = QLabel("Protocol")
+        lbl_app = QLabel("Application")
+        lbl_bytes = QLabel("Bytes")
+        lbl_packets = QLabel("Packets")
+        lbl_duration = QLabel("Duration (ms)")
+        lbl_sni = QLabel("SNI")
 
-        # Buttons: filter
-        btn_row2 = QHBoxLayout()
-        self.btn_filter_src = QPushButton("Filter Src")
-        self.btn_filter_dst = QPushButton("Filter Dst")
-        self.btn_filter_src.clicked.connect(lambda: self.apply_filter_ip(self.current_value("src_ip")))
-        self.btn_filter_dst.clicked.connect(lambda: self.apply_filter_ip(self.current_value("dst_ip")))
-        btn_row2.addWidget(self.btn_filter_src)
-        btn_row2.addWidget(self.btn_filter_dst)
-        details_layout.addLayout(btn_row2)
+        for lbl in (lbl_src, lbl_dst, lbl_proto, lbl_app, lbl_bytes, lbl_packets, lbl_duration, lbl_sni):
+            lbl.setObjectName("FlowFieldLabel")
 
-        # Conversation + Finding
-        self.btn_toggle_conv = QPushButton("Conversation: OFF")
-        self.btn_toggle_conv.clicked.connect(self.toggle_conversation)
+        for val in (self.d_src, self.d_dst, self.d_proto, self.d_app, self.d_bytes, self.d_packets, self.d_duration, self.d_sni):
+            val.setObjectName("FlowFieldValue")
 
-        self.btn_mark_finding = QPushButton("Mark as Finding")
-        self.btn_mark_finding.clicked.connect(self.mark_as_finding)
+        details_grid.addWidget(lbl_src,      0, 0)
+        details_grid.addWidget(lbl_dst,      0, 1)
+        details_grid.addWidget(self.d_src,   1, 0)
+        details_grid.addWidget(self.d_dst,   1, 1)
 
-        details_layout.addWidget(self.btn_toggle_conv)
-        details_layout.addWidget(self.btn_mark_finding)
-        details_layout.addStretch()
+        details_grid.addWidget(lbl_proto,    2, 0)
+        details_grid.addWidget(lbl_app,      2, 1)
+        details_grid.addWidget(self.d_proto, 3, 0)
+        details_grid.addWidget(self.d_app,   3, 1)
+
+        details_grid.addWidget(lbl_bytes,    4, 0)
+        details_grid.addWidget(lbl_packets,  4, 1)
+        details_grid.addWidget(self.d_bytes, 5, 0)
+        details_grid.addWidget(self.d_packets, 5, 1)
+
+        details_grid.addWidget(lbl_duration,    6, 0)
+        details_grid.addWidget(self.d_duration, 7, 0)
+
+        details_grid.addWidget(lbl_sni,         8, 0, 1, 2)
+        details_grid.addWidget(self.d_sni,      9, 0, 1, 2)
+
+        details_grid.setColumnStretch(0, 1)
+        details_grid.setColumnStretch(1, 1)
+
+        grp.setMinimumHeight(0)
+        grp.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setWidget(grp)
+        details_layout.addWidget(scroll, 1)
 
         self.splitter.addWidget(details_panel)
-        self.splitter.setStretchFactor(0, 4)
+        self.splitter.setStretchFactor(0, 5)
         self.splitter.setStretchFactor(1, 2)
         self.splitter.setCollapsible(1, False)
 
@@ -604,84 +982,24 @@ class App(QWidget):
         self.tabs.addTab(flows_tab, "Flows")
 
         # Findings tab
-        findings_tab = QWidget()
-        findings_root = QVBoxLayout(findings_tab)
+        self.findings_page = FindingsPage()
 
-        actions = QHBoxLayout()
-        self.btn_finding_edit = QPushButton("Edit")
-        self.btn_finding_delete = QPushButton("Delete")
-        self.btn_finding_jump = QPushButton("Jump to Flow")
-        actions.addWidget(self.btn_finding_edit)
-        actions.addWidget(self.btn_finding_delete)
-        actions.addWidget(self.btn_finding_jump)
-        actions.addStretch()
-        findings_root.addLayout(actions)
+        self.btn_finding_edit = self.findings_page.btn_finding_edit
+        self.btn_finding_delete = self.findings_page.btn_finding_delete
+        self.btn_finding_jump = self.findings_page.btn_finding_jump
+        self.btn_finding_ai = self.findings_page.btn_finding_ai
 
-        # Findings filter row
-        frow = QHBoxLayout()
-        frow.addWidget(QLabel("Status:"))
-        self.cmb_find_status = QComboBox()
-        self.cmb_find_status.addItems(["All", "New", "Investigating", "Confirmed", "False Positive"])
-        frow.addWidget(self.cmb_find_status)
+        self.cmb_find_status = self.findings_page.cmb_find_status
+        self.cmb_find_sort = self.findings_page.cmb_find_sort
+        self.txt_find_search = self.findings_page.txt_find_search
+        self.txt_find_tag = self.findings_page.txt_find_tag
+        self.btn_find_clear = self.findings_page.btn_find_clear
 
-        frow.addSpacing(12)
-        frow.addWidget(QLabel("Search:"))
-        self.txt_find_search = QLineEdit()
-        self.txt_find_search.setPlaceholderText("title / ip / app / sni / note...")
-        frow.addWidget(self.txt_find_search, 2)
+        self.findings_list = self.findings_page.findings_list
+        self.finding_detail = self.findings_page.finding_detail
+        self.findings_split = self.findings_page.findings_split
 
-        frow.addSpacing(12)
-        frow.addWidget(QLabel("Tag contains:"))
-        self.txt_find_tag = QLineEdit()
-        self.txt_find_tag.setPlaceholderText("e.g. c2, dns, exfil ...")
-        frow.addWidget(self.txt_find_tag, 1)
-
-        frow.addSpacing(12)
-        frow.addWidget(QLabel("Sort:"))
-        self.cmb_find_sort = QComboBox()
-        self.cmb_find_sort.addItems(["Newest", "Oldest", "Status", "Title"])
-        frow.addWidget(self.cmb_find_sort)
-
-        self.btn_find_clear = QPushButton("Clear")
-        frow.addWidget(self.btn_find_clear)
-
-        findings_root.addLayout(frow)
-
-        self.findings_split = QSplitter(Qt.Horizontal)
-
-        self.findings_list = QListWidget()
-        self.findings_list.itemSelectionChanged.connect(self.on_finding_selected)
-        self.findings_list.itemDoubleClicked.connect(lambda _: self.jump_to_selected_finding())
-
-        # Right click menu on Findings
-        self.findings_list.setContextMenuPolicy(Qt.CustomContextMenu)
-        self.findings_list.customContextMenuRequested.connect(self.on_findings_context_menu)
-
-        self.finding_detail = QTextEdit()
-        self.finding_detail.setReadOnly(True)
-        self.finding_detail.setPlaceholderText("Select a finding to see details...")
-
-        self.findings_split.addWidget(self.findings_list)
-        self.findings_split.addWidget(self.finding_detail)
-        self.findings_split.setSizes([420, 700])
-
-        findings_root.addWidget(self.findings_split)
-        self.tabs.addTab(findings_tab, "Findings")
-
-        self.btn_finding_edit.clicked.connect(self.edit_selected_finding)
-        self.btn_finding_delete.clicked.connect(self.delete_selected_finding)
-        self.btn_finding_jump.clicked.connect(self.jump_to_selected_finding)
-
-        self.btn_finding_edit.setEnabled(False)
-        self.btn_finding_delete.setEnabled(False)
-        self.btn_finding_jump.setEnabled(False)
-
-        # connect filters
-        self.cmb_find_status.currentTextChanged.connect(lambda _: self.apply_findings_filter())
-        self.cmb_find_sort.currentTextChanged.connect(lambda _: self.apply_findings_filter())
-        self.txt_find_search.textChanged.connect(lambda _: self.apply_findings_filter())
-        self.txt_find_tag.textChanged.connect(lambda _: self.apply_findings_filter())
-        self.btn_find_clear.clicked.connect(self.clear_findings_filters)
+        self.tabs.addTab(self.findings_page, "Findings")
 
         # Notes tab
         notes_tab = QWidget()
@@ -691,7 +1009,6 @@ class App(QWidget):
         left.addWidget(QLabel("Project notes"))
         self.txt_notes = QTextEdit()
         self.txt_notes.setPlaceholderText("Write case notes here… (autosave)")
-        self.txt_notes.textChanged.connect(self.on_notes_changed)
         left.addWidget(self.txt_notes, 1)
 
         right = QVBoxLayout()
@@ -705,62 +1022,54 @@ class App(QWidget):
         self.tabs.addTab(notes_tab, "Notes")
 
         # Explore layout
-        explore_layout.addWidget(self.lbl_project_banner)
-        explore_layout.addWidget(self.btn_load)
-        explore_layout.addWidget(self.lbl_path)
-        explore_layout.addWidget(self.lbl_stats)
-        explore_layout.addLayout(paging_row)
-        explore_layout.addWidget(self.lbl_showing)
+        explore_layout.addWidget(header_card)
         explore_layout.addWidget(self.lbl_mode)
+        explore_layout.addWidget(self.lbl_conv_summary)
         explore_layout.addWidget(self.search)
         explore_layout.addWidget(self.tabs, 1)
 
-        # Add pages
-                # Add pages (Home -> Projects -> Explore)
-        home_page = self.build_home_page()
-        self.pages.addWidget(home_page)
+        # Pages
         self.pages.addWidget(projects_page)
         self.pages.addWidget(explore_container)
+
         self.registry_page = RegistryPage()
         self.pages.addWidget(self.registry_page)
 
-        # Start on Home
-        self.pages.setCurrentIndex(self.IDX_HOME)
+        self.listing_page = ListingPage()
+        self.pages.addWidget(self.listing_page)
 
-
-        # Nav + actions
-        btn_projects.clicked.connect(lambda: self.pages.setCurrentIndex(self.IDX_PROJECTS))
-        btn_explore.clicked.connect(lambda: self.pages.setCurrentIndex(self.IDX_EXPLORE))
-        btn_live_rtt.clicked.connect(self.live_rtt.show_dialog)
-        self.btn_load.clicked.connect(self.load_dataset_dialog)
-        btn_registry.clicked.connect(lambda: self.pages.setCurrentIndex(self.IDX_REGISTRY))
+        self.pages.setCurrentIndex(self.IDX_PROJECTS)
+        self._set_active_nav(self._nav_projects)
 
         root.addLayout(sidebar, 1)
         root.addWidget(self.pages, 8)
-        # Potpis
-        # ---- add root layout into outer (top area)
         outer.addLayout(root, 1)
 
-        # ---- footer signature (bottom-right)
+        # footer
         footer = QHBoxLayout()
         footer.addStretch()
-
         self.lbl_signature = QLabel("by _Igy_")
-        self.lbl_signature.setStyleSheet(""" QLabel {color: #444444;font-size: 14px;
-        font-style: italic;}""")
-
+        self.lbl_signature.setObjectName("Signature")
         footer.addWidget(self.lbl_signature)
         outer.addLayout(footer)
+          
+    def _set_active_nav(self, active: QPushButton):
+        for b in (self._nav_projects, self._nav_explore, self._nav_registry, self._nav_listing):
+            b.setProperty("active", b is active)
+            b.style().unpolish(b)
+            b.style().polish(b)
+            b.update()
 
+    def go_page(self, idx: int, active_btn: QPushButton):
+        self.pages.setCurrentIndex(idx)
+        self._set_active_nav(active_btn)
 
-        # init
-        self.refresh_projects()
-        self.update_detail(None)
-        self.update_mode_label()
-        self.refresh_findings_ui()
-        self.refresh_notes_ui()
+    def _open_from_registry(self, src: str, dst: str):
+        self.go_to_explore_flows()
+        self.search.setText("")
+        self.explore_ui_controller.enter_conversation(src, dst)
 
-    # ---------- Keyboard shortcuts ----------
+        # ---------- Keyboard shortcuts ----------
     def keyPressEvent(self, event):
         key = event.key()
         mods = event.modifiers()
@@ -773,18 +1082,12 @@ class App(QWidget):
             return
 
         if mods & Qt.ControlModifier and key == Qt.Key_L:
-            self.load_dataset_dialog()
+            self.dataset_controller.load_dataset_dialog()
             event.accept()
             return
 
         if key == Qt.Key_Escape:
-            # reset conversation + clear global search
-            self.proxy.clear_conversation()
-            self._conversation_on = False
-            self.btn_toggle_conv.setText("Conversation: OFF")
-            self.update_mode_label()
-            self.search.setText("")
-            self.update_showing()
+            self.explore_ui_controller.leave_conversation(clear_search=True)
             event.accept()
             return
 
@@ -804,406 +1107,68 @@ class App(QWidget):
                 return
 
         super().keyPressEvent(event)
+          
+    def on_ai_task_finished(self, result: str):
+        self.txt_ai_summary.setPlainText(result)
 
-    # ---------- Paging ----------
-    def on_page_size_changed(self, txt: str):
-        try:
-            self.PAGE_SIZE = max(250, int(txt))
-        except Exception:
-            self.PAGE_SIZE = 2000
-        self.update_loaded_label()
-        self.update_load_more_enabled()
+        if self._ai_mode == "summary":
+            self.btn_ai_summary.setEnabled(True)
+            self.btn_ai_summary.setText("Generate AI Summary")
+        elif self._ai_mode == "flow":
+            self.btn_ai_explain.setEnabled(True)
+        elif self._ai_mode == "finding":
+            self.btn_finding_ai.setEnabled(True)
 
-    def update_loaded_label(self):
-        total = len(self.flows)
-        loaded = len(self.loaded_flows)
-        if total:
-            self.lbl_loaded.setText(f"Loaded: {loaded} / {total}")
-        else:
-            self.lbl_loaded.setText("")
+    def on_ai_task_error(self, message: str):
+        self.txt_ai_summary.setPlainText(f"AI error: {message}")
 
-    def update_load_more_enabled(self):
-        self.btn_load_more.setEnabled(bool(self.flows) and len(self.loaded_flows) < len(self.flows))
+        if self._ai_mode == "summary":
+            self.btn_ai_summary.setEnabled(True)
+            self.btn_ai_summary.setText("Generate AI Summary")
+        elif self._ai_mode == "flow":
+            self.btn_ai_explain.setEnabled(True)
+        elif self._ai_mode == "finding":
+            self.btn_finding_ai.setEnabled(True)
 
-    def load_next_page(self):
-        if not self.flows:
-            return
-        start = len(self.loaded_flows)
-        end = min(len(self.flows), start + self.PAGE_SIZE)
-        if start >= end:
-            return
+    def _cleanup_ai_thread(self):
+        if self._ai_worker is not None:
+            self._ai_worker.deleteLater()
+            self._ai_worker = None
 
-        self.loaded_flows = self.flows[:end]
-        self.model.set_flows(self.loaded_flows)
-        self.update_loaded_label()
-        self.update_load_more_enabled()
-        self.update_showing()
+        if self._ai_thread is not None:
+            self._ai_thread.deleteLater()
+            self._ai_thread = None
 
-    def on_table_scrolled(self, value: int):
-        if not self.flows:
-            return
-        if self._conversation_on:
-            return
-        bar = self.table.verticalScrollBar()
-        if bar.maximum() <= 0:
-            return
-        if value >= int(bar.maximum() * 0.92):
-            if len(self.loaded_flows) < len(self.flows):
-                self.load_next_page()
-
-    # ---------- Projects ----------
-    def refresh_projects(self):
-        self.projects_list.clear()
-        projects = list_projects()
-        for p in projects:
-            item = QListWidgetItem(f"{p.name} (id={p.id})")
-            item.setData(Qt.UserRole, p.id)
-            self.projects_list.addItem(item)
-
-    def create_project_dialog(self):
-        name, ok = QInputDialog.getText(self, "New project", "Project name:")
-        if not ok:
-            return
-        name = (name or "").strip()
-        if not name:
-            return
-
-        desc, ok2 = QInputDialog.getMultiLineText(self, "New project", "Description (optional):")
-        if not ok2:
-            desc = ""
-
-        base = QFileDialog.getExistingDirectory(self, "Select project base folder (optional)")
-        base = base or ""
-
-        try:
-            pid = create_project(name=name, description=desc, base_folder=base)
-        except Exception as e:
-            QMessageBox.critical(self, "Error", str(e))
-            return
-
-        self.set_active_project(pid)
-        self.refresh_projects()
-        self.refresh_recent_datasets(pid)
-        self.refresh_findings_ui()
-        self.refresh_notes_ui()
-
-    def on_project_selected_preview(self):
-        item = self.projects_list.currentItem()
-        if not item:
-            self.projects_info.setText("")
-            self.recent_list.clear()
-            return
-
-        pid = int(item.data(Qt.UserRole))
-        p = get_project(pid)
-        if not p:
-            return
-
-        info = []
-        info.append(f"Name: {p.name}")
-        info.append(f"ID: {p.id}")
-        info.append(f"Base folder: {p.base_folder or '-'}")
-        info.append(f"Created: {p.created_at}")
-        info.append(f"Updated: {p.updated_at}")
-        info.append("")
-        info.append(p.description or "")
-        self.projects_info.setText("\n".join(info))
-
-        self.refresh_recent_datasets(pid)
-
-    def open_selected_project(self):
-        item = self.projects_list.currentItem()
-        if not item:
-            return
-        pid = int(item.data(Qt.UserRole))
-        self.set_active_project(pid)
-    
-    def delete_selected_project(self):
-        item = self.projects_list.currentItem()
-        if not item:
-            return
-
-        project_id = int(item.data(Qt.UserRole))
-        project = get_project(project_id)
-        if not project:
-            QMessageBox.warning(self, "Delete project", "Project not found.")
-            return
-
-        msg = QMessageBox(self)
-        msg.setIcon(QMessageBox.Warning)
-        msg.setWindowTitle("Delete project")
-        msg.setText("Delete selected project?")
-        msg.setInformativeText(
-            f"{project.name} (id={project.id})\n\n"
-            "This will permanently delete:\n"
-            "• project\n"
-            "• loaded datasets\n"
-            "• findings\n"
-            "• activity log"
-        )
-
-        btn_delete = msg.addButton("Delete", QMessageBox.DestructiveRole)
-        msg.addButton(QMessageBox.Cancel)
-        msg.setDefaultButton(QMessageBox.Cancel)
-
-        msg.exec()
-        if msg.clickedButton() != btn_delete:
-            return
-
-        try:
-            delete_project(project_id)
-        except Exception as e:
-            QMessageBox.critical(self, "Delete project failed", str(e))
-            return
-
-    # ---- IMPORTANT PART ----
-        if self.current_project_id == project_id:
-            # reset application state
-            self.current_project_id = None
-            self.current_project = None
-
-        # reset UI elements that depend on project
-            self.lbl_current_project.setText("No project selected")
-
-            if hasattr(self, "registry_page"):
-                self.registry_page.set_dataset("", [], [])
-
-            if hasattr(self, "findings_page"):
-                self.findings_page.clear()
-
-            if hasattr(self, "activity_page"):
-                self.activity_page.clear()
-
-        self.refresh_projects()
-
-    def set_active_project(self, project_id: int):
-        p = get_project(project_id)
-        if not p:
-            QMessageBox.warning(self, "Project", "Project not found.")
-            return
-
-        self.current_project_id = p.id
-        self.current_project_name = p.name
-
-        self.lbl_active_project.setText(f"Active project: {p.name} (id={p.id})")
-        self.lbl_project_banner.setText(f"Project: {p.name} (id={p.id})")
-
-        self.refresh_recent_datasets(p.id)
-        self.refresh_findings_ui()
-        self.refresh_notes_ui()
-
-    def refresh_recent_datasets(self, project_id: int):
-        self.recent_list.clear()
-        paths = list_recent_datasets(project_id, limit=15)
-        if not paths:
-            self.recent_list.addItem(QListWidgetItem("(no datasets yet)"))
-            return
-        for fp in paths:
-            item = QListWidgetItem(fp)
-            item.setData(Qt.UserRole, fp)
-            self.recent_list.addItem(item)
-
-    def open_selected_dataset(self):
-        item = self.recent_list.currentItem()
-        if not item:
-            return
-        fp = item.data(Qt.UserRole)
-        if not fp or str(fp).startswith("("):
-            return
-        self.load_dataset_path(str(fp))
-        self.pages.setCurrentIndex(self.IDX_EXPLORE)
-
-    # ---------- Explore ----------
-    def load_dataset_dialog(self):
-        folder = QFileDialog.getExistingDirectory(self, "Select dataset folder")
-        if not folder:
-            return
-        self.load_dataset_path(folder)
-
-    def load_dataset_path(self, folder: str):
-        folder = str(folder)
-        if not Path(folder).exists():
-            QMessageBox.warning(self, "Dataset", f"Folder not found:\n{folder}")
-            return
-
-        self.current_folder = Path(folder)
-        files, flows = load_folder(folder, debug=False)
-        self.flows = flows
-        if hasattr(self, "registry_page"):
-            self.registry_page.set_dataset(folder, files, flows)
-
-        self.lbl_path.setText(f"Dataset: {folder}")
-        self.lbl_stats.setText(f"JSON files: {len(files)}\nTotal flow records: {len(flows)}")
-
-        if self.current_project_id is not None:
-            add_dataset_load(self.current_project_id, folder)
-            self.refresh_recent_datasets(self.current_project_id)
-            self.refresh_activity_ui()
-
-        self.render_summary()
-
-        self.loaded_flows = self.flows[: min(len(self.flows), self.PAGE_SIZE)]
-        self.model.set_flows(self.loaded_flows)
-
-        self.search.setText("")
-        self.proxy.clear_conversation()
-        self._conversation_on = False
-        self.btn_toggle_conv.setText("Conversation: OFF")
-        self.update_mode_label()
-        self.update_showing()
-
-        self.update_loaded_label()
-        self.update_load_more_enabled()
-
-        self.tabs.setCurrentIndex(1)
-        self.table.resizeColumnsToContents()
-        self.splitter.setSizes([920, 420])
-        self.update_detail(None)
-
-    def render_summary(self):
-        if not self.flows:
-            self.txt_summary.setText("No flows loaded.")
-            return
-
-        lines = []
-        lines.append("=== TOP SOURCE IPs (count) ===")
-        for ip, c in top_src_ips(self.flows, limit=10):
-            lines.append(f"{ip:20} {c}")
-
-        lines.append("\n=== TOP DESTINATION IPs (count) ===")
-        for ip, c in top_dst_ips(self.flows, limit=10):
-            lines.append(f"{ip:20} {c}")
-
-        lines.append("\n=== TOP PROTOCOLS (count) ===")
-        for proto, c in top_protocols(self.flows, limit=10):
-            lines.append(f"{proto:20} {c}")
-
-        lines.append("\n=== TOP APPLICATIONS (count) ===")
-        for app, c in top_applications(self.flows, limit=10):
-            lines.append(f"{app:30} {c}")
-
-        if self.current_project_id is None:
-            lines.append("\nNOTE: No active project selected. Dataset load won't be stored.")
-        else:
-            lines.append(f"\nProject: {self.current_project_name}")
-
-        lines.append("\n(Table is paged. Scroll to auto-load more, or click Load next.)")
-        self.txt_summary.setText("\n".join(lines))
-
-    def update_showing(self):
-        total = len(self.model._flows)
-        shown = self.proxy.rowCount()
-        self.lbl_showing.setText(f"Showing: {shown} / {total} (loaded)" if total else "")
-
-    # ---------- selection -> details ----------
-    def on_row_selected(self, *args):
-        sel = self.table.selectionModel().selectedRows()
-        if not sel:
-            self.update_detail(None)
-            return
-
-        proxy_index = sel[0]
-        source_index = self.proxy.mapToSource(proxy_index)
-        row = source_index.row()
-
-        if 0 <= row < len(self.loaded_flows):
-            self.update_detail(self.loaded_flows[row])
-        else:
-            self.update_detail(None)
-
-    def update_detail(self, flow: dict[str, Any] | None):
-        self._current_flow = flow
-        if not flow:
-            self.d_src.setText("-")
-            self.d_dst.setText("-")
-            self.d_proto.setText("-")
-            self.d_app.setText("-")
-            self.d_bytes.setText("-")
-            self.d_packets.setText("-")
-            self.d_duration.setText("-")
-            self.d_sni.setText("-")
-            return
-
-        self.d_src.setText(f"{flow.get('src_ip','')}:{flow.get('src_port','')}")
-        self.d_dst.setText(f"{flow.get('dst_ip','')}:{flow.get('dst_port','')}")
-        self.d_proto.setText(format_ip_proto(flow.get("protocol", "")))
-        self.d_app.setText(str(flow.get("application_name", "")))
-        self.d_bytes.setText(str(flow.get("bidirectional_bytes", "")))
-        self.d_packets.setText(str(flow.get("bidirectional_packets", "")))
-        self.d_duration.setText(str(flow.get("bidirectional_duration_ms", "")))
-        self.d_sni.setText(str(flow.get("requested_server_name", "")))
-
-    # ---------- Filter / Conversation ----------
-    def apply_filter_ip(self, ip: str):
-        if not ip:
-            return
-        self.search.setText(ip)
-        self.search.setFocus()
-
-    def toggle_conversation(self):
-        if not self._current_flow:
-            return
-
-        src = self.current_value("src_ip")
-        dst = self.current_value("dst_ip")
-        if not src or not dst:
-            return
-
-        if not self._conversation_on:
-            self.proxy.set_conversation(src, dst)
-            self._conversation_on = True
-            self.btn_toggle_conv.setText("Conversation: ON")
-        else:
-            self.proxy.clear_conversation()
-            self._conversation_on = False
-            self.btn_toggle_conv.setText("Conversation: OFF")
-
-        self.update_mode_label()
-        self.update_showing()
-
-    def update_mode_label(self):
-        if self._conversation_on and self._current_flow:
-            a = self.current_value("src_ip")
-            b = self.current_value("dst_ip")
-            self.lbl_mode.setText(f"Mode: Conversation between {a} ⇄ {b}")
-        else:
-            self.lbl_mode.setText("")
+        self._ai_mode = None    
 
     # ---------- Findings ----------
     def selected_finding_id(self) -> int | None:
-        item = self.findings_list.currentItem()
-        if not item:
-            return None
-        fid = item.data(Qt.UserRole)
-        if not fid or str(item.text()).startswith("("):
-            return None
-        try:
-            return int(fid)
-        except Exception:
-            return None
+        return self.findings_page.selected_finding_id()
 
     def set_findings_actions_enabled(self, enabled: bool):
-        self.btn_finding_edit.setEnabled(enabled)
-        self.btn_finding_delete.setEnabled(enabled)
-        self.btn_finding_jump.setEnabled(enabled)
+        self.findings_page.set_actions_enabled(enabled)
+
+    def _get_selected_finding_row(self):
+        fid = self.selected_finding_id()
+        return self.findings_controller.get_selected_row(fid)
 
     def mark_as_finding(self):
         if self.current_project_id is None:
-            QMessageBox.warning(self, "Findings", "Select an active project first (Projects -> Open).")
+            self._message_dialog("Findings", "Select an active project first (Projects -> Open).", width=460)
             return
         if not self._current_flow:
-            QMessageBox.warning(self, "Findings", "Select a flow first.")
+            self._message_dialog("Findings", "Select a flow first.", width=400)
             return
 
         default_title = f"{self.current_value('src_ip')} -> {self.current_value('dst_ip')} ({self.current_value('application_name')})"
-        title, ok = QInputDialog.getText(self, "New finding", "Title:", text=default_title)
+        title, ok = self._text_input_dialog("New finding", "Title:", text=default_title, width=480)
         if not ok:
             return
         title = (title or "").strip()
         if not title:
             return
 
-        note, ok2 = QInputDialog.getMultiLineText(self, "New finding", "Note (optional):")
+        note, ok2 = self._multiline_input_dialog("New finding", "Note (optional):", width=480, height=260)
         if not ok2:
             note = ""
 
@@ -1211,7 +1176,7 @@ class App(QWidget):
             add_finding(self.current_project_id, self._current_flow, title=title, note=note)
             add_activity(self.current_project_id, "finding_created", title)
         except Exception as e:
-            QMessageBox.critical(self, "Findings", str(e))
+            self._message_dialog("Findings", "Failed to create finding.", str(e), width=460)
             return
 
         self.refresh_findings_ui()
@@ -1224,219 +1189,159 @@ class App(QWidget):
         self.txt_find_search.setText("")
         self.txt_find_tag.setText("")
         self.apply_findings_filter()
+    
+    def refresh_findings_ui(self):
+        self.findings_controller.rows = []
+        self._findings_view_rows = []
 
-    def _matches_findings_filters(self, r) -> bool:
-        status_sel = (self.cmb_find_status.currentText() or "All").strip()
-        search = (self.txt_find_search.text() or "").strip().lower()
-        tagq = (self.txt_find_tag.text() or "").strip().lower()
+        if self.current_project_id is None:
+            self.findings_page.clear_list()
+            self.findings_page.add_list_item("(no active project)", None)
+            self.findings_page.clear_detail()
+            return
 
-        if status_sel != "All":
-            if (r["status"] or "New") != status_sel:
-                return False
+        rows = self.findings_controller.load_rows(self.current_project_id)        
 
-        if tagq:
-            tags = (r["tags"] or "").lower()
-            if tagq not in tags:
-                return False
-
-        if search:
-            hay = " ".join([
-                str(r["title"] or ""),
-                str(r["note"] or ""),
-                str(r["src_ip"] or ""),
-                str(r["dst_ip"] or ""),
-                str(r["application_name"] or ""),
-                str(r["requested_server_name"] or ""),
-                str(r["protocol"] or ""),
-                str(r["tags"] or ""),
-                str(r["created_at"] or ""),
-            ]).lower()
-            if search not in hay:
-                return False
-
-        return True
-
-    def _sort_findings_rows(self, rows: list[Any]) -> list[Any]:
-        mode = (self.cmb_find_sort.currentText() or "Newest").strip()
-
-        def status_rank(s: str) -> int:
-            order = {"Confirmed": 0, "Investigating": 1, "New": 2, "False Positive": 3}
-            return order.get((s or "New"), 9)
-
-        if mode == "Oldest":
-            return sorted(rows, key=lambda r: (r["created_at"], int(r["id"])))
-        if mode == "Status":
-            return sorted(rows, key=lambda r: (status_rank(r["status"]), r["created_at"], int(r["id"])), reverse=False)
-        if mode == "Title":
-            return sorted(rows, key=lambda r: ((r["title"] or "").lower(), r["created_at"]), reverse=False)
-
-        # Newest (default)
-        return sorted(rows, key=lambda r: (r["created_at"], int(r["id"])), reverse=True)
+        self.apply_findings_filter()
 
     def apply_findings_filter(self):
         keep_id = self.selected_finding_id()
 
-        rows = [r for r in self._findings_rows if self._matches_findings_filters(r)]
-        rows = self._sort_findings_rows(rows)
+        status_sel = (self.cmb_find_status.currentText() or "All").strip()
+        search = (self.txt_find_search.text() or "").strip().lower()
+        tagq = (self.txt_find_tag.text() or "").strip().lower()
+
+        rows = self.findings_controller.get_filtered_rows(
+            status_sel,
+            self.txt_find_search.text(),
+            self.txt_find_tag.text(),
+            self.findings_page
+        )                                   
+
+        render_rows = self.findings_controller.prepare_render_rows(
+            rows,
+            status_emoji
+        )
+
         self._findings_view_rows = rows
-
-        self.findings_list.blockSignals(True)
-        self.findings_list.clear()
-        self.finding_detail.clear()
-        self.set_findings_actions_enabled(False)
-
-        if self.current_project_id is None:
-            self.findings_list.addItem(QListWidgetItem("(no active project)"))
-            self.findings_list.blockSignals(False)
-            return
-
-        if not rows:
-            self.findings_list.addItem(QListWidgetItem("(no findings match filters)"))
-            self.findings_list.blockSignals(False)
-            return
-
-        for r in rows:
-            badge = status_emoji(r["status"])
-            title = r["title"]
-            src = f"{r['src_ip']}:{r['src_port'] or ''}"
-            dst = f"{r['dst_ip']}:{r['dst_port'] or ''}"
-            app = r["application_name"] or ""
-            created = r["created_at"]
-            tags = (r["tags"] or "").strip()
-            tag_part = f" | #{tags}" if tags else ""
-            label = f"{created} | {badge} {title} | {src} -> {dst} | {app}{tag_part}"
-
-            item = QListWidgetItem(label)
-            item.setData(Qt.UserRole, int(r["id"]))
-            self.findings_list.addItem(item)
-
-        self.findings_list.blockSignals(False)
-
-        if keep_id is not None:
-            for i in range(self.findings_list.count()):
-                it = self.findings_list.item(i)
-                if int(it.data(Qt.UserRole) or 0) == keep_id:
-                    self.findings_list.setCurrentItem(it)
-                    break
-
-    def refresh_findings_ui(self):
-        self._findings_rows = []
-        self._findings_view_rows = []
-
-        if self.current_project_id is None:
-            self.findings_list.clear()
-            self.findings_list.addItem(QListWidgetItem("(no active project)"))
-            self.finding_detail.clear()
-            self.set_findings_actions_enabled(False)
-            return
-
-        rows = list_findings(self.current_project_id, limit=500)
-        self._findings_rows = list(rows)
-
-        self.apply_findings_filter()
+        self.findings_page.render_list(render_rows, self.current_project_id, keep_id)
 
     def on_finding_selected(self):
-        fid = self.selected_finding_id()
+        fid, row = self._get_selected_finding_row()
+
         if fid is None:
-            self.finding_detail.setText("")
-            self.set_findings_actions_enabled(False)
+            self.findings_page.clear_detail()
             return
 
-        row = get_finding(fid)
         if row is None:
-            self.finding_detail.setText("Finding not found.")
+            self.findings_page.show_detail("Finding not found.")
             self.set_findings_actions_enabled(False)
             return
 
         self.set_findings_actions_enabled(True)
 
         lines = []
-        lines.append(f"Finding ID: {row['id']}")
-        lines.append(f"Created: {row['created_at']}")
-        lines.append(f"Status: {status_emoji(row['status'])} {row['status']}")
-        lines.append(f"Tags: {row['tags'] or ''}")
         lines.append(f"Title: {row['title']}")
         lines.append("")
+        lines.append(f"Status: {status_emoji(row['status'])} {row['status']}")
+        lines.append(f"Created: {row['created_at']}")
+        lines.append(f"Tags: {row['tags'] or '-'}")
+        lines.append("")
+        lines.append("Flow")
         lines.append(f"Source: {row['src_ip']}:{row['src_port'] or ''}")
-        lines.append(f"Dest: {row['dst_ip']}:{row['dst_port'] or ''}")
+        lines.append(f"Destination: {row['dst_ip']}:{row['dst_port'] or ''}")
         lines.append(f"Protocol: {row['protocol']}")
-        lines.append(f"App: {row['application_name']}")
-        lines.append(f"SNI: {row['requested_server_name']}")
+        lines.append(f"Application: {row['application_name'] or '-'}")
+        lines.append(f"SNI: {row['requested_server_name'] or '-'}")
         lines.append(f"Bytes: {row['bidirectional_bytes']}")
         lines.append(f"Packets: {row['bidirectional_packets']}")
-        lines.append(f"Duration(ms): {row['bidirectional_duration_ms']}")
+        lines.append(f"Duration (ms): {row['bidirectional_duration_ms']}")
         lines.append("")
-        lines.append("Note:")
-        lines.append(row["note"] or "")
-        self.finding_detail.setText("\n".join(lines))
+        lines.append("Note")
+        lines.append(row["note"] or "-")
 
-    def jump_to_selected_finding(self):
-        fid = self.selected_finding_id()
-        if fid is None:
+        self.findings_page.show_detail("\n".join(lines))
+
+    def explain_selected_finding(self):
+        fid, row = self._get_selected_finding_row()
+        if fid is None or row is None:
+            self._message_dialog("AI Assistant", "Select a finding first.", width=400)
             return
 
-        row = get_finding(fid)
-        if row is None:
+        if self._ai_thread is not None:
+            self._message_dialog("AI Assistant", "Another AI task is already running.", width=430)
+            return
+
+        self._ai_mode = "finding"
+        self.txt_ai_summary.setPlainText("Generating AI finding explanation...")
+        self.tabs.setCurrentIndex(0)
+
+        self.btn_finding_ai.setEnabled(False)
+
+        self._ai_thread = QThread()
+        self._ai_worker = AITextWorker(
+            self.ai_service.explain_finding,
+            dict(row),
+        )
+
+        self._ai_worker.moveToThread(self._ai_thread)
+        self._ai_thread.started.connect(self._ai_worker.run)
+        self._ai_worker.finished.connect(self.on_ai_task_finished)
+        self._ai_worker.error.connect(self.on_ai_task_error)
+
+        self._ai_worker.finished.connect(self._ai_thread.quit)
+        self._ai_worker.error.connect(self._ai_thread.quit)
+
+        self._ai_thread.finished.connect(self._cleanup_ai_thread)
+
+        self._ai_thread.start()
+
+    def jump_to_selected_finding(self):
+        fid, row = self._get_selected_finding_row()
+        if fid is None or row is None:
             return
 
         src = row["src_ip"]
         dst = row["dst_ip"]
 
-        self.pages.setCurrentIndex(2)
-        self.tabs.setCurrentIndex(1)
-
+        self.go_to_explore_flows()
         self.search.setText("")
-        self.proxy.clear_conversation()
+        self.explore_ui_controller.leave_conversation(clear_search=False)
+        self.explore_ui_controller.enter_conversation(src, dst)
 
-        self.proxy.set_conversation(src, dst)
-        self._conversation_on = True
-        self.btn_toggle_conv.setText("Conversation: ON")
-        self.update_mode_label()
-
-        def _do_select():
-            self.table.clearSelection()
-            for r_idx in range(self.proxy.rowCount()):
-                idx0 = self.proxy.index(r_idx, 0)
-                src_ip = self.proxy.data(idx0, Qt.DisplayRole)
-                dst_ip = self.proxy.data(self.proxy.index(r_idx, 2), Qt.DisplayRole)
-
-                if (src_ip == src and dst_ip == dst) or (src_ip == dst and dst_ip == src):
-                    self.table.setCurrentIndex(idx0)
-                    self.table.selectRow(r_idx)
-                    self.table.scrollTo(idx0, QTableView.PositionAtCenter)
-                    break
-            self.update_showing()
-
-        QTimer.singleShot(0, _do_select)
+        QTimer.singleShot(0, lambda: self.explore_ui_controller.select_flow_pair(src, dst))
 
     def edit_selected_finding(self):
-        fid = self.selected_finding_id()
-        if fid is None:
+        fid, row = self._get_selected_finding_row()
+        if fid is None or row is None:
             return
 
-        row = get_finding(fid)
-        if row is None:
-            return
-
-        title, ok = QInputDialog.getText(self, "Edit finding", "Title:", text=row["title"] or "")
+        title, ok = self._text_input_dialog("Edit finding", "Title:", text=row["title"] or "", width=480)
         if not ok:
             return
         title = (title or "").strip()
         if not title:
             return
 
-        note, ok2 = QInputDialog.getMultiLineText(self, "Edit finding", "Note:", text=row["note"] or "")
+        note, ok2 = self._multiline_input_dialog("Edit finding", "Note:", text=row["note"] or "", width=480, height=260)
         if not ok2:
             return
 
         statuses = ["New", "Investigating", "Confirmed", "False Positive"]
         cur = row["status"] if row["status"] in statuses else "New"
         idx = statuses.index(cur)
-        status, ok3 = QInputDialog.getItem(self, "Edit finding", "Status:", statuses, idx, False)
+
+        status, ok3 = self._item_choice_dialog(
+            "Edit finding",
+            "Status:",
+            statuses,
+            current_index=idx,
+            width=420,
+        )
         if not ok3:
             return
 
-        tags, ok4 = QInputDialog.getText(self, "Edit finding", "Tags (comma-separated):", text=row["tags"] or "")
+        tags, ok4 = self._text_input_dialog("Edit finding", "Tags (comma-separated):", text=row["tags"] or "", width=440)
         if not ok4:
             return
 
@@ -1447,43 +1352,33 @@ class App(QWidget):
             if self.current_project_id:
                 add_activity(self.current_project_id, "finding_updated", f"#{fid} {title}")
         except Exception as e:
-            QMessageBox.critical(self, "Findings", str(e))
+            self._message_dialog("Findings", "Failed to update finding.", str(e), width=460)
             return
 
         self.refresh_findings_ui()
         self.refresh_activity_ui()
-
-        for i in range(self.findings_list.count()):
-            it = self.findings_list.item(i)
-            if int(it.data(Qt.UserRole) or 0) == fid:
-                self.findings_list.setCurrentItem(it)
-                break
+        self.findings_page.select_finding_by_id(fid)
 
     def delete_selected_finding(self):
-        fid = self.selected_finding_id()
-        if fid is None:
-            return
-
-        row = get_finding(fid)
-        if row is None:
+        fid, row = self._get_selected_finding_row()
+        if fid is None or row is None:
             return
 
         title = row["title"] or "(no title)"
         src = f"{row['src_ip']}:{row['src_port'] or ''}"
         dst = f"{row['dst_ip']}:{row['dst_port'] or ''}"
 
-        msg = QMessageBox(self)
-        msg.setIcon(QMessageBox.Warning)
-        msg.setWindowTitle("Delete finding")
-        msg.setText("Delete selected finding?")
-        msg.setInformativeText(f"{title}\n{src} -> {dst}")
+        confirmed = self._confirm_dialog(
+            title="Delete finding",
+            message="Delete selected finding?",
+            details=f"{title}\n{src} -> {dst}",
+            ok_text="Delete",
+            cancel_text="Cancel",
+            width=430,
+            destructive=True,
+        )
 
-        btn_delete = msg.addButton("Delete", QMessageBox.DestructiveRole)
-        msg.addButton(QMessageBox.Cancel)
-        msg.setDefaultButton(QMessageBox.Cancel)
-
-        msg.exec()
-        if msg.clickedButton() != btn_delete:
+        if not confirmed:
             return
 
         try:
@@ -1491,7 +1386,7 @@ class App(QWidget):
             if self.current_project_id:
                 add_activity(self.current_project_id, "finding_deleted", f"#{fid} {title}")
         except Exception as e:
-            QMessageBox.critical(self, "Findings", str(e))
+            self._message_dialog("Findings", "Failed to delete finding.", str(e), width=460)
             return
 
         self.refresh_findings_ui()
@@ -1553,11 +1448,53 @@ class App(QWidget):
                 if self.current_project_id:
                     add_activity(self.current_project_id, "finding_status", f"#{fid} -> {new_status}")
             except Exception as e:
-                QMessageBox.critical(self, "Findings", str(e))
+                self._message_dialog("Findings", "Failed to update finding status.", str(e), width=460)
                 return
 
             self.refresh_findings_ui()
             self.refresh_activity_ui()
+
+    def _make_ai_note_block(self, text: str) -> str:
+        ts = datetime.now().strftime("%d.%m.%Y. %H:%M:%S")
+        body = (text or "").strip()
+
+        if not body:
+            return ""
+
+        return (
+            f"[AI note added: {ts}]\n"
+            f"{body}\n"
+            f"{'-' * 60}\n"
+        )
+
+    def add_ai_summary_to_notes(self):
+        if self.current_project_id is None:
+            self._message_dialog("Notes", "Open an active project first.", width=420)
+            return
+
+        text = (self.txt_ai_summary.toPlainText() or "").strip()
+        if not text:
+            self._message_dialog("Notes", "There is no AI-generated text to add.", width=440)
+            return
+
+        block = self._make_ai_note_block(text)
+        if not block:
+            return
+
+        existing = self.txt_notes.toPlainText() or ""
+
+        if existing.strip():
+            if not existing.endswith("\n"):
+                existing += "\n"
+            new_text = existing + "\n" + block
+        else:
+            new_text = block
+
+        self.txt_notes.setPlainText(new_text)
+        self._notes_dirty = True
+        self._flush_notes()
+
+        self.tabs.setCurrentIndex(3)  # Notes tab
 
     # ---------- Notes ----------
     def refresh_notes_ui(self):
@@ -1574,7 +1511,8 @@ class App(QWidget):
 
         self.txt_notes.setEnabled(True)
         self.txt_notes.setPlaceholderText("Write case notes here… (autosave)")
-        self.txt_notes.setPlainText(get_project_notes(self.current_project_id) or "")
+        notes = self.notes_controller.load_notes(self.current_project_id)
+        self.txt_notes.setPlainText(notes)
         self.txt_notes.blockSignals(False)
 
         self.refresh_activity_ui()
@@ -1585,7 +1523,7 @@ class App(QWidget):
             self.lst_activity.addItem(QListWidgetItem("(no active project)"))
             return
 
-        rows = list_activity(self.current_project_id, limit=200)
+        rows = self.notes_controller.load_activity(self.current_project_id)
         if not rows:
             self.lst_activity.addItem(QListWidgetItem("(no activity yet)"))
             return
@@ -1606,7 +1544,10 @@ class App(QWidget):
         if not self._notes_dirty or self.current_project_id is None:
             return
         try:
-            set_project_notes(self.current_project_id, self.txt_notes.toPlainText())
+            self.notes_controller.save_notes(
+            self.current_project_id,
+            self.txt_notes.toPlainText()
+        )
         except Exception:
             return
         self._notes_dirty = False
@@ -1620,19 +1561,15 @@ class App(QWidget):
         if not self._current_flow:
             return ""
         v = self._current_flow.get(key, "")
-        return "" if v is None else str(v)
+        return "" if v is None else str(v)    
     
-    def closeEvent(self, event):
-        try:
-            self.live_rtt.stop()
-        except Exception:
-            pass
-        super().closeEvent(event)
-
-
-
 def main():
     app = QApplication(sys.argv)
+
+    # load global stylesheet
+    qss_path = Path(__file__).resolve().parent / "style.qss"
+    if qss_path.exists():
+        app.setStyleSheet(qss_path.read_text(encoding="utf-8"))
 
     base_dir = Path(__file__).resolve().parent          # ...\Conduvia\ui
     project_dir = base_dir.parent                       # ...\Conduvia
@@ -1640,14 +1577,12 @@ def main():
 
     icon = QIcon(str(icon_path))
 
-    app.setWindowIcon(icon)   # globalno (taskbar + dialogs)
+    app.setWindowIcon(icon)   # global (taskbar + dialogs)
     w = App()
-    w.setWindowIcon(icon)     # eksplicitno na glavnom prozoru
+    w.setWindowIcon(icon)     # explicit on main window
     w.showMaximized()
 
     sys.exit(app.exec())
-
-
 
 if __name__ == "__main__":
     main()
