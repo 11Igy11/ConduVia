@@ -1215,37 +1215,6 @@ class App(QWidget):
 
         self._ai_mode = None    
 
-    def copy_selected_cell_value(self):
-        index = self.table.currentIndex()
-        if not index.isValid():
-            return
-
-        value = self.proxy.data(index, Qt.DisplayRole)
-        if value is None:
-            return
-
-        self.copy_text(str(value))
-
-    def copy_current_flow_multiline(self):
-        if not self._current_flow:
-            return
-
-        flow = self._current_flow
-
-        lines = [
-            f"Source IP: {flow.get('src_ip', '')}",
-            f"Source Port: {flow.get('src_port', '')}",
-            f"Destination IP: {flow.get('dst_ip', '')}",
-            f"Destination Port: {flow.get('dst_port', '')}",
-            f"Protocol: {format_ip_proto(flow.get('protocol', ''))}",
-            f"Application: {flow.get('application_name', '')}",
-            f"Bytes: {flow.get('bidirectional_bytes', '')}",
-            f"Duration(ms): {flow.get('bidirectional_duration_ms', '')}",
-            f"SNI: {flow.get('requested_server_name', '')}",
-        ]
-
-        self.copy_text("\n".join(lines))
-
     # ---------- Findings ----------
     def selected_finding_id(self) -> int | None:
         return self.findings_page.selected_finding_id()
