@@ -165,8 +165,8 @@ class ExploreUIController:
             idx_bytes = self.app.proxy.index(r, 6)
             idx_app = self.app.proxy.index(r, 5)
 
-            b = self.app.proxy.data(idx_bytes)
-            app = self.app.proxy.data(idx_app) or ""
+            b = self.app.proxy.data(idx_bytes, Qt.DisplayRole)
+            app = self.app.proxy.data(idx_app, Qt.DisplayRole) or ""
 
             try:
                 total_bytes += int(b)
@@ -343,3 +343,5 @@ class ExploreUIController:
         self.app._ai_thread.finished.connect(self.app._cleanup_ai_thread)
 
         self.app._ai_thread.start()
+
+    
