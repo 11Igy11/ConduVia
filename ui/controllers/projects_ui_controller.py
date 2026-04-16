@@ -9,8 +9,9 @@ from core.db import (
     get_project,
     delete_project,
     list_recent_datasets,
+    update_project,
 )
-
+from core.workspace import ensure_workspace_structure
 
 class ProjectsUIController:
     def __init__(self, app):
@@ -27,6 +28,7 @@ class ProjectsUIController:
 
         self.app.projects_info.setText("Select a project to see details.")
         self.app.recent_list.clear()
+        self.app.refresh_activity_ui_for_project(None)
 
     def create_project_dialog(self):
         name, ok = self.app._text_input_dialog("New project", "Project name:", width=420)
@@ -50,6 +52,17 @@ class ProjectsUIController:
             "Select project base folder (optional)"
         )
         base = base or ""
+        if base:
+            try:
+                ensure_workspace_structure(base)
+            except Exception as e:
+                self.app._message_dialog(
+                    "Workspace",
+                    "Failed to initialize workspace folder.",
+                    str(e),
+                    width=460,
+                )
+                return
 
         try:
             pid = create_project(name=name, description=desc, base_folder=base)
@@ -91,7 +104,7 @@ class ProjectsUIController:
         info = []
         info.append(f"Name: {p.name}")
         info.append(f"ID: {p.id}")
-        info.append(f"Base folder: {p.base_folder or '-'}")
+        info.append(f"Workspace folder: {p.base_folder or '-'}")
         info.append(f"Created: {p.created_at}")
         info.append(f"Updated: {p.updated_at}")
         info.append("")
@@ -99,6 +112,7 @@ class ProjectsUIController:
         self.app.projects_info.setText("\n".join(info))
 
         self.refresh_recent_datasets(pid)
+        self.app.refresh_activity_ui_for_project(pid)
 
     def open_selected_project(self):
         item = self.app.projects_list.currentItem()
@@ -145,52 +159,156 @@ class ProjectsUIController:
             return
 
         if self.app.current_project_id == project_id:
+            self.app.clear_dataset_context()
+
             self.app.current_project_id = None
             self.app.current_project_name = ""
-            self.app.current_folder = None
 
             self.app.lbl_active_project.setText("Active project: (none)")
             self.app.lbl_project_banner.setText("Project: (none)")
-
-            self.app.lbl_path.setText("No dataset loaded")
-            self.app.lbl_stats.setText("")
-            self.app.txt_top_src_left.setText("No flows loaded.")
-            self.app.txt_top_src_right.setText("")
-
-            self.app.txt_top_dst_left.setText("No flows loaded.")
-            self.app.txt_top_dst_right.setText("")
-
-            self.app.txt_top_proto_left.setText("No flows loaded.")
-            self.app.txt_top_proto_right.setText("")
-
-            self.app.txt_top_apps_left.setText("No flows loaded.")
-            self.app.txt_top_apps_right.setText("")
-            self.app.txt_ai_summary.clear()
-
-            self.app.model.set_flows([])
-            self.app.leave_conversation(clear_search=True)
-            self.app.explore_ui_controller.update_loaded_label()
-            self.app.explore_ui_controller.update_load_more_enabled()
-            self.app._flows_expanded = False
-
-            if hasattr(self.app, "details_panel"):
-                self.app.details_panel.show()
-            if hasattr(self.app, "btn_expand_flows"):
-                self.app.btn_expand_flows.setText("Expand Flows")
-
-            if hasattr(self.app, "registry_page"):
-                self.app.registry_page.set_dataset("", [], [])
 
             self.app.refresh_findings_ui()
             self.app.refresh_notes_ui()
 
         self.refresh_projects()
 
+    def edit_selected_project(self):
+        item = self.app.projects_list.currentItem()
+        if not item:
+            self.app._message_dialog(
+                "Edit project",
+                "Select a project first.",
+                width=400,
+            )
+            return
+
+        project_id = int(item.data(Qt.UserRole))
+        project = get_project(project_id)
+
+        if not project:
+            self.app._message_dialog(
+                "Edit project",
+                "Project not found.",
+                width=400,
+            )
+            return
+
+        # --- Name ---
+        name, ok = self.app._text_input_dialog(
+            "Edit project",
+            "Project name:",
+            text=project.name or "",
+            width=420,
+        )
+
+        if not ok:
+            return
+
+        name = (name or "").strip()
+
+        if not name:
+            self.app._message_dialog(
+                "Edit project",
+                "Project name is required.",
+                width=400,
+            )
+            return
+
+        # --- Description ---
+        desc, ok2 = self.app._multiline_input_dialog(
+            "Edit project",
+            "Description (optional):",
+            text=project.description or "",
+            width=460,
+            height=260,
+        )
+
+        if not ok2:
+            return
+
+        # --- Base folder ---
+        change_folder = self.app._confirm_dialog(
+            title="Edit project",
+            message="Do you want to change the workspace folder?",
+            details=f"Current: {project.base_folder or '-'}",
+            ok_text="Change",
+            cancel_text="Keep current",
+            width=460,
+        )
+
+        if change_folder:
+            base = QFileDialog.getExistingDirectory(
+                self.app,
+                 "Select workspace folder (optional)"
+            )
+
+            if base:
+                base_folder = base
+            else:
+                base_folder = project.base_folder or ""
+        else:
+            base_folder = project.base_folder or ""
+
+        if base_folder:
+            try:
+                ensure_workspace_structure(base_folder)
+            except Exception as e:
+                self.app._message_dialog(
+                    "Workspace",
+                    "Failed to initialize workspace folder.",
+                    str(e),
+                    width=460,
+                )
+                return
+
+        try:
+            update_project(
+                project_id=project.id,
+                name=name,
+                description=desc,
+                base_folder=base_folder,
+            )
+
+        except Exception as e:
+            self.app._message_dialog(
+                "Edit project",
+                "Project update failed.",
+                str(e),
+                width=440,
+            )
+            return
+
+        # refresh whole page
+        self.refresh_projects()
+
+        # reselect updated item
+        for i in range(self.app.projects_list.count()):
+            it = self.app.projects_list.item(i)
+
+            if int(it.data(Qt.UserRole)) == project.id:
+                self.app.projects_list.setCurrentItem(it)
+                break
+
+        # update active project labels if needed
+        if self.app.current_project_id == project.id:
+            self.app.current_project_name = name
+            self.app.lbl_active_project.setText(
+                f"Active project: {name}"
+            )
+            self.app.lbl_project_banner.setText(
+                f"Project: {name}"
+            )
+
     def set_active_project(self, project_id: int):
         p = get_project(project_id)
         if not p:
             self.app._message_dialog("Project", "Project not found.", width=400)
             return
+        
+        project_changed = self.app.current_project_id != p.id
+
+        if project_changed:
+            self.app.clear_dataset_context()
 
         self.app.current_project_id = p.id
         self.app.current_project_name = p.name
@@ -245,3 +363,20 @@ class ProjectsUIController:
             return
 
         self.app.go_page(self.app.IDX_EXPLORE, self.app._nav_explore)
+
+    def open_new_dataset(self):
+        if self.app.current_project_id is None:
+            self.app._message_dialog(
+                "Dataset",
+                "Open an active project first.",
+                width=420,
+            )
+            return
+
+        self.app.dataset_controller.load_dataset_dialog()
+        self.app.go_page(
+            self.app.IDX_EXPLORE,
+            self.app._nav_explore
+        )
+
+    

@@ -8,6 +8,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 from core.protocols import format_ip_proto
+from core.workspace import write_project_notes_backup
 from ui.controllers.flow_controller import FlowController
 from ui.controllers.findings_controller import FindingsController
 from ui.controllers.search_controller import SearchController
@@ -41,7 +42,7 @@ from PySide6.QtWidgets import (
 from core.db import (
     init_db, add_finding, get_finding,
     update_finding, delete_finding,
-    add_activity
+    add_activity, get_project
 )
 # ---------- helpers ----------
 def is_private_ip(ip: str) -> bool:
@@ -259,9 +260,11 @@ class App(QWidget):
         self.btn_new_project.clicked.connect(self.projects_ui_controller.create_project_dialog)
         self.btn_refresh_projects.clicked.connect(self.projects_ui_controller.refresh_projects)
         self.btn_open_project.clicked.connect(self.projects_ui_controller.open_selected_project)
+        self.btn_edit_project.clicked.connect(self.projects_ui_controller.edit_selected_project)
         self.btn_delete_project.clicked.connect(self.projects_ui_controller.delete_selected_project)
         self.projects_list.itemSelectionChanged.connect(self.projects_ui_controller.on_project_selected_preview)
         self.btn_open_dataset.clicked.connect(self.projects_ui_controller.open_selected_dataset)
+        self.btn_open_new_dataset.clicked.connect(self.projects_ui_controller.open_new_dataset)
 
         # 10b) Double click shortcuts
         self.projects_list.itemDoubleClicked.connect(lambda _: self.projects_ui_controller.open_selected_project())
@@ -487,12 +490,16 @@ class App(QWidget):
         self.lbl_active_project = QLabel("Active project: (none)")
 
         btn_row = QHBoxLayout()
+
         self.btn_new_project = QPushButton("New project")
         self.btn_open_project = QPushButton("Open project")
+        self.btn_edit_project = QPushButton("Edit project")
         self.btn_refresh_projects = QPushButton("Refresh")
         self.btn_delete_project = QPushButton("Delete selected")
+
         btn_row.addWidget(self.btn_new_project)
         btn_row.addWidget(self.btn_open_project)
+        btn_row.addWidget(self.btn_edit_project)
         btn_row.addWidget(self.btn_refresh_projects)
         btn_row.addWidget(self.btn_delete_project)
 
@@ -505,8 +512,12 @@ class App(QWidget):
         self.recent_list = QListWidget()
 
         recent_btn_row = QHBoxLayout()
-        self.btn_open_dataset = QPushButton("Open dataset")
+
+        self.btn_open_dataset = QPushButton("Open selected")
+        self.btn_open_new_dataset = QPushButton("Open new dataset")
+
         recent_btn_row.addWidget(self.btn_open_dataset)
+        recent_btn_row.addWidget(self.btn_open_new_dataset)
         recent_btn_row.addStretch()
 
         projects_layout.addWidget(self.lbl_active_project)
@@ -525,9 +536,32 @@ class App(QWidget):
         middle_row.addLayout(right_col, 3)
 
         projects_layout.addLayout(middle_row, 1)
-        projects_layout.addWidget(self.lbl_recent)
-        projects_layout.addWidget(self.recent_list, 1)
-        projects_layout.addLayout(recent_btn_row)
+
+        bottom_row = QHBoxLayout()
+
+        # --- Left: Recent datasets ---
+        recent_col = QVBoxLayout()
+        recent_col.addWidget(self.lbl_recent)
+        recent_col.addWidget(self.recent_list, 1)
+        recent_col.addLayout(recent_btn_row)
+
+        # --- Right: Activity log ---
+        activity_col = QVBoxLayout()
+        activity_col.addWidget(QLabel("Activity log"))
+
+        self.lst_activity = QListWidget()
+        activity_col.addWidget(self.lst_activity, 1)
+
+        activity_footer = QWidget()
+        activity_footer.setFixedHeight(self.btn_open_dataset.sizeHint().height())
+
+        activity_col.addWidget(activity_footer) 
+       
+
+        bottom_row.addLayout(recent_col, 2)
+        bottom_row.addLayout(activity_col, 3)
+
+        projects_layout.addLayout(bottom_row, 1)
 
         # -------- Explore page --------
         explore_container = QWidget()
@@ -1003,21 +1037,12 @@ class App(QWidget):
 
         # Notes tab
         notes_tab = QWidget()
-        notes_root = QHBoxLayout(notes_tab)
+        notes_root = QVBoxLayout(notes_tab)
 
-        left = QVBoxLayout()
-        left.addWidget(QLabel("Project notes"))
+        notes_root.addWidget(QLabel("Project notes"))
         self.txt_notes = QTextEdit()
         self.txt_notes.setPlaceholderText("Write case notes here… (autosave)")
-        left.addWidget(self.txt_notes, 1)
-
-        right = QVBoxLayout()
-        right.addWidget(QLabel("Activity log"))
-        self.lst_activity = QListWidget()
-        right.addWidget(self.lst_activity, 1)
-
-        notes_root.addLayout(left, 2)
-        notes_root.addLayout(right, 1)
+        notes_root.addWidget(self.txt_notes, 1)
 
         self.tabs.addTab(notes_tab, "Notes")
 
@@ -1517,13 +1542,14 @@ class App(QWidget):
 
         self.refresh_activity_ui()
 
-    def refresh_activity_ui(self):
+    def refresh_activity_ui_for_project(self, project_id: int | None):
         self.lst_activity.clear()
-        if self.current_project_id is None:
-            self.lst_activity.addItem(QListWidgetItem("(no active project)"))
+
+        if project_id is None:
+            self.lst_activity.addItem(QListWidgetItem("(no project selected)"))
             return
 
-        rows = self.notes_controller.load_activity(self.current_project_id)
+        rows = self.notes_controller.load_activity(project_id)
         if not rows:
             self.lst_activity.addItem(QListWidgetItem("(no activity yet)"))
             return
@@ -1534,6 +1560,9 @@ class App(QWidget):
             msg = r["message"] or ""
             self.lst_activity.addItem(QListWidgetItem(f"{ts} | {et} | {msg}"))
 
+    def refresh_activity_ui(self):
+        self.refresh_activity_ui_for_project(self.current_project_id)
+
     def on_notes_changed(self):
         if self.current_project_id is None:
             return
@@ -1543,14 +1572,97 @@ class App(QWidget):
     def _flush_notes(self):
         if not self._notes_dirty or self.current_project_id is None:
             return
+
+        text = self.txt_notes.toPlainText()
+
         try:
             self.notes_controller.save_notes(
-            self.current_project_id,
-            self.txt_notes.toPlainText()
-        )
+                self.current_project_id,
+                text
+            )
         except Exception:
             return
+
+        try:
+            project = get_project(self.current_project_id)
+            if project and project.base_folder:
+                write_project_notes_backup(
+                    project.base_folder,
+                    text
+                )
+        except Exception:
+            pass
+
         self._notes_dirty = False
+
+    def clear_dataset_context(self) -> None:
+        # reset basic dataset state
+        self.current_folder = None
+        self._current_flow = None
+        self._conversation_on = False
+        self._flows_expanded = False
+
+        # reset flow storage / table
+        self.flow_controller.set_flows([])
+        self.model.set_flows([])
+
+        # reset search / proxy / selection
+        self.search.blockSignals(True)
+        self.search.setText("")
+        self.search.blockSignals(False)
+
+        self.proxy.set_filter_text("")
+        self.proxy.clear_conversation()
+
+        if self.table.selectionModel():
+            self.table.clearSelection()
+
+        # reset explore details / labels
+        self.explore_ui_controller.update_detail(None)
+        self.explore_ui_controller.update_mode_label()
+        self.explore_ui_controller.update_conversation_summary()
+        self.explore_ui_controller.update_loaded_label()
+        self.explore_ui_controller.update_load_more_enabled()
+        self.explore_ui_controller.update_showing()
+
+        self.lbl_path.setText("No dataset loaded")
+        self.lbl_stats.setText("")
+        self.lbl_showing.setText("")
+        self.lbl_loaded.setText("")
+        self.lbl_conv_summary.clear()
+        self.lbl_conv_summary.hide()
+        self.lbl_mode.clear()
+        self.lbl_mode.hide()
+
+        # reset summary cards
+        self.txt_top_src_left.setText("No flows loaded.")
+        self.txt_top_src_right.setText("")
+        self.txt_top_dst_left.setText("No flows loaded.")
+        self.txt_top_dst_right.setText("")
+        self.txt_top_proto_left.setText("No flows loaded.")
+        self.txt_top_proto_right.setText("")
+        self.txt_top_apps_left.setText("No flows loaded.")
+        self.txt_top_apps_right.setText("")
+
+        # reset AI output
+        self.txt_ai_summary.clear()
+
+        # reset flow details panel state
+        if hasattr(self, "details_panel"):
+            self.details_panel.show()
+        if hasattr(self, "btn_expand_flows"):
+            self.btn_expand_flows.setText("Expand Flows")
+
+        # reset registry
+        if hasattr(self, "registry_page"):
+            self.registry_page.set_dataset("", [], [])
+
+        # reset listing
+        if hasattr(self, "listing_page"):
+            try:
+                self.listing_page.set_dataset("", [], [])
+            except Exception:
+                pass
 
     # ---------- clipboard ----------
     def copy_text(self, text: str):
