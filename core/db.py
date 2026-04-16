@@ -156,6 +156,37 @@ def create_project(
             (name, description or "", base_folder or ""),
         )
         return int(cur.lastrowid)
+    
+def update_project(
+    project_id: int,
+    name: str,
+    description: str = "",
+    base_folder: str = "",
+    db_path: Path = DEFAULT_DB_PATH,
+) -> None:
+    name = (name or "").strip()
+
+    if not name:
+        raise ValueError("Project name is required.")
+
+    with _connect(db_path) as con:
+        con.execute(
+            """
+            UPDATE projects
+            SET
+                name = ?,
+                description = ?,
+                base_folder = ?,
+                updated_at = datetime('now')
+            WHERE id = ?
+            """,
+            (
+                name,
+                description or "",
+                base_folder or "",
+                project_id,
+            ),
+        )
 
 def list_projects(db_path: Path = DEFAULT_DB_PATH) -> list[Project]:
     with _connect(db_path) as con:
