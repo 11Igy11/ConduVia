@@ -25,7 +25,11 @@ Thumbs.db
 # Local datasets (do not commit)
 data/
 data/**/*.json
+# Runtime notes data
+DataBase/notes/*.txt
 
+# Optional: keep folder structure
+!DataBase/notes/.gitkeep
 
 
 

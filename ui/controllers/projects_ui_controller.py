@@ -11,7 +11,13 @@ from core.db import (
     list_recent_datasets,
     update_project,
 )
-from core.workspace import ensure_workspace_structure
+from core.workspace import (
+    ensure_workspace_structure,
+    build_workspace_path,
+    move_workspace_folder,
+    delete_workspace_folder,
+    looks_like_conduvia_workspace,   
+)
 
 class ProjectsUIController:
     def __init__(self, app):
@@ -47,14 +53,18 @@ class ProjectsUIController:
         if not ok2:
             desc = ""
 
-        base = QFileDialog.getExistingDirectory(
+        parent_folder = QFileDialog.getExistingDirectory(
             self.app,
-            "Select project base folder (optional)"
+            "Select parent folder for project workspace (optional)"
         )
-        base = base or ""
-        if base:
+        
+        parent_folder = parent_folder or ""
+
+        workspace_folder = ""
+        if parent_folder:
             try:
-                ensure_workspace_structure(base)
+                workspace_folder = str(build_workspace_path(parent_folder, name))
+                ensure_workspace_structure(workspace_folder)
             except Exception as e:
                 self.app._message_dialog(
                     "Workspace",
@@ -62,10 +72,10 @@ class ProjectsUIController:
                     str(e),
                     width=460,
                 )
-                return
+                return                                                  
 
         try:
-            pid = create_project(name=name, description=desc, base_folder=base)
+            pid = create_project(name=name, description=desc, base_folder=workspace_folder)
         except Exception as e:
             self.app._message_dialog("Error", "Project creation failed.", str(e), width=440)
             return
@@ -141,7 +151,9 @@ class ProjectsUIController:
                 "• project\n"
                 "• loaded datasets\n"
                 "• findings\n"
-                "• activity log"
+                "• activity log\n"
+                "• workspace folders\n\n"
+                "Only ConduVia workspace folders for this project will be removed."
             ),
             ok_text="Delete",
             cancel_text="Cancel",
@@ -153,7 +165,11 @@ class ProjectsUIController:
             return
 
         try:
+            if project.base_folder and looks_like_conduvia_workspace(project.base_folder):
+                delete_workspace_folder(project.base_folder)
+
             delete_project(project_id)
+
         except Exception as e:
             self.app._message_dialog("Delete project failed", str(e), width=440)
             return
@@ -200,12 +216,10 @@ class ProjectsUIController:
             text=project.name or "",
             width=420,
         )
-
         if not ok:
             return
 
         name = (name or "").strip()
-
         if not name:
             self.app._message_dialog(
                 "Edit project",
@@ -222,51 +236,74 @@ class ProjectsUIController:
             width=460,
             height=260,
         )
-
         if not ok2:
             return
 
-        # --- Base folder ---
+        # --- Current workspace / parent ---
+        current_workspace = (project.base_folder or "").strip()
+        current_parent_folder = str(Path(current_workspace).parent) if current_workspace else ""
+
+        # --- Parent folder change ---
         change_folder = self.app._confirm_dialog(
             title="Edit project",
-            message="Do you want to change the workspace folder?",
-            details=f"Current: {project.base_folder or '-'}",
+            message="Do you want to change the parent folder for this project workspace?",
+            details=f"Current workspace: {project.base_folder or '-'}",
             ok_text="Change",
             cancel_text="Keep current",
             width=460,
         )
 
         if change_folder:
-            base = QFileDialog.getExistingDirectory(
+            selected_parent = QFileDialog.getExistingDirectory(
                 self.app,
-                 "Select workspace folder (optional)"
+                "Select parent folder for project workspace"
             )
-
-            if base:
-                base_folder = base
+            if selected_parent:
+                parent_folder = selected_parent
             else:
-                base_folder = project.base_folder or ""
+                parent_folder = current_parent_folder
         else:
-            base_folder = project.base_folder or ""
+            parent_folder = current_parent_folder
 
-        if base_folder:
+        # --- Build target workspace path ---
+        new_workspace_folder = ""
+        if parent_folder:
             try:
-                ensure_workspace_structure(base_folder)
+                new_workspace_folder = str(build_workspace_path(parent_folder, name))
             except Exception as e:
                 self.app._message_dialog(
                     "Workspace",
-                    "Failed to initialize workspace folder.",
+                    "Invalid workspace folder configuration.",
                     str(e),
                     width=460,
                 )
                 return
 
+        # --- Rename / move workspace before DB update ---
+        try:
+            if current_workspace and new_workspace_folder:
+                move_workspace_folder(current_workspace, new_workspace_folder)
+            elif not current_workspace and new_workspace_folder:
+                ensure_workspace_structure(new_workspace_folder)
+            else:
+                new_workspace_folder = current_workspace
+
+        except Exception as e:
+            self.app._message_dialog(
+                "Workspace",
+                "Failed to rename/move project workspace folder.",
+                str(e),
+                width=460,
+            )
+            return
+
+        # --- Update DB only after successful filesystem operation ---
         try:
             update_project(
                 project_id=project.id,
                 name=name,
                 description=desc,
-                base_folder=base_folder,
+                base_folder=new_workspace_folder,
             )
 
         except Exception as e:
@@ -284,7 +321,6 @@ class ProjectsUIController:
         # reselect updated item
         for i in range(self.app.projects_list.count()):
             it = self.app.projects_list.item(i)
-
             if int(it.data(Qt.UserRole)) == project.id:
                 self.app.projects_list.setCurrentItem(it)
                 break
@@ -292,12 +328,8 @@ class ProjectsUIController:
         # update active project labels if needed
         if self.app.current_project_id == project.id:
             self.app.current_project_name = name
-            self.app.lbl_active_project.setText(
-                f"Active project: {name}"
-            )
-            self.app.lbl_project_banner.setText(
-                f"Project: {name}"
-            )
+            self.app.lbl_active_project.setText(f"Active project: {name}")
+            self.app.lbl_project_banner.setText(f"Project: {name}")
 
     def set_active_project(self, project_id: int):
         p = get_project(project_id)
