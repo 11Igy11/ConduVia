@@ -1,4 +1,5 @@
 import sys
+import webbrowser
 from core.ai.assistant_service import AIAssistantService
 import ipaddress
 from ui.registry_page import RegistryPage
@@ -192,8 +193,15 @@ class App(QWidget):
         self.btn_nav_explore = QPushButton("Explore")
         self.btn_nav_registry = QPushButton("Registry")
         self.btn_nav_listing = QPushButton("Listing")
+        self.btn_nav_help = QPushButton("Help")
 
-        for b in (self.btn_nav_projects, self.btn_nav_explore, self.btn_nav_registry, self.btn_nav_listing):
+        for b in (
+            self.btn_nav_projects,
+            self.btn_nav_explore,
+            self.btn_nav_registry,
+            self.btn_nav_listing,
+            self.btn_nav_help,
+        ):
             b.setObjectName("NavButton")
             b.setFixedHeight(40)
 
@@ -207,6 +215,7 @@ class App(QWidget):
         sidebar.addWidget(self.btn_nav_explore)
         sidebar.addWidget(self.btn_nav_registry)
         sidebar.addWidget(self.btn_nav_listing)
+        sidebar.addWidget(self.btn_nav_help)
         sidebar.addStretch()
 
         return sidebar
@@ -216,6 +225,7 @@ class App(QWidget):
         self.btn_nav_explore.clicked.connect(lambda: self.go_page(self.IDX_EXPLORE, self._nav_explore))
         self.btn_nav_registry.clicked.connect(lambda: self.go_page(self.IDX_REGISTRY, self._nav_registry))
         self.btn_nav_listing.clicked.connect(lambda: self.go_page(self.IDX_LISTING, self._nav_listing))
+        self.btn_nav_help.clicked.connect(self.open_user_manual)
 
     def _wire_ui(self) -> None:
         # 1) sidebar navigation
@@ -413,6 +423,19 @@ class App(QWidget):
             current_index=current_index,
             width=width,
         )
+    def open_user_manual(self):
+        manual_path = self.project_dir / "docs" / "ConduVia.pdf"
+
+        if not manual_path.exists():
+            self._message_dialog(
+                "Help",
+                "User manual not found.",
+                str(manual_path),
+                width=460,
+            )
+            return
+
+        webbrowser.open(manual_path.resolve().as_uri())
 
     def _confirm_dialog(
         self,

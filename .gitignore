@@ -31,5 +31,8 @@ DataBase/notes/*.txt
 # Optional: keep folder structure
 !DataBase/notes/.gitkeep
 
+# Local runtime workspace
+BaseFolder/
+
 
 
