@@ -3,11 +3,12 @@ from __future__ import annotations
 import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
+import os
 from typing import Optional, Iterable
 
 # Project root = parent of /core
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_DB_PATH = PROJECT_ROOT / "cache" / "conduvia.db"
+APP_DATA_DIR = Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local")) / "ConduVia"
+DEFAULT_DB_PATH = APP_DATA_DIR / "conduvia.db"
 
 @dataclass
 class Project:

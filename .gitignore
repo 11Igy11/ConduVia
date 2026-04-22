@@ -33,6 +33,12 @@ DataBase/notes/*.txt
 
 # Local runtime workspace
 BaseFolder/
+# PyInstaller
+/build/
+/dist/
+*.spec
 
+# Inno Setup output
+/installer/output/
 
 
