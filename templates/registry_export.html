@@ -1,0 +1,526 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>{{TITLE}}</title>
+
+<style>
+:root{
+    --bg:#0f141b;
+    --panel:#151c24;
+    --panel2:#1b2430;
+    --line:#2b3644;
+    --text:#e8edf3;
+    --muted:#96a3b5;
+    --accent:#4ea1ff;
+    --accent2:#69b4ff;
+    --green:#34d399;
+}
+
+*{
+    box-sizing:border-box;
+}
+
+html,body{
+    margin:0;
+    padding:0;
+    background:var(--bg);
+    color:var(--text);
+    font-family:Segoe UI, Inter, Arial, sans-serif;
+}
+
+body{
+    padding:28px;
+}
+
+.page{
+    max-width:1500px;
+    margin:auto;
+}
+
+/* HEADER */
+
+.hero{
+    position:relative;
+    overflow:hidden;
+    border:1px solid var(--line);
+    background:linear-gradient(145deg,#131a22,#18212c);
+    border-radius:18px;
+    padding:26px 28px;
+    margin-bottom:22px;
+}
+
+.hero-grid{
+    display:grid;
+    grid-template-columns:1fr 150px;
+    gap:24px;
+    align-items:center;
+}
+
+h1{
+    margin:0;
+    font-size:32px;
+    line-height:1.1;
+    font-weight:800;
+    letter-spacing:.2px;
+}
+
+.meta-line{
+    margin-top:8px;
+    color:var(--muted);
+    font-size:14px;
+}
+
+.quick-stats{
+    margin-top:12px;
+    display:flex;
+    gap:12px;
+    flex-wrap:wrap;
+    color:#d5dce5;
+    font-size:13px;
+}
+
+.logo-box{
+    text-align:right;
+}
+
+.logo-box img{
+    max-width:120px;
+    max-height:120px;
+    opacity:.95;
+    filter:drop-shadow(0 0 18px rgba(78,161,255,.18));
+}
+
+/* CHIPS */
+
+.chips{
+    margin-top:18px;
+    display:grid;
+    grid-template-columns:repeat(4,1fr);
+    gap:12px;
+}
+
+.chip{
+    background:rgba(255,255,255,.02);
+    border:1px solid var(--line);
+    border-radius:12px;
+    padding:12px 14px;
+}
+
+.chip .label{
+    color:var(--muted);
+    font-size:12px;
+    margin-bottom:5px;
+}
+
+.chip .value{
+    font-size:15px;
+    font-weight:700;
+    color:#fff;
+    word-break:break-word;
+}
+
+/* STATS */
+
+.stats{
+    display:grid;
+    grid-template-columns:repeat(5,1fr);
+    gap:14px;
+    margin-bottom:22px;
+}
+
+.stat{
+    border:1px solid var(--line);
+    background:var(--panel);
+    border-radius:16px;
+    padding:16px;
+}
+
+.stat .t{
+    font-size:12px;
+    color:var(--muted);
+}
+
+.stat .v{
+    margin-top:6px;
+    font-size:28px;
+    font-weight:800;
+}
+
+/* PANELS */
+
+.panel{
+    border:1px solid var(--line);
+    background:var(--panel);
+    border-radius:18px;
+    padding:18px;
+    margin-bottom:22px;
+}
+
+.panel h2{
+    margin:0 0 14px;
+    font-size:20px;
+}
+
+/* risk */
+
+.risk-wrap{
+    margin-bottom:16px;
+}
+
+.risk-text{
+    margin-bottom:8px;
+    font-weight:700;
+}
+
+.risk-bar{
+    height:14px;
+    background:#0e1319;
+    border:1px solid var(--line);
+    border-radius:999px;
+    overflow:hidden;
+}
+
+.risk-fill{
+    height:100%;
+    background:linear-gradient(90deg,var(--accent),var(--accent2));
+}
+
+/* content grid */
+
+.two{
+    display:grid;
+    grid-template-columns:1fr 1fr;
+    gap:18px;
+}
+
+.block{
+    background:var(--panel2);
+    border:1px solid var(--line);
+    border-radius:14px;
+    padding:14px;
+}
+
+.block h3{
+    margin:0 0 10px;
+    font-size:15px;
+}
+
+ul{
+    margin:8px 0 0 18px;
+    padding:0;
+}
+
+li{
+    margin:6px 0;
+    color:#dce3eb;
+}
+
+/* hist */
+
+.histogram{
+    height:120px;
+    display:grid;
+    grid-template-columns:repeat(24,1fr);
+    gap:4px;
+    align-items:end;
+    margin-top:10px;
+}
+
+.hist-bar-wrap{
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    justify-content:flex-end;
+    height:100%;
+}
+
+.hist-bar{
+    width:100%;
+    background:linear-gradient(180deg,var(--accent2),var(--accent));
+    border-radius:4px 4px 0 0;
+    min-height:4px;
+}
+
+.hist-label{
+    margin-top:6px;
+    font-size:10px;
+    color:var(--muted);
+}
+
+/* direction */
+
+.direction-bar{
+    display:flex;
+    height:12px;
+    border-radius:999px;
+    overflow:hidden;
+    border:1px solid var(--line);
+    margin-top:10px;
+}
+
+.direction-out{
+    background:var(--accent);
+}
+
+.direction-in{
+    background:#64748b;
+}
+
+/* compare */
+
+.compare-grid{
+    display:grid;
+    grid-template-columns:repeat(4,1fr);
+    gap:12px;
+}
+
+.compare-grid div{
+    background:var(--panel2);
+    border:1px solid var(--line);
+    border-radius:14px;
+    padding:14px;
+}
+
+.compare-grid span{
+    display:block;
+    color:var(--muted);
+    font-size:12px;
+}
+
+.compare-grid strong{
+    display:block;
+    margin-top:6px;
+    font-size:24px;
+}
+
+/* insight */
+
+.insight-grid{
+    display:grid;
+    grid-template-columns:repeat(3,1fr);
+    gap:16px;
+}
+
+.insight-card{
+    border:1px solid var(--line);
+    background:var(--panel);
+    border-radius:16px;
+    padding:14px;
+}
+
+.insight-card h3{
+    margin:0 0 12px;
+    font-size:15px;
+}
+
+table{
+    width:100%;
+    border-collapse:collapse;
+}
+
+th,td{
+    padding:9px 8px;
+    border-top:1px solid var(--line);
+    text-align:left;
+    font-size:13px;
+}
+
+th{
+    color:var(--muted);
+    font-weight:700;
+    position:sticky;
+    top:0;
+    background:var(--panel);
+}
+
+td.num,th.num{
+    text-align:center;
+}
+
+/* full dataset */
+
+.table-shell{
+    border:1px solid var(--line);
+    background:var(--panel);
+    border-radius:18px;
+    padding:18px;
+    margin-top:22px;
+}
+
+.table-wrap{
+    overflow:auto;
+    max-height:720px;
+    border:1px solid var(--line);
+    border-radius:14px;
+}
+
+.table-wrap table{
+    min-width:1400px;
+}
+
+/* footer */
+
+.footer{
+    margin:26px 0 10px;
+    color:var(--muted);
+    font-size:13px;
+    text-align:center;
+}
+
+/* responsive */
+
+@media (max-width:1200px){
+    .stats{grid-template-columns:repeat(2,1fr);}
+    .chips{grid-template-columns:repeat(2,1fr);}
+    .two{grid-template-columns:1fr;}
+    .insight-grid{grid-template-columns:1fr;}
+    .compare-grid{grid-template-columns:repeat(2,1fr);}
+}
+
+@media (max-width:760px){
+    .hero-grid{grid-template-columns:1fr;}
+    .logo-box{text-align:left;}
+    .chips{grid-template-columns:1fr;}
+    .stats{grid-template-columns:1fr;}
+    .compare-grid{grid-template-columns:1fr;}
+}
+</style>
+</head>
+
+<body>
+<div class="page">
+
+<section class="hero">
+<div class="hero-grid">
+
+<div>
+<h1>ConduVia Registry Report</h1>
+
+<div class="meta-line">{{FOLDER}}</div>
+<div class="meta-line">Exported: {{EXPORTED_AT}}</div>
+
+<div class="quick-stats">
+<div>Rows: {{TOTAL_FLOWS}}</div>
+<div>Apps: {{UNIQ_APPS}}</div>
+<div>Files: {{FILES_COUNT}}</div>
+</div>
+</div>
+
+<div class="logo-box">
+<img src="{{LOGO}}">
+</div>
+
+</div>
+
+<div class="chips">
+<div class="chip">
+<div class="label">Klasa</div>
+<div class="value">{{KLASA}}</div>
+</div>
+
+<div class="chip">
+<div class="label">Urbroj</div>
+<div class="value">{{URBROJ}}</div>
+</div>
+
+<div class="chip">
+<div class="label">Target</div>
+<div class="value">{{TARGET}}</div>
+</div>
+
+<div class="chip">
+<div class="label">Period</div>
+<div class="value">{{PERIOD}}</div>
+</div>
+</div>
+</section>
+
+<section class="stats">
+<div class="stat"><div class="t">Total flows</div><div class="v">{{TOTAL_FLOWS}}</div></div>
+<div class="stat"><div class="t">Unique src IP</div><div class="v">{{UNIQ_SRC}}</div></div>
+<div class="stat"><div class="t">Unique dst IP</div><div class="v">{{UNIQ_DST}}</div></div>
+<div class="stat"><div class="t">Unique apps</div><div class="v">{{UNIQ_APPS}}</div></div>
+<div class="stat"><div class="t">Total bytes</div><div class="v">{{TOTAL_BYTES}}</div></div>
+</section>
+
+<section class="panel">
+<h2>Analyst Summary</h2>
+
+<div class="risk-wrap">
+<div class="risk-text">Behavior deviation: {{DEVIATION_SCORE}} / 100 ({{DEVIATION_LEVEL}})</div>
+<div class="risk-bar"><div class="risk-fill" style="width:{{DEVIATION_SCORE}}%"></div></div>
+</div>
+
+<div class="two">
+
+<div class="block">
+<h3>Deviation signals</h3>
+<ul>
+{{DEVIATION_REASONS}}
+</ul>
+</div>
+
+<div class="block">
+<h3>Coverage</h3>
+<div>{{COVERAGE}}</div>
+<div style="margin-top:8px;">Outbound share: {{OUTBOUND_SHARE}}</div>
+</div>
+
+<div class="block">
+<h3>Dominant application</h3>
+<div>{{DOMINANT_APP}} ({{DOMINANT_APP_BYTES_SHARE}} bytes)</div>
+<div style="margin-top:8px;">By count: {{DOMINANT_APP_COUNT}} ({{DOMINANT_APP_COUNT_SHARE}})</div>
+</div>
+
+<div class="block">
+<h3>Top outbound relations</h3>
+<div>Internal: {{TOP_INTERNAL}} ({{TOP_INTERNAL_SHARE}})</div>
+<div style="margin-top:8px;">Destination: {{TOP_DST}} ({{TOP_DST_SHARE}})</div>
+</div>
+
+<div class="block">
+<h3>Activity by bytes</h3>
+{{HIST_BYTES}}
+</div>
+
+<div class="block">
+<h3>Activity by flows</h3>
+{{HIST_FLOWS}}
+</div>
+
+</div>
+
+<div style="margin-top:18px;">
+Peak: {{PEAK_HOUR}} |
+Quiet: {{QUIET_HOUR}} |
+Night: {{NIGHT_SHARE}} |
+Business: {{BUSINESS_SHARE}}
+</div>
+
+<div style="margin-top:16px;">
+OUT {{OUT_BYTES}} ({{OUT_PCT}}) |
+IN {{IN_BYTES}} ({{IN_PCT}})
+{{DIRECTION_BAR}}
+</div>
+
+</section>
+
+{{COMPARE_BLOCK}}
+
+<section class="panel">
+<h2>Insights</h2>
+<div class="insight-grid">
+{{INSIGHT_CARDS}}
+</div>
+</section>
+
+{{FULL_DATASET}}
+
+<div class="footer">
+Generated by ConduVia
+</div>
+
+</div>
+</body>
+</html>

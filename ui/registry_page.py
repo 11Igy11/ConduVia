@@ -4,6 +4,7 @@ import html
 from pathlib import Path
 from typing import Any
 from core.timeutils import parse_flow_timestamp
+from core.exporters.registry_exporter import export_registry_html
 
 from PySide6.QtCore import Qt, Signal, QAbstractTableModel, QModelIndex, QSortFilterProxyModel, QSize, QRectF
 from PySide6.QtGui import QPainter, QColor, QPen, QFontMetrics
@@ -1537,20 +1538,34 @@ class RegistryPage(QWidget):
         if not self._folder or not self._flows:
             return
 
-        default_name = "ConduVia_Report.html"
+        default_name = "ConduVia_Registry_Report.html"
         out_path, _ = QFileDialog.getSaveFileName(
             self,
             "Export report",
             str(self._folder / default_name),
             "HTML (*.html)"
         )
+
         if not out_path:
             return
 
         try:
-            html_report = self._build_html_report(include_full=bool(self.chk_full.isChecked()))
-            Path(out_path).write_text(html_report, encoding="utf-8")
+            export_registry_html(
+                file_path=out_path,
+                folder=self._folder,
+                files=self._files,
+                flows=self._flows,
+                meta=self._meta,
+                summary=self._summary,
+                analyst=self._analyst,
+                columns=self._cols,
+                tab_defs=self._tab_defs,
+                compare_result=self._compare_result,
+                include_full=bool(self.chk_full.isChecked()),
+            )
+
             QMessageBox.information(self, "Export", f"Report saved:\n{out_path}")
+
         except Exception as e:
             QMessageBox.critical(self, "Export failed", str(e))
 
