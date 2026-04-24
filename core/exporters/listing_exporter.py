@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import html
+import base64
 from datetime import datetime
 from pathlib import Path
 
@@ -71,8 +72,43 @@ def export_listing_html(
     dataset: str,
     view_mode: str,
     files_count: int,
+    meta: dict | None = None,
 ) -> None:
     path = Path(file_path)
+
+    meta = meta or {}
+
+    def _fmt_date(value: str) -> str:
+        if not value or value == "-":
+            return "-"
+        try:
+            dt = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+            return dt.strftime("%d.%m.%Y.")
+        except Exception:
+            return str(value)
+
+    klasa = str(meta.get("OrigRegNo") or "-")
+    urbroj = str(meta.get("RegNo") or "-")
+    target = str(meta.get("target") or "-")
+    targettype = str(meta.get("targettype") or "")
+
+    target_display = target
+
+    bt = _fmt_date(str(meta.get("bt") or ""))
+    et = _fmt_date(str(meta.get("et") or ""))
+
+    period = "-"
+    if bt != "-" or et != "-":
+        period = f"{bt} – {et}"
+
+    dataset_name = Path(dataset).name if dataset else "(no dataset)"
+    project_root = Path(__file__).resolve().parents[2]
+    logo_path = project_root / "assets" / "ConduVia.png"
+
+    logo_data_uri = ""
+    if logo_path.exists():
+        logo_b64 = base64.b64encode(logo_path.read_bytes()).decode("ascii")
+        logo_data_uri = f"data:image/png;base64,{logo_b64}"
 
     template = _load_listing_html_template()
 
@@ -94,9 +130,14 @@ def export_listing_html(
     rendered = (
         template
         .replace("{{TITLE}}", "ConduVia Listing Export")
-        .replace("{{DATASET}}", html.escape(dataset or "(no dataset)"))
+        .replace("{{LOGO}}", html.escape(logo_data_uri))
+        .replace("{{DATASET}}", html.escape(dataset_name))
         .replace("{{EXPORTED_AT}}", datetime.now().strftime("%d.%m.%Y %H:%M:%S"))
         .replace("{{VIEW_MODE}}", html.escape(view_mode or "Unknown"))
+        .replace("{{KLASA}}", html.escape(klasa))
+        .replace("{{URBROJ}}", html.escape(urbroj))
+        .replace("{{TARGET}}", html.escape(target_display))
+        .replace("{{PERIOD}}", html.escape(period))
         .replace("{{ROWS_COUNT}}", str(len(rows)))
         .replace("{{COLUMNS_COUNT}}", str(len(headers)))
         .replace("{{FILES_COUNT}}", str(files_count))

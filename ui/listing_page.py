@@ -3,6 +3,7 @@ from PySide6.QtGui import QFont
 from PySide6.QtCore import Qt, QAbstractTableModel, QModelIndex
 from core.protocols import format_ip_proto
 from core.exporters.listing_exporter import export_listing_csv, export_listing_excel, export_listing_html
+from core.parser import extract_dataset_meta
 
 
 class ListingTableModel(QAbstractTableModel):
@@ -797,6 +798,16 @@ class ListingPage(QWidget):
             return
 
         try:
+            meta = {}
+
+            try:
+                if self.files:
+                    meta = extract_dataset_meta(self.files[0])
+                elif self.dataset_path:
+                    meta = extract_dataset_meta(self.dataset_path)
+            except Exception:
+                meta = {}
+
             export_listing_html(
                 file_path=file_path,
                 headers=headers,
@@ -804,6 +815,7 @@ class ListingPage(QWidget):
                 dataset=self.dataset_path,
                 view_mode=self.cmb_view_mode.currentText(),
                 files_count=len(self.files),
+                meta=meta,
             )
 
             QMessageBox.information(

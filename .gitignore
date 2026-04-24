@@ -41,4 +41,6 @@ BaseFolder/
 # Inno Setup output
 /installer/output/
 
+installer/third_party/
+
 
