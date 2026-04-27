@@ -721,15 +721,23 @@ class ListingPage(QWidget):
         headers = []
         rows = []
 
-        for key in self.model._columns:
+        columns = list(self.model._columns or [])
+
+        for key in columns:
             headers.append(self.model._friendly_label(key))
 
-        for row_idx in range(self.model.rowCount()):
+        # Export mora koristiti cijeli dataset, ne samo preview iz tablice.
+        export_model = ListingTableModel(self.flows)
+        export_model.set_columns(columns)
+
+        for row_idx in range(export_model.rowCount()):
             row_values = []
-            for col_idx in range(self.model.columnCount()):
-                index = self.model.index(row_idx, col_idx)
-                value = self.model.data(index, Qt.DisplayRole)
+
+            for col_idx in range(export_model.columnCount()):
+                index = export_model.index(row_idx, col_idx)
+                value = export_model.data(index, Qt.DisplayRole)
                 row_values.append("" if value is None else str(value))
+
             rows.append(row_values)
 
         return headers, rows

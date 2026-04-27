@@ -6,15 +6,25 @@
 
 <style>
 :root{
-    --bg:#0f141b;
-    --panel:#151c24;
-    --panel2:#1b2430;
-    --line:#2b3644;
-    --text:#e8edf3;
-    --muted:#96a3b5;
-    --accent:#4ea1ff;
-    --accent2:#69b4ff;
-    --green:#34d399;
+    --bg:#0c1520;
+    --bg2:#132031;
+
+    --panel:#162334;
+    --panel2:#1b2a3d;
+    --line:rgba(255,255,255,.10);
+
+    --text:#eaf1fb;
+    --muted:#9bb0c9;
+
+    --accent:#35a8ff;
+    --accent2:#79c7ff;
+    --green:#7df56f;
+
+    --paper:#ffffff;
+    --paper2:#f8fafc;
+    --paper3:#eef2f7;
+    --ink:#111827;
+    --softline:#dde4ee;
 }
 
 *{
@@ -24,13 +34,16 @@
 html,body{
     margin:0;
     padding:0;
-    background:var(--bg);
     color:var(--text);
     font-family:Segoe UI, Inter, Arial, sans-serif;
 }
 
 body{
     padding:28px;
+    background:
+        radial-gradient(circle at 10% 0%, rgba(53,168,255,.14), transparent 30%),
+        radial-gradient(circle at 100% 0%, rgba(125,245,111,.06), transparent 24%),
+        linear-gradient(180deg,var(--bg),var(--bg2));
 }
 
 .page{
@@ -183,7 +196,16 @@ h1{
 
 .risk-fill{
     height:100%;
+    width:100%;
+    position:relative;
+}
+
+.risk-fill-inner{
+    display:block;
+    height:100%;
+    width:0;
     background:linear-gradient(90deg,var(--accent),var(--accent2));
+    border-radius:999px;
 }
 
 /* content grid */
@@ -303,15 +325,26 @@ li{
 }
 
 .insight-card{
-    border:1px solid var(--line);
-    background:var(--panel);
+    border:1px solid rgba(255,255,255,.10);
+    background:linear-gradient(180deg,rgba(255,255,255,.045),rgba(255,255,255,.025));
     border-radius:16px;
     padding:14px;
+    box-shadow:0 12px 32px rgba(0,0,0,.18);
 }
 
 .insight-card h3{
+    display:inline-flex;
+    align-items:center;
     margin:0 0 12px;
-    font-size:15px;
+    font-size:13px;
+    font-weight:850;
+    letter-spacing:.06em;
+    text-transform:uppercase;
+    color:#ffffff;
+    border:1px solid rgba(53,168,255,.35);
+    background:rgba(53,168,255,.12);
+    border-radius:999px;
+    padding:7px 11px;
 }
 
 table{
@@ -329,34 +362,126 @@ th,td{
 th{
     color:var(--muted);
     font-weight:700;
+    background:var(--panel);
+}
+.table-wrap thead th{
     position:sticky;
     top:0;
-    background:var(--panel);
+    z-index:30;
+
+    background:linear-gradient(180deg,#101a2a,#0b1220);
+    color:#ffffff;
+
+    padding:12px 14px;
+    font-size:13px;
+    font-weight:900;
+    letter-spacing:.01em;
+
+    border-bottom:3px solid var(--accent);
+    border-right:1px solid rgba(255,255,255,.12);
+
+    box-shadow:
+        0 2px 0 rgba(78,161,255,.55),
+        0 8px 18px rgba(0,0,0,.25);
+}
+.table-wrap thead th:last-child{
+    border-right:none;
 }
 
 td.num,th.num{
     text-align:center;
 }
 
-/* full dataset */
+/* full dataset - listing style */
 
 .table-shell{
     border:1px solid var(--line);
-    background:var(--panel);
-    border-radius:18px;
-    padding:18px;
+    border-radius:24px;
+    overflow:hidden;
+    background:linear-gradient(180deg,var(--panel),var(--panel2));
+    box-shadow:0 28px 70px rgba(0,0,0,.34);
     margin-top:22px;
+    padding:0;
+}
+
+.table-head{
+    padding:16px 20px;
+    border-bottom:1px solid var(--line);
+}
+
+.table-head h2{
+    margin:0;
+    font-size:18px;
+    font-weight:850;
+    color:#ffffff;
+    letter-spacing:-.02em;
 }
 
 .table-wrap{
+    background:var(--paper);
+    max-height:78vh;
     overflow:auto;
-    max-height:720px;
-    border:1px solid var(--line);
-    border-radius:14px;
+    border:none;
+    border-radius:0;
+    position:relative;
 }
 
 .table-wrap table{
-    min-width:1400px;
+    min-width:2200px;
+    width:100%;
+    border-collapse:separate;
+    border-spacing:0;
+    font-size:13px;
+}
+
+.table-wrap thead th{
+    position:sticky;
+    top:0;
+    z-index:30;
+
+    background:linear-gradient(180deg,var(--paper),var(--paper3));
+    color:#0f172a;
+
+    padding:12px 13px;
+    text-align:left;
+    font-weight:850;
+    white-space:nowrap;
+
+    border-top:none;
+    border-bottom:3px solid var(--accent);
+    border-right:1px solid var(--softline);
+
+    box-shadow:none;
+}
+
+.table-wrap thead th:last-child{
+    border-right:none;
+}
+
+.table-wrap tbody td{
+    padding:9px 13px;
+    color:var(--ink);
+    white-space:nowrap;
+    border-top:none;
+    border-bottom:1px solid #edf1f6;
+    border-right:1px solid #edf1f6;
+    vertical-align:middle;
+}
+
+.table-wrap tbody td:last-child{
+    border-right:none;
+}
+
+.table-wrap tbody tr:nth-child(odd){
+    background:#ffffff;
+}
+
+.table-wrap tbody tr:nth-child(even){
+    background:#f8fafc;
+}
+
+.table-wrap tbody tr:hover{
+    background:#e8f4ff;
 }
 
 /* footer */
@@ -449,7 +574,11 @@ td.num,th.num{
 
 <div class="risk-wrap">
 <div class="risk-text">Behavior deviation: {{DEVIATION_SCORE}} / 100 ({{DEVIATION_LEVEL}})</div>
-<div class="risk-bar"><div class="risk-fill" style="width:{{DEVIATION_SCORE}}%"></div></div>
+<div class="risk-bar">
+    <div class="risk-fill">
+        <span class="risk-fill-inner" data-score="{{DEVIATION_SCORE}}"></span>
+    </div>
+</div>
 </div>
 
 <div class="two">
@@ -522,5 +651,14 @@ Generated by ConduVia
 </div>
 
 </div>
+<script>
+document.querySelectorAll(".risk-fill-inner").forEach(function(el){
+    var score = parseFloat(el.getAttribute("data-score") || "0");
+    if (isNaN(score)) score = 0;
+    if (score < 0) score = 0;
+    if (score > 100) score = 100;
+    el.style.width = score + "%";
+});
+</script>
 </body>
 </html>

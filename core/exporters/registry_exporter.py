@@ -156,20 +156,110 @@ def _direction_bar_html(out_pct: float, in_pct: float) -> str:
     </div>
     """
 
+def _friendly_column_name(col: str) -> str:
+    labels = {
+        "id": "ID",
+        "expiration_id": "Expiration ID",
+
+        "src_ip": "Source IP",
+        "src_port": "Source Port",
+        "src_mac": "Source MAC",
+        "src_oui": "Source OUI",
+
+        "dst_ip": "Destination IP",
+        "dst_port": "Destination Port",
+        "dst_mac": "Destination MAC",
+        "dst_oui": "Destination OUI",
+
+        "protocol": "Protocol",
+        "application_name": "Application",
+        "requested_server_name": "Server Name",
+
+        "bidirectional_first_seen_ms": "First Seen",
+        "bidirectional_last_seen_ms": "Last Seen",
+        "bidirectional_duration_ms": "Duration",
+        "bidirectional_packets": "Packets",
+        "bidirectional_bytes": "Volume",
+
+        "src2dst_packets": "Src → Dst Packets",
+        "src2dst_bytes": "Src → Dst Bytes",
+        "dst2src_packets": "Dst → Src Packets",
+        "dst2src_bytes": "Dst → Src Bytes",
+
+        "timestamp": "Timestamp",
+        "date": "Date",
+        "time": "Time",
+    }
+
+    if col in labels:
+        return labels[col]
+
+    return col.replace("_", " ").strip().title()
+
+def _format_registry_value(col: str, value: Any) -> str:
+    if value is None or value == "":
+        return "—"
+
+    if col == "protocol":
+        return format_ip_proto(value)
+
+    # first/last seen - supports both epoch ms and datetime string
+    if "first_seen" in col or "last_seen" in col:
+        try:
+            # epoch milliseconds
+            if isinstance(value, (int, float)) or str(value).strip().isdigit():
+                ms = int(float(value))
+                dt = datetime.fromtimestamp(ms / 1000)
+                return dt.strftime("%d.%m.%Y. %H:%M:%S.%f")[:-3]
+
+            # datetime string: 2026-01-04 00:00:02.450000
+            raw = str(value).strip().replace("T", " ")
+            dt = datetime.fromisoformat(raw)
+            return dt.strftime("%d.%m.%Y. %H:%M:%S.%f")[:-3]
+
+        except Exception:
+            return str(value)
+
+    # duration in ms
+    if "duration_ms" in col:
+        try:
+            ms = int(float(value))
+            hours = ms // 3600000
+            minutes = (ms % 3600000) // 60000
+            seconds = (ms % 60000) // 1000
+            millis = ms % 1000
+            return f"{hours:02d}:{minutes:02d}:{seconds:02d}.{millis:03d}"
+        except Exception:
+            return str(value)
+
+    # bytes
+    if col.endswith("_bytes") or col == "bidirectional_bytes":
+        return _human_bytes(value)
+
+    # booleans
+    if col.endswith("_is_guessed") or col in (
+        "application_is_guessed",
+        "client_is_guessed",
+        "server_is_guessed",
+    ):
+        try:
+            return "Yes" if int(float(value)) == 1 else "No"
+        except Exception:
+            return str(value)
+
+    return str(value)
 
 def _full_dataset_table(flows: list[dict[str, Any]], columns: list[str]) -> str:
     if not flows or not columns:
         return ""
 
-    thead = "".join(f"<th>{_esc(c)}</th>" for c in columns)
+    thead = "".join(f"<th>{_esc(_friendly_column_name(c))}</th>" for c in columns)
     body_rows = []
 
     for row in flows:
         tds = []
         for c in columns:
-            v = row.get(c, "")
-            if c == "protocol":
-                v = format_ip_proto(v)
+            v = _format_registry_value(c, row.get(c, ""))
             tds.append(f"<td>{_esc(v)}</td>")
 
         body_rows.append("<tr>" + "".join(tds) + "</tr>")
