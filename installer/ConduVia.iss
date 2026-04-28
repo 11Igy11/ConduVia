@@ -21,7 +21,7 @@ Name: "installai"; Description: "Install AI support (Ollama)"; GroupDescription:
 Name: "pullmodel"; Description: "Download recommended AI model (llama3)"; GroupDescription: "Additional options:"; Flags: unchecked
 
 [Files]
-Source: "..\dist\ConduVia\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "..\dist\main.exe"; DestDir: "{app}"; DestName: "ConduVia.exe"; Flags: ignoreversion
 Source: "third_party\OllamaSetup.exe"; DestDir: "{tmp}"; Flags: deleteafterinstall
 
 [Icons]
