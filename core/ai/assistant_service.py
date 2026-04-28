@@ -43,7 +43,7 @@ class AIAssistantService:
                     "prompt": prompt,
                     "stream": False,
                 },
-                timeout=180,
+                timeout=600,
             )
 
             if response.status_code != 200:
@@ -70,7 +70,7 @@ class AIAssistantService:
                     "prompt": prompt,
                     "stream": False,
                 },
-                timeout=180,
+                timeout=600,
             )
 
             if response.status_code != 200:
@@ -97,7 +97,7 @@ class AIAssistantService:
                     "prompt": prompt,
                     "stream": False,
                 },
-                timeout=180,
+                timeout=600,
             )
 
             if response.status_code != 200:

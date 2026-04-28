@@ -3,6 +3,7 @@ from PySide6.QtGui import QFont
 from PySide6.QtCore import Qt, QAbstractTableModel, QModelIndex
 from core.protocols import format_ip_proto
 from core.exporters.listing_exporter import export_listing_csv, export_listing_excel, export_listing_html
+from core.parser import extract_dataset_meta
 
 
 class ListingTableModel(QAbstractTableModel):
@@ -720,15 +721,23 @@ class ListingPage(QWidget):
         headers = []
         rows = []
 
-        for key in self.model._columns:
+        columns = list(self.model._columns or [])
+
+        for key in columns:
             headers.append(self.model._friendly_label(key))
 
-        for row_idx in range(self.model.rowCount()):
+        # Export mora koristiti cijeli dataset, ne samo preview iz tablice.
+        export_model = ListingTableModel(self.flows)
+        export_model.set_columns(columns)
+
+        for row_idx in range(export_model.rowCount()):
             row_values = []
-            for col_idx in range(self.model.columnCount()):
-                index = self.model.index(row_idx, col_idx)
-                value = self.model.data(index, Qt.DisplayRole)
+
+            for col_idx in range(export_model.columnCount()):
+                index = export_model.index(row_idx, col_idx)
+                value = export_model.data(index, Qt.DisplayRole)
                 row_values.append("" if value is None else str(value))
+
             rows.append(row_values)
 
         return headers, rows
@@ -797,6 +806,16 @@ class ListingPage(QWidget):
             return
 
         try:
+            meta = {}
+
+            try:
+                if self.files:
+                    meta = extract_dataset_meta(self.files[0])
+                elif self.dataset_path:
+                    meta = extract_dataset_meta(self.dataset_path)
+            except Exception:
+                meta = {}
+
             export_listing_html(
                 file_path=file_path,
                 headers=headers,
@@ -804,6 +823,7 @@ class ListingPage(QWidget):
                 dataset=self.dataset_path,
                 view_mode=self.cmb_view_mode.currentText(),
                 files_count=len(self.files),
+                meta=meta,
             )
 
             QMessageBox.information(

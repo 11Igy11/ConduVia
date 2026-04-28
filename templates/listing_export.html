@@ -1,126 +1,386 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="utf-8">
-    <title>{{TITLE}}</title>
-    <style>
-        body {
-            font-family: Arial, sans-serif;
-            margin: 24px;
-            background: #ffffff;
-            color: #111827;
-        }
+<meta charset="UTF-8">
+<title>{{TITLE}}</title>
 
-        h1 {
-            margin-bottom: 8px;
-            font-size: 28px;
-        }
+<style>
+:root{
+    --bg:#0c1520;
+    --bg2:#132031;
 
-        .meta {
-            margin-bottom: 20px;
-            color: #4b5563;
-            line-height: 1.6;
-        }
+    --panel:#162334;
+    --panel2:#1b2a3d;
 
-        .cards {
-            display: flex;
-            gap: 12px;
-            margin-bottom: 24px;
-            flex-wrap: wrap;
-        }
+    --line:rgba(255,255,255,.10);
+    --line2:rgba(255,255,255,.06);
 
-        .card {
-            border: 1px solid #d1d5db;
-            border-radius: 10px;
-            padding: 12px 14px;
-            min-width: 140px;
-            background: #f9fafb;
-        }
+    --text:#eaf1fb;
+    --muted:#9bb0c9;
 
-        .card-label {
-            font-size: 12px;
-            color: #6b7280;
-            margin-bottom: 6px;
-            text-transform: uppercase;
-            letter-spacing: 0.04em;
-        }
+    --blue:#35a8ff;
+    --blue2:#79c7ff;
+    --green:#7df56f;
 
-        .card-value {
-            font-size: 18px;
-            font-weight: 700;
-            color: #111827;
-        }
+    --paper:#ffffff;
+    --paper2:#f8fafc;
+    --paper3:#eef2f7;
+    --ink:#111827;
+    --softline:#dde4ee;
+}
 
-        .table-wrap {
-            overflow-x: auto;
-        }
+*{
+    box-sizing:border-box;
+}
 
-        table {
-            border-collapse: collapse;
-            width: 100%;
-            font-size: 14px;
-            background: #ffffff;
-        }
+body{
+    margin:0;
+    padding:28px;
+    font-family:"Segoe UI", Arial, sans-serif;
+    color:var(--text);
 
-        th, td {
-            border: 1px solid #d1d5db;
-            padding: 8px 10px;
-            text-align: left;
-            vertical-align: top;
-            white-space: nowrap;
-        }
+    background:
+        radial-gradient(circle at 10% 0%, rgba(53,168,255,.14), transparent 30%),
+        radial-gradient(circle at 100% 0%, rgba(125,245,111,.06), transparent 24%),
+        linear-gradient(180deg,var(--bg),var(--bg2));
+}
 
-        th {
-            background: #1f2937;
-            color: #ffffff;
-            position: sticky;
-            top: 0;
-        }
+.report{
+    max-width:1780px;
+    margin:0 auto;
+}
 
-        tr:nth-child(even) {
-            background: #f9fafb;
-        }
+/* =====================================================
+   HERO
+===================================================== */
+.hero{
+    position:relative;
+    overflow:hidden;
 
-        tr:hover {
-            background: #eef2ff;
-        }
-    </style>
+    border:1px solid var(--line);
+    border-radius:24px;
+
+    background:
+        linear-gradient(135deg, rgba(255,255,255,.04), rgba(255,255,255,.02)),
+        linear-gradient(135deg,var(--panel),var(--panel2));
+
+    box-shadow:
+        0 28px 70px rgba(0,0,0,.34);
+
+    padding:28px 30px 22px;
+    margin-bottom:18px;
+}
+
+/* watermark logo */
+.watermark{
+    position:absolute;
+    right:26px;
+    top:18px;
+    width:220px;
+    opacity:.14;
+    pointer-events:none;
+    filter:drop-shadow(0 0 20px rgba(53,168,255,.12));
+}
+
+/* left content only */
+.hero-left{
+    position:relative;
+    z-index:2;
+    max-width:980px;
+}
+
+h1{
+    margin:0;
+    font-size:40px;
+    line-height:1.02;
+    letter-spacing:-.04em;
+    font-weight:900;
+    color:#ffffff;
+}
+
+.dataset{
+    margin-top:12px;
+    font-size:14px;
+    color:var(--muted);
+    word-break:break-all;
+}
+
+.dataset strong{
+    color:#ffffff;
+}
+
+.meta-lines{
+    margin-top:10px;
+    margin-bottom:26px;
+    display:flex;
+    flex-direction:column;
+    gap:4px;
+    font-size:13px;
+    color:var(--muted);
+}
+
+.meta-lines strong{
+    color:#ffffff;
+}
+
+
+.info-strip{
+    margin-top:20px;
+    display:grid;
+    grid-template-columns:1fr 1fr 1.45fr 1.1fr;
+    gap:10px;
+}
+
+.info{
+    border:1px solid var(--line);
+    border-radius:14px;
+    padding:11px 14px;
+    min-height:86px;
+    background:rgba(255,255,255,.035);
+    backdrop-filter: blur(8px);
+}
+.label{
+    font-size:9px;
+    font-weight:850;
+    letter-spacing:.13em;
+    color:var(--blue2);
+    text-transform:uppercase;
+    margin-bottom:6px;
+}
+
+.value{
+    font-size:14px;
+    line-height:1.25;
+    font-weight:750;
+    color:#ffffff;
+    word-break:break-word;
+}
+.info:last-child .value{
+    white-space:nowrap;
+    font-size:14px;
+}
+
+.stats{
+    margin-top:14px;
+    display:flex;
+    gap:10px;
+    flex-wrap:wrap;
+}
+
+.stat{
+    border:1px solid var(--line);
+    border-radius:999px;
+    padding:9px 14px;
+    background:rgba(255,255,255,.045);
+    font-size:13px;
+    color:#d5e4f7;
+    font-weight:700;
+}
+
+.stat strong{
+    color:#ffffff;
+    margin-left:7px;
+    font-size:15px;
+}
+
+/* =====================================================
+   TABLE SHELL
+===================================================== */
+.table-shell{
+    border:1px solid var(--line);
+    border-radius:24px;
+    overflow:hidden;
+
+    background:
+        linear-gradient(180deg,var(--panel),var(--panel2));
+
+    box-shadow:
+        0 28px 70px rgba(0,0,0,.34);
+}
+
+.table-head{
+    padding:16px 20px;
+    border-bottom:1px solid var(--line);
+}
+
+.table-head h2{
+    margin:0;
+    font-size:18px;
+    font-weight:850;
+    color:#ffffff;
+    letter-spacing:-.02em;
+}
+
+/* =====================================================
+   TABLE
+===================================================== */
+.table-wrap{
+    background:var(--paper);
+    max-height:78vh;
+    overflow:auto;
+}
+
+table{
+    width:100%;
+    min-width:1200px;
+    border-collapse:separate;
+    border-spacing:0;
+    font-size:13px;
+}
+
+thead th{
+    position:sticky;
+    top:0;
+    z-index:20;
+
+    background:linear-gradient(180deg,var(--paper),var(--paper3));
+    color:#0f172a;
+
+    padding:12px 13px;
+    text-align:left;
+    font-weight:850;
+    white-space:nowrap;
+
+    border-bottom:3px solid var(--blue);
+    border-right:1px solid var(--softline);
+}
+
+thead th:last-child{
+    border-right:none;
+}
+
+tbody td{
+    padding:9px 13px;
+    color:var(--ink);
+    white-space:nowrap;
+
+    border-bottom:1px solid #edf1f6;
+    border-right:1px solid #edf1f6;
+}
+
+tbody td:last-child{
+    border-right:none;
+}
+
+tbody tr:nth-child(odd){
+    background:#ffffff;
+}
+
+tbody tr:nth-child(even){
+    background:#f8fafc;
+}
+
+tbody tr:hover{
+    background:#e8f4ff;
+}
+
+/* =====================================================
+   FOOTER
+===================================================== */
+.footer{
+    margin-top:10px;
+    text-align:right;
+    color:var(--muted);
+    font-size:12px;
+}
+
+/* =====================================================
+   RESPONSIVE
+===================================================== */
+@media(max-width:1100px){
+
+    .watermark{
+        width:150px;
+        opacity:.10;
+    }
+
+    .info-strip{
+        grid-template-columns:1fr 1fr;
+    }
+
+    h1{
+        font-size:34px;
+    }
+}
+</style>
 </head>
+
 <body>
-    <h1>{{TITLE}}</h1>
+<div class="report">
 
-    <div class="meta">
-        <div><strong>Dataset:</strong> {{DATASET}}</div>
-        <div><strong>Exported:</strong> {{EXPORTED_AT}}</div>
-        <div><strong>View Mode:</strong> {{VIEW_MODE}}</div>
+    <section class="hero">
+
+        <img class="watermark" src="{{LOGO}}" alt="ViaNyquist">
+
+        <div class="hero-left">
+
+            <h1>ViaNyquist Listing Report</h1>
+
+            <div class="dataset">
+                <strong>Dataset:</strong> {{DATASET}}
+            </div>
+
+            <div class="meta-lines">
+                <div><strong>Exported:</strong> {{EXPORTED_AT}}</div>
+                <div><strong>View:</strong> {{VIEW_MODE}}</div>
+                <div><strong>Rows:</strong> {{ROWS_COUNT}}</div>
+                <div><strong>Columns:</strong> {{COLUMNS_COUNT}}</div>
+                <div><strong>JSON files:</strong> {{FILES_COUNT}}</div>
+            </div>
+
+            <div class="info-strip">
+
+                <div class="info">
+                    <div class="label">Klasa</div>
+                    <div class="value">{{KLASA}}</div>
+                </div>
+
+                <div class="info">
+                    <div class="label">Urbroj</div>
+                    <div class="value">{{URBROJ}}</div>
+                </div>
+
+                <div class="info">
+                    <div class="label">Target</div>
+                    <div class="value">{{TARGET}}</div>
+                </div>
+
+                <div class="info">
+                    <div class="label">Period</div>
+                    <div class="value">{{PERIOD}}</div>
+                </div>
+
+            </div>
+            
+        </div>
+
+    </section>
+
+    <section class="table-shell">
+
+        <div class="table-head">
+            <h2>Listing Data</h2>
+        </div>
+
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        {{TABLE_HEADERS}}
+                    </tr>
+                </thead>
+                <tbody>
+                    {{TABLE_ROWS}}
+                </tbody>
+            </table>
+        </div>
+
+    </section>
+
+    <div class="footer">
+        ViaNyquist • by _Igy_
     </div>
 
-    <div class="cards">
-        <div class="card">
-            <div class="card-label">Rows</div>
-            <div class="card-value">{{ROWS_COUNT}}</div>
-        </div>
-        <div class="card">
-            <div class="card-label">Columns</div>
-            <div class="card-value">{{COLUMNS_COUNT}}</div>
-        </div>
-        <div class="card">
-            <div class="card-label">Files</div>
-            <div class="card-value">{{FILES_COUNT}}</div>
-        </div>
-    </div>
-
-    <div class="table-wrap">
-        <table>
-            <thead>
-                <tr>
-                    {{TABLE_HEADERS}}
-                </tr>
-            </thead>
-            <tbody>
-                {{TABLE_ROWS}}
-            </tbody>
-        </table>
-    </div>
+</div>
 </body>
 </html>
