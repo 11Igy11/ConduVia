@@ -91,7 +91,7 @@ class App(QWidget):
         logo = QLabel()
         logo.setFixedSize(64, 64)
 
-        icon_path = self.project_dir / "assets" / "ConduVia.ico"
+        icon_path = self.project_dir / "assets" / "ViaNyquist.ico"
         pm = QPixmap(str(icon_path)) if icon_path.exists() else QPixmap()
 
         if not pm.isNull():
@@ -100,7 +100,7 @@ class App(QWidget):
         title_col = QVBoxLayout()
         title_col.setSpacing(2)
 
-        title = QLabel("ConduVia")
+        title = QLabel("ViaNyquist")
         f = QFont()
         f.setPointSize(30)
         f.setBold(True)
@@ -315,7 +315,7 @@ class App(QWidget):
         
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("ConduVia")
+        self.setWindowTitle("ViaNyquist")
         self.setMinimumSize(1100, 700)
         self.resize(1200, 800)
 
@@ -424,7 +424,7 @@ class App(QWidget):
             width=width,
         )
     def open_user_manual(self):
-        manual_path = self.project_dir / "docs" / "ConduVia.pdf"
+        manual_path = self.project_dir / "docs" / "ViaNyquist.pdf"
 
         if not manual_path.exists():
             self._message_dialog(
@@ -1706,9 +1706,9 @@ def main():
     if qss_path.exists():
         app.setStyleSheet(qss_path.read_text(encoding="utf-8"))
 
-    base_dir = Path(__file__).resolve().parent          # ...\Conduvia\ui
-    project_dir = base_dir.parent                       # ...\Conduvia
-    icon_path = project_dir / "assets" / "ConduVia.ico"
+    base_dir = Path(__file__).resolve().parent          
+    project_dir = base_dir.parent                       
+    icon_path = project_dir / "assets" / "ViaNyquist.ico"
 
     icon = QIcon(str(icon_path))
 

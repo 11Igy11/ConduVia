@@ -105,7 +105,7 @@ def delete_workspace_folder(base_folder: str) -> None:
 
     shutil.rmtree(root)
 
-def looks_like_conduvia_workspace(base_folder: str) -> bool:
+def looks_like_vianyquist_workspace(base_folder: str) -> bool:
     folder = (base_folder or "").strip()
     if not folder:
         return False

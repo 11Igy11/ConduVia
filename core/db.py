@@ -7,8 +7,8 @@ import os
 from typing import Optional, Iterable
 
 # Project root = parent of /core
-APP_DATA_DIR = Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local")) / "ConduVia"
-DEFAULT_DB_PATH = APP_DATA_DIR / "conduvia.db"
+APP_DATA_DIR = Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local")) / "ViaNyquist"
+DEFAULT_DB_PATH = APP_DATA_DIR / "vianyquist.db"
 
 @dataclass
 class Project:

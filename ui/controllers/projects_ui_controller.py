@@ -16,7 +16,7 @@ from core.workspace import (
     build_workspace_path,
     move_workspace_folder,
     delete_workspace_folder,
-    looks_like_conduvia_workspace,   
+    looks_like_vianyquist_workspace,   
 )
 
 class ProjectsUIController:
@@ -153,7 +153,7 @@ class ProjectsUIController:
                 "• findings\n"
                 "• activity log\n"
                 "• workspace folders\n\n"
-                "Only ConduVia workspace folders for this project will be removed."
+                "Only ViaNyquist workspace folders for this project will be removed."
             ),
             ok_text="Delete",
             cancel_text="Cancel",
@@ -165,7 +165,7 @@ class ProjectsUIController:
             return
 
         try:
-            if project.base_folder and looks_like_conduvia_workspace(project.base_folder):
+            if project.base_folder and looks_like_vianyquist_workspace(project.base_folder):
                 delete_workspace_folder(project.base_folder)
 
             delete_project(project_id)

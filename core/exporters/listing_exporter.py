@@ -103,7 +103,7 @@ def export_listing_html(
 
     dataset_name = Path(dataset).name if dataset else "(no dataset)"
     project_root = Path(__file__).resolve().parents[2]
-    logo_path = project_root / "assets" / "ConduVia.png"
+    logo_path = project_root / "assets" / "ViaNyquist.png"
 
     logo_data_uri = ""
     if logo_path.exists():
@@ -129,7 +129,7 @@ def export_listing_html(
 
     rendered = (
         template
-        .replace("{{TITLE}}", "ConduVia Listing Export")
+        .replace("{{TITLE}}", "ViaNyquist Listing Export")
         .replace("{{LOGO}}", html.escape(logo_data_uri))
         .replace("{{DATASET}}", html.escape(dataset_name))
         .replace("{{EXPORTED_AT}}", datetime.now().strftime("%d.%m.%Y %H:%M:%S"))

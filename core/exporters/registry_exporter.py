@@ -67,7 +67,7 @@ def _load_template() -> str:
 
 def _logo_data_uri() -> str:
     project_root = Path(__file__).resolve().parents[2]
-    logo_path = project_root / "assets" / "ConduVia.png"
+    logo_path = project_root / "assets" / "ViaNyquist.png"
 
     if not logo_path.exists():
         return ""
@@ -416,7 +416,7 @@ def export_registry_html(
 
     rendered = (
         template
-        .replace("{{TITLE}}", "ConduVia Registry Report")
+        .replace("{{TITLE}}", "ViaNyquist Registry Report")
         .replace("{{LOGO}}", _esc(_logo_data_uri()))
         .replace("{{FOLDER}}", _esc(Path(folder).name if folder else "—"))
         .replace("{{EXPORTED_AT}}", datetime.now().strftime("%d.%m.%Y %H:%M:%S"))
