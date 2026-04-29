@@ -32,6 +32,10 @@ def extract_dataset_meta(json_path: str | Path) -> dict[str, Any]:
         if k in data and data[k] is not None:
             meta[k] = data[k]
 
+    for alias in ("targetType", "target_type"):
+        if "targettype" not in meta and alias in data and data[alias] is not None:
+            meta["targettype"] = data[alias]
+
     # case list (your sample uses case[0].RegNo / OrigRegNo / bt / et)
     case_list = data.get("case")
     if isinstance(case_list, list) and case_list and isinstance(case_list[0], dict):

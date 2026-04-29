@@ -19,6 +19,8 @@ class Project:
     base_folder: str
     created_at: str
     updated_at: str
+    target_identifier: str = ""
+    target_type: str = ""
 
 @contextmanager
 def _connect(db_path: Path):
@@ -67,6 +69,8 @@ def init_db(db_path: Path = DEFAULT_DB_PATH) -> None:
         # migration-safe: notes column
         _ensure_columns(con, "projects", [
             ("notes", "TEXT NOT NULL DEFAULT ''"),
+            ("target_identifier", "TEXT NOT NULL DEFAULT ''"),
+            ("target_type", "TEXT NOT NULL DEFAULT ''"),
         ])
 
         # --- Datasets (load history) ---
@@ -260,7 +264,15 @@ def list_projects(db_path: Path = DEFAULT_DB_PATH) -> list[Project]:
     with _connect(db_path) as con:
         rows = con.execute(
             """
-            SELECT id, name, description, base_folder, created_at, updated_at
+            SELECT
+                id,
+                name,
+                description,
+                base_folder,
+                created_at,
+                updated_at,
+                target_identifier,
+                target_type
             FROM projects
             ORDER BY updated_at DESC;
             """
@@ -274,6 +286,8 @@ def list_projects(db_path: Path = DEFAULT_DB_PATH) -> list[Project]:
             base_folder=str(r["base_folder"] or ""),
             created_at=str(r["created_at"]),
             updated_at=str(r["updated_at"]),
+            target_identifier=str(r["target_identifier"] or ""),
+            target_type=str(r["target_type"] or ""),
         )
         for r in rows
     ]
@@ -282,7 +296,15 @@ def get_project(project_id: int, db_path: Path = DEFAULT_DB_PATH) -> Optional[Pr
     with _connect(db_path) as con:
         r = con.execute(
             """
-            SELECT id, name, description, base_folder, created_at, updated_at
+            SELECT
+                id,
+                name,
+                description,
+                base_folder,
+                created_at,
+                updated_at,
+                target_identifier,
+                target_type
             FROM projects
             WHERE id = ?;
             """,
@@ -299,6 +321,8 @@ def get_project(project_id: int, db_path: Path = DEFAULT_DB_PATH) -> Optional[Pr
         base_folder=str(r["base_folder"] or ""),
         created_at=str(r["created_at"]),
         updated_at=str(r["updated_at"]),
+        target_identifier=str(r["target_identifier"] or ""),
+        target_type=str(r["target_type"] or ""),
     )
 
 def touch_project(project_id: int, db_path: Path = DEFAULT_DB_PATH) -> None:
@@ -306,6 +330,29 @@ def touch_project(project_id: int, db_path: Path = DEFAULT_DB_PATH) -> None:
         con.execute(
             "UPDATE projects SET updated_at = datetime('now') WHERE id = ?;",
             (project_id,),
+        )
+
+def set_project_target(
+    project_id: int,
+    target_identifier: str = "",
+    target_type: str = "",
+    db_path: Path = DEFAULT_DB_PATH,
+) -> None:
+    with _connect(db_path) as con:
+        con.execute(
+            """
+            UPDATE projects
+            SET
+                target_identifier = ?,
+                target_type = ?,
+                updated_at = datetime('now')
+            WHERE id = ?;
+            """,
+            (
+                (target_identifier or "").strip(),
+                (target_type or "").strip(),
+                project_id,
+            ),
         )
 
 def delete_project(project_id: int, db_path: Path = DEFAULT_DB_PATH) -> None:

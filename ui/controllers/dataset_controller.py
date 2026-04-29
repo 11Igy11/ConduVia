@@ -6,8 +6,9 @@ from PySide6.QtCore import QObject, Qt, QThread, Signal
 from PySide6.QtWidgets import QFileDialog
 
 from core.analyzer import top_applications, top_dst_ips, top_protocols, top_src_ips
-from core.db import add_dataset_load, list_recent_datasets
+from core.db import add_dataset_load, get_project, list_recent_datasets, set_project_target
 from core.loader import load_folder, load_json_file
+from core.parser import extract_dataset_meta
 from core.protocols import format_ip_proto
 
 
@@ -48,6 +49,7 @@ class DatasetLoadWorker(QObject):
             else:
                 raise ValueError(f"Unsupported dataset mode: {self.mode}")
 
+            meta = self._extract_meta(files)
             compare_result = self._build_compare(flows, previous_flows)
 
             self.finished.emit({
@@ -60,6 +62,7 @@ class DatasetLoadWorker(QObject):
                 "stats_label": stats_label,
                 "current_folder": current_folder,
                 "project_id": self.project_id,
+                "meta": meta,
             })
         except Exception as e:
             title = "Failed to load dataset folder." if self.mode == "folder" else "Failed to load JSON file."
@@ -80,6 +83,15 @@ class DatasetLoadWorker(QObject):
             return []
 
         return []
+
+    def _extract_meta(self, files: list[Path]) -> dict:
+        if not files:
+            return {}
+
+        try:
+            return extract_dataset_meta(files[0])
+        except Exception:
+            return {}
 
     def _build_compare(self, flows: list[dict], previous_flows: list[dict]) -> dict | None:
         if not previous_flows:
@@ -110,6 +122,9 @@ class DatasetController(QObject):
         return "\n".join(left_lines), "\n".join(right_lines)
 
     def load_dataset_dialog(self):
+        if not self._ensure_active_project():
+            return
+
         choice = self.app._choice_dialog(
             title="Open dataset",
             message="What do you want to open?",
@@ -175,6 +190,9 @@ class DatasetController(QObject):
         self.app.txt_top_apps_right.setText(right)
 
     def load_dataset_path(self, folder: str):
+        if not self._ensure_active_project():
+            return
+
         folder = str(folder)
         if not Path(folder).exists():
             self.app._message_dialog("Dataset", "Folder not found.", folder, width=480)
@@ -184,6 +202,9 @@ class DatasetController(QObject):
         self._start_dataset_load("folder", folder, previous_path)
 
     def load_dataset_file(self, file_path: str):
+        if not self._ensure_active_project():
+            return
+
         file_path = str(file_path)
         fp = Path(file_path)
 
@@ -244,6 +265,9 @@ class DatasetController(QObject):
             )
             return
 
+        if not self._confirm_or_bind_project_target(result.get("meta") or {}):
+            return
+
         path = str(result["path"])
         files = result["files"]
         flows = result["flows"]
@@ -283,6 +307,121 @@ class DatasetController(QObject):
         self.app.btn_expand_flows.setText("Expand Flows")
         self.app.splitter.setSizes([920, 420])
         self.app.explore_ui_controller.update_detail(None)
+
+    def _ensure_active_project(self) -> bool:
+        if self.app.current_project_id is not None:
+            return True
+
+        self.app._message_dialog(
+            "Dataset",
+            "Open an active project first.",
+            "Datasets are stored and checked against the active project target.",
+            width=480,
+        )
+        return False
+
+    def _dataset_target_from_meta(self, meta: dict) -> tuple[str, str]:
+        target_identifier = str(meta.get("target") or "").strip()
+        target_type = str(meta.get("targettype") or "").strip()
+        return target_identifier, target_type
+
+    def _format_target(self, target_identifier: str, target_type: str) -> str:
+        if target_identifier and target_type:
+            return f"{target_identifier} ({target_type})"
+        return target_identifier or target_type or "-"
+
+    def _target_matches(
+        self,
+        project_identifier: str,
+        project_type: str,
+        dataset_identifier: str,
+        dataset_type: str,
+    ) -> bool:
+        same_identifier = project_identifier.strip().casefold() == dataset_identifier.strip().casefold()
+        if not same_identifier:
+            return False
+
+        if project_type and dataset_type:
+            return project_type.strip().casefold() == dataset_type.strip().casefold()
+
+        return True
+
+    def _refresh_selected_project_preview(self, project_id: int) -> None:
+        selected_item = self.app.projects_list.currentItem()
+        if selected_item and int(selected_item.data(Qt.UserRole)) == project_id:
+            self.app.projects_ui_controller.on_project_selected_preview()
+
+    def _confirm_or_bind_project_target(self, meta: dict) -> bool:
+        project_id = self.app.current_project_id
+        if project_id is None:
+            return False
+
+        project = get_project(project_id)
+        if not project:
+            self.app._message_dialog("Dataset", "Project not found.", width=400)
+            return False
+
+        dataset_identifier, dataset_type = self._dataset_target_from_meta(meta)
+        project_identifier = (project.target_identifier or "").strip()
+        project_type = (project.target_type or "").strip()
+
+        if not dataset_identifier:
+            details = (
+                f"Project target: {self._format_target(project_identifier, project_type)}\n"
+                "Dataset target: -\n\n"
+                "ViaNyquist cannot verify whether this dataset belongs to the active project."
+            )
+            return self.app._confirm_dialog(
+                title="Dataset target missing",
+                message="Dataset does not contain a target identifier.",
+                details=details,
+                ok_text="Load anyway",
+                cancel_text="Cancel",
+                width=520,
+            )
+
+        if not project_identifier:
+            set_project_target(project_id, dataset_identifier, dataset_type)
+            self._refresh_selected_project_preview(project_id)
+            return True
+
+        same_identifier = project_identifier.casefold() == dataset_identifier.casefold()
+        if same_identifier and not project_type and dataset_type:
+            set_project_target(project_id, project_identifier, dataset_type)
+            self._refresh_selected_project_preview(project_id)
+            return True
+
+        if same_identifier and project_type and not dataset_type:
+            details = (
+                f"Project target: {self._format_target(project_identifier, project_type)}\n"
+                f"Dataset target: {self._format_target(dataset_identifier, dataset_type)}\n\n"
+                "The identifier matches, but the dataset does not contain a target type."
+            )
+            return self.app._confirm_dialog(
+                title="Dataset target type missing",
+                message="Dataset target type could not be verified.",
+                details=details,
+                ok_text="Load anyway",
+                cancel_text="Cancel",
+                width=540,
+            )
+
+        if self._target_matches(project_identifier, project_type, dataset_identifier, dataset_type):
+            return True
+
+        details = (
+            f"Project target: {self._format_target(project_identifier, project_type)}\n"
+            f"Dataset target: {self._format_target(dataset_identifier, dataset_type)}\n\n"
+            "This may mean the selected dataset belongs to a different target than the active project."
+        )
+        return self.app._confirm_dialog(
+            title="Dataset target mismatch",
+            message="Dataset target does not match the active project.",
+            details=details,
+            ok_text="Load anyway",
+            cancel_text="Cancel",
+            width=560,
+        )
 
     def _on_dataset_load_error(self, title: str, details: str):
         self.app._message_dialog("Dataset", title, details, width=520)

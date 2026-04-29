@@ -114,6 +114,8 @@ class ProjectsUIController:
         info = []
         info.append(f"Name: {p.name}")
         info.append(f"ID: {p.id}")
+        info.append(f"Target: {p.target_identifier or '-'}")
+        info.append(f"Target type: {p.target_type or '-'}")
         info.append(f"Workspace folder: {p.base_folder or '-'}")
         info.append(f"Created: {p.created_at}")
         info.append(f"Updated: {p.updated_at}")
