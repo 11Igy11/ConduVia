@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 import os
@@ -19,11 +20,16 @@ class Project:
     created_at: str
     updated_at: str
 
-def _connect(db_path: Path) -> sqlite3.Connection:
+@contextmanager
+def _connect(db_path: Path):
     db_path.parent.mkdir(parents=True, exist_ok=True)
     con = sqlite3.connect(db_path)
     con.row_factory = sqlite3.Row
-    return con
+    try:
+        yield con
+        con.commit()
+    finally:
+        con.close()
 
 def _column_exists(con: sqlite3.Connection, table: str, col: str) -> bool:
     rows = con.execute(f"PRAGMA table_info({table});").fetchall()
@@ -132,10 +138,71 @@ def init_db(db_path: Path = DEFAULT_DB_PATH) -> None:
             """
         )
 
+        # --- App settings ---
+        con.execute(
+            """
+            CREATE TABLE IF NOT EXISTS app_settings (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL DEFAULT '',
+                updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+            """
+        )
+
         # --- Indexes (performance) ---
         con.execute("CREATE INDEX IF NOT EXISTS idx_datasets_project_loaded ON datasets(project_id, loaded_at);")
         con.execute("CREATE INDEX IF NOT EXISTS idx_findings_project_created ON findings(project_id, created_at);")
         con.execute("CREATE INDEX IF NOT EXISTS idx_activity_project_created ON activity_log(project_id, created_at);")
+
+# ---------------- App settings ----------------
+def get_app_setting(key: str, default: str = "", db_path: Path = DEFAULT_DB_PATH) -> str:
+    key = (key or "").strip()
+    if not key:
+        return default
+
+    with _connect(db_path) as con:
+        row = con.execute(
+            "SELECT value FROM app_settings WHERE key = ?;",
+            (key,),
+        ).fetchone()
+
+    if not row:
+        return default
+
+    return str(row["value"] or "")
+
+
+def set_app_setting(key: str, value: str, db_path: Path = DEFAULT_DB_PATH) -> None:
+    key = (key or "").strip()
+    if not key:
+        raise ValueError("Setting key is required.")
+
+    with _connect(db_path) as con:
+        con.execute(
+            """
+            INSERT INTO app_settings (key, value, updated_at)
+            VALUES (?, ?, datetime('now'))
+            ON CONFLICT(key) DO UPDATE SET
+                value = excluded.value,
+                updated_at = datetime('now');
+            """,
+            (key, value or ""),
+        )
+
+
+def get_app_settings(prefix: str = "", db_path: Path = DEFAULT_DB_PATH) -> dict[str, str]:
+    prefix = prefix or ""
+
+    with _connect(db_path) as con:
+        if prefix:
+            rows = con.execute(
+                "SELECT key, value FROM app_settings WHERE key LIKE ? ORDER BY key;",
+                (prefix + "%",),
+            ).fetchall()
+        else:
+            rows = con.execute("SELECT key, value FROM app_settings ORDER BY key;").fetchall()
+
+    return {str(r["key"]): str(r["value"] or "") for r in rows}
 
 # ---------------- Projects ----------------
 def create_project(

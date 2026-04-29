@@ -11,6 +11,7 @@ from core.ai.assistant_service import AIAssistantService, AISettings
 from core.ai.context_builder import build_dataset_context
 from core.ai.prompts import build_dataset_summary_prompt
 from core.compare import compare_flows, summarize_new_flows
+from core.db import get_app_setting, get_app_settings, init_db, set_app_setting
 from core.flow_stats import compute_registry_summary, top_field_by_bytes, top_field_values
 from core.formatters import (
     format_duration_hms_ms,
@@ -187,11 +188,39 @@ class WorkspaceTests(unittest.TestCase):
         self.assertEqual(make_safe_project_folder_name(' Case: A/B? '), "Case_A_B")
 
 
+class AppSettingsTests(unittest.TestCase):
+    def test_app_settings_are_persisted_in_database(self):
+        with temporary_directory() as tmp:
+            db_path = Path(tmp) / "settings.db"
+            init_db(db_path)
+
+            set_app_setting("ai.model", "model-a", db_path=db_path)
+            set_app_setting("ai.timeout_seconds", "42", db_path=db_path)
+
+            self.assertEqual(get_app_setting("ai.model", db_path=db_path), "model-a")
+            self.assertEqual(
+                get_app_settings("ai.", db_path=db_path),
+                {"ai.model": "model-a", "ai.timeout_seconds": "42"},
+            )
+
+
 class AIServiceTests(unittest.TestCase):
     def test_ai_settings_builds_generate_url(self):
         settings = AISettings(base_url="http://localhost:11434/", model="m", timeout_seconds=5)
 
         self.assertEqual(settings.generate_url, "http://localhost:11434/api/generate")
+
+    def test_ai_settings_loads_from_persisted_mapping(self):
+        settings = AISettings.from_mapping({
+            "ai.base_url": "http://saved.local",
+            "ai.model": "saved-model",
+            "ai.timeout_seconds": "33",
+        })
+
+        self.assertEqual(settings.base_url, "http://saved.local")
+        self.assertEqual(settings.model, "saved-model")
+        self.assertEqual(settings.timeout_seconds, 33)
+        self.assertEqual(settings.to_mapping()["ai.model"], "saved-model")
 
     def test_generate_uses_configured_endpoint_model_and_timeout(self):
         class FakeResponse:

@@ -37,6 +37,32 @@ class AISettings:
             timeout_seconds=timeout,
         )
 
+    @classmethod
+    def from_mapping(cls, values: dict[str, str]) -> "AISettings":
+        defaults = cls.from_env()
+
+        def pick(name: str, default: str) -> str:
+            return (values.get(name) or values.get(f"ai.{name}") or default or "").strip()
+
+        timeout_raw = pick("timeout_seconds", str(defaults.timeout_seconds))
+        try:
+            timeout = max(1, int(timeout_raw))
+        except Exception:
+            timeout = defaults.timeout_seconds
+
+        return cls(
+            base_url=pick("base_url", defaults.base_url) or defaults.base_url,
+            model=pick("model", defaults.model) or defaults.model,
+            timeout_seconds=timeout,
+        )
+
+    def to_mapping(self) -> dict[str, str]:
+        return {
+            "ai.base_url": self.base_url,
+            "ai.model": self.model,
+            "ai.timeout_seconds": str(self.timeout_seconds),
+        }
+
     @property
     def generate_url(self) -> str:
         return self.base_url.rstrip("/") + "/api/generate"
