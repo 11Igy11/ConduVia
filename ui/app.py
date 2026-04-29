@@ -44,7 +44,8 @@ from PySide6.QtWidgets import (
 from core.db import (
     init_db, add_finding, get_finding,
     update_finding, delete_finding,
-    add_activity, get_project
+    add_activity, get_project,
+    get_app_settings, set_app_setting,
 )
 # ---------- helpers ----------
 def is_private_ip(ip: str) -> bool:
@@ -325,7 +326,9 @@ class App(QWidget):
         self.project_dir = Path(__file__).resolve().parent.parent
         self._init_state()
 
-        self.ai_service = AIAssistantService()
+        self.ai_service = AIAssistantService(
+            AISettings.from_mapping(get_app_settings("ai."))
+        )
         self.notes_controller = NotesController()
         self.flow_controller = FlowController()
         self.findings_controller = FindingsController()
@@ -1557,9 +1560,12 @@ class App(QWidget):
             return
 
         self.ai_service.update_settings(AISettings(**values))
+        for key, value in self.ai_service.settings.to_mapping().items():
+            set_app_setting(key, value)
+
         self._message_dialog(
             "AI Settings",
-            "AI settings updated for this session.",
+            "AI settings updated.",
             f"Base URL: {values['base_url']}\nModel: {values['model']}\nTimeout: {values['timeout_seconds']} seconds",
             width=520,
         )
