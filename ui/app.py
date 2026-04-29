@@ -1,6 +1,6 @@
 import sys
 import webbrowser
-from core.ai.assistant_service import AIAssistantService
+from core.ai.assistant_service import AIAssistantService, AISettings
 import ipaddress
 from ui.registry_page import RegistryPage
 from ui.listing_page import ListingPage
@@ -28,6 +28,7 @@ from ui.dialogs import (
     multiline_input_dialog,
     item_choice_dialog,
     confirm_dialog,
+    ai_settings_dialog,
 )
 from PySide6.QtCore import Qt, QTimer, QThread
 from PySide6.QtGui import QGuiApplication, QIcon, QFont, QPixmap
@@ -248,6 +249,7 @@ class App(QWidget):
         self.btn_load.clicked.connect(self.dataset_controller.load_dataset_dialog)
         self.btn_ai_summary.clicked.connect(self.explore_ui_controller.generate_ai_summary)
         self.btn_add_ai_to_notes.clicked.connect(self.add_ai_summary_to_notes)
+        self.btn_ai_settings.clicked.connect(self.configure_ai_settings)
         self.btn_toggle_conv.clicked.connect(self.explore_ui_controller.toggle_conversation)
         self.btn_expand_flows.clicked.connect(self.explore_ui_controller.toggle_flows_expanded)
         self.btn_mark_finding.clicked.connect(self.mark_as_finding)
@@ -667,12 +669,14 @@ class App(QWidget):
 
         self.btn_ai_summary = QPushButton("Generate AI Summary")
         self.btn_add_ai_to_notes = QPushButton("Add AI to Notes")
+        self.btn_ai_settings = QPushButton("AI Settings")
         self.btn_add_ai_to_notes.setEnabled(True)
 
         summary_btn_row = QHBoxLayout()
         summary_btn_row.setSpacing(8)
         summary_btn_row.addWidget(self.btn_ai_summary)
         summary_btn_row.addWidget(self.btn_add_ai_to_notes)
+        summary_btn_row.addWidget(self.btn_ai_settings)
         summary_btn_row.addStretch()
 
         summary_layout.addLayout(summary_btn_row)
@@ -1222,7 +1226,6 @@ class App(QWidget):
 
         try:
             add_finding(self.current_project_id, self._current_flow, title=title, note=note)
-            add_activity(self.current_project_id, "finding_created", title)
         except Exception as e:
             self._message_dialog("Findings", "Failed to create finding.", str(e), width=460)
             return
@@ -1397,8 +1400,6 @@ class App(QWidget):
 
         try:
             update_finding(fid, title=title, note=note, status=status, tags=tags)
-            if self.current_project_id:
-                add_activity(self.current_project_id, "finding_updated", f"#{fid} {title}")
         except Exception as e:
             self._message_dialog("Findings", "Failed to update finding.", str(e), width=460)
             return
@@ -1431,8 +1432,6 @@ class App(QWidget):
 
         try:
             delete_finding(fid)
-            if self.current_project_id:
-                add_activity(self.current_project_id, "finding_deleted", f"#{fid} {title}")
         except Exception as e:
             self._message_dialog("Findings", "Failed to delete finding.", str(e), width=460)
             return
@@ -1543,6 +1542,27 @@ class App(QWidget):
         self._flush_notes()
 
         self.tabs.setCurrentIndex(3)  # Notes tab
+
+    def configure_ai_settings(self):
+        current = self.ai_service.settings
+        values, ok = ai_settings_dialog(
+            self,
+            base_url=current.base_url,
+            model=current.model,
+            timeout_seconds=current.timeout_seconds,
+            width=480,
+        )
+
+        if not ok or not values:
+            return
+
+        self.ai_service.update_settings(AISettings(**values))
+        self._message_dialog(
+            "AI Settings",
+            "AI settings updated for this session.",
+            f"Base URL: {values['base_url']}\nModel: {values['model']}\nTimeout: {values['timeout_seconds']} seconds",
+            width=520,
+        )
 
     # ---------- Notes ----------
     def refresh_notes_ui(self):

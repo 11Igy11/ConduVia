@@ -6,34 +6,22 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from core.formatters import (
+    format_duration_hms_ms,
+    format_flow_datetime,
+    format_short_date,
+    human_bytes,
+    safe_int,
+)
 from core.protocols import format_ip_proto
-from core.timeutils import parse_flow_timestamp
 
 
 def _human_bytes(n: int | float | None) -> str:
-    try:
-        v = float(n or 0)
-    except Exception:
-        v = 0.0
-
-    units = ["B", "KB", "MB", "GB", "TB"]
-    i = 0
-
-    while v >= 1024 and i < len(units) - 1:
-        v /= 1024.0
-        i += 1
-
-    if i == 0:
-        return f"{int(v)} {units[i]}"
-
-    return f"{v:.1f} {units[i]}"
+    return human_bytes(n, precision=1)
 
 
 def _safe_int(x: Any) -> int:
-    try:
-        return int(float(x or 0))
-    except Exception:
-        return 0
+    return safe_int(x)
 
 
 def _esc(x: Any) -> str:
@@ -41,23 +29,7 @@ def _esc(x: Any) -> str:
 
 
 def _fmt_dt_short(x: Any) -> str:
-    if not x:
-        return "—"
-
-    try:
-        dt = datetime.fromisoformat(str(x).strip().replace("Z", "+00:00"))
-        return dt.strftime("%d.%m.%Y.")
-    except Exception:
-        pass
-
-    try:
-        dt = parse_flow_timestamp({"timestamp": x})
-        if dt is not None:
-            return dt.strftime("%d.%m.%Y.")
-    except Exception:
-        pass
-
-    return str(x)
+    return format_short_date(x, missing="—")
 
 
 def _load_template() -> str:
@@ -205,32 +177,11 @@ def _format_registry_value(col: str, value: Any) -> str:
 
     # first/last seen - supports both epoch ms and datetime string
     if "first_seen" in col or "last_seen" in col:
-        try:
-            # epoch milliseconds
-            if isinstance(value, (int, float)) or str(value).strip().isdigit():
-                ms = int(float(value))
-                dt = datetime.fromtimestamp(ms / 1000)
-                return dt.strftime("%d.%m.%Y. %H:%M:%S.%f")[:-3]
-
-            # datetime string: 2026-01-04 00:00:02.450000
-            raw = str(value).strip().replace("T", " ")
-            dt = datetime.fromisoformat(raw)
-            return dt.strftime("%d.%m.%Y. %H:%M:%S.%f")[:-3]
-
-        except Exception:
-            return str(value)
+        return format_flow_datetime(value, milliseconds=True)
 
     # duration in ms
     if "duration_ms" in col:
-        try:
-            ms = int(float(value))
-            hours = ms // 3600000
-            minutes = (ms % 3600000) // 60000
-            seconds = (ms % 60000) // 1000
-            millis = ms % 1000
-            return f"{hours:02d}:{minutes:02d}:{seconds:02d}.{millis:03d}"
-        except Exception:
-            return str(value)
+        return format_duration_hms_ms(value)
 
     # bytes
     if col.endswith("_bytes") or col == "bidirectional_bytes":

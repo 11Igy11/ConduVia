@@ -289,3 +289,74 @@ def confirm_dialog(
     layout.addWidget(buttons)
 
     return dlg.exec() == QDialog.Accepted
+
+
+def ai_settings_dialog(
+    parent,
+    *,
+    base_url: str,
+    model: str,
+    timeout_seconds: int,
+    width: int = 480,
+):
+    dlg = QDialog(parent)
+    dlg.setWindowTitle("AI Settings")
+    dlg.setModal(True)
+    dlg.setFixedWidth(width)
+
+    layout = QVBoxLayout(dlg)
+    layout.setContentsMargins(18, 16, 18, 16)
+    layout.setSpacing(12)
+
+    lbl = QLabel("Configure local AI provider.")
+    lbl.setWordWrap(True)
+    layout.addWidget(lbl)
+
+    edit_url = QLineEdit()
+    edit_url.setText(base_url or "")
+    edit_url.setMinimumHeight(38)
+    edit_url.setPlaceholderText("http://localhost:11434")
+    layout.addWidget(QLabel("Base URL:"))
+    layout.addWidget(edit_url)
+
+    edit_model = QLineEdit()
+    edit_model.setText(model or "")
+    edit_model.setMinimumHeight(38)
+    edit_model.setPlaceholderText("llama3")
+    layout.addWidget(QLabel("Model:"))
+    layout.addWidget(edit_model)
+
+    edit_timeout = QLineEdit()
+    edit_timeout.setText(str(timeout_seconds or 600))
+    edit_timeout.setMinimumHeight(38)
+    edit_timeout.setPlaceholderText("600")
+    layout.addWidget(QLabel("Timeout seconds:"))
+    layout.addWidget(edit_timeout)
+
+    buttons = QDialogButtonBox()
+    btn_ok = buttons.addButton("OK", QDialogButtonBox.AcceptRole)
+    btn_cancel = buttons.addButton("Cancel", QDialogButtonBox.RejectRole)
+
+    btn_ok.setFixedHeight(36)
+    btn_cancel.setFixedHeight(36)
+    btn_ok.setMinimumWidth(110)
+    btn_cancel.setMinimumWidth(110)
+
+    buttons.accepted.connect(dlg.accept)
+    buttons.rejected.connect(dlg.reject)
+    layout.addWidget(buttons)
+
+    ok = dlg.exec() == QDialog.Accepted
+    if not ok:
+        return None, False
+
+    try:
+        timeout = int((edit_timeout.text() or "").strip())
+    except Exception:
+        timeout = 600
+
+    return {
+        "base_url": (edit_url.text() or "").strip() or "http://localhost:11434",
+        "model": (edit_model.text() or "").strip() or "llama3",
+        "timeout_seconds": max(1, timeout),
+    }, True

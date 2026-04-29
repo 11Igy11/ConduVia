@@ -34,40 +34,6 @@ def _is_private_ip(ip: str) -> bool:
     except Exception:
         return False
 
-def _parse_flow_dt(ts: Any) -> datetime | None:
-    # 1) epoch (ms or s)
-    if isinstance(ts, (int, float)):
-        try:
-            v = float(ts)
-            # heuristika: ms epoch je obično > 1e12
-            if v > 1e12:
-                return datetime.utcfromtimestamp(v / 1000.0)
-            # seconds epoch
-            if v > 1e9:
-                return datetime.utcfromtimestamp(v)
-        except Exception:
-            return None
-
-    # 2) string formats
-    if not ts:
-        return None
-    s = str(ts).strip()
-    if len(s) < 16:
-        return None
-
-    fmts = (
-        "%Y-%m-%d %H:%M:%S.%f",
-        "%Y-%m-%d %H:%M:%S",
-        "%Y-%m-%dT%H:%M:%S.%f",
-        "%Y-%m-%dT%H:%M:%S",
-    )
-    for fmt in fmts:
-        try:
-            return datetime.strptime(s, fmt)
-        except Exception:
-            pass
-    return None
-
 def _parse_meta_iso_dt(s: Any) -> datetime | None:
     """
     Meta bt/et sample:
