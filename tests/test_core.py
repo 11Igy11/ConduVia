@@ -8,6 +8,8 @@ from pathlib import Path
 from unittest.mock import patch
 
 from core.ai.assistant_service import AIAssistantService, AISettings
+from core.ai.context_builder import build_dataset_context
+from core.ai.prompts import build_dataset_summary_prompt
 from core.compare import compare_flows, summarize_new_flows
 from core.flow_stats import compute_registry_summary, top_field_by_bytes, top_field_values
 from core.formatters import (
@@ -20,6 +22,7 @@ from core.formatters import (
     safe_int,
 )
 from core.loader import list_json_files, load_folder, load_json_file
+from core.protocols import describe_ip_proto, format_ip_proto_with_description
 from core.timeutils import LOCAL_TZ, parse_timestamp
 from core.workspace import (
     WORKSPACE_MARKER,
@@ -159,6 +162,14 @@ class CompareTests(unittest.TestCase):
         self.assertEqual(new_summary["new_sni"], ["b.test"])
 
 
+class ProtocolTests(unittest.TestCase):
+    def test_protocol_descriptions_explain_without_confirming_service(self):
+        self.assertIn("Connection-oriented transport", describe_ip_proto(6))
+        self.assertIn("Connectionless transport", describe_ip_proto("UDP"))
+        self.assertIn("purpose is not confirmed", describe_ip_proto(250))
+        self.assertIn("TCP (6) - Connection-oriented transport", format_ip_proto_with_description(6))
+
+
 class WorkspaceTests(unittest.TestCase):
     def test_workspace_marker_controls_vianyquist_workspace_detection(self):
         with temporary_directory() as tmp:
@@ -201,6 +212,34 @@ class AIServiceTests(unittest.TestCase):
         self.assertEqual(post.call_args.args, ("hello",))
         self.assertEqual(service.settings.model, "custom-model")
         self.assertEqual(service.settings.timeout_seconds, 7)
+
+    def test_dataset_context_includes_behavior_indicators(self):
+        flows = [
+            {
+                "src_ip": "10.0.0.1",
+                "dst_ip": "8.8.8.8",
+                "protocol": 6,
+                "application_name": "A",
+                "bidirectional_bytes": "2048",
+                "bidirectional_packets": 10,
+                "bidirectional_duration_ms": 1000,
+                "bidirectional_first_seen_ms": "2024-01-01 10:00:00",
+            }
+        ]
+
+        context = build_dataset_context(flows)
+
+        self.assertIn("Dataset-level behavior indicators", context)
+        self.assertIn("Top source IPs by bytes", context)
+        self.assertIn("Largest individual flows", context)
+        self.assertIn("Connection-oriented transport", context)
+
+    def test_dataset_prompt_encourages_interpretation_without_cyber_mode(self):
+        prompt = build_dataset_summary_prompt("context")
+
+        self.assertIn("The user wants interpretation", prompt)
+        self.assertIn("Do not jump into cybersecurity mode", prompt)
+        self.assertIn("Limits Of Interpretation", prompt)
 
 
 if __name__ == "__main__":
