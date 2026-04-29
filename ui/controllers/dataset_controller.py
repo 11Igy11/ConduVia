@@ -1,14 +1,103 @@
+from __future__ import annotations
+
 from pathlib import Path
 
-from core.db import add_dataset_load, list_recent_datasets
-from core.analyzer import top_src_ips, top_dst_ips, top_applications, top_protocols
-from core.protocols import format_ip_proto
-from core.loader import load_folder, load_json_file
+from PySide6.QtCore import QObject, Qt, QThread, Signal
 from PySide6.QtWidgets import QFileDialog
 
-class DatasetController:
+from core.analyzer import top_applications, top_dst_ips, top_protocols, top_src_ips
+from core.db import add_dataset_load, list_recent_datasets
+from core.loader import load_folder, load_json_file
+from core.protocols import format_ip_proto
+
+
+class DatasetLoadWorker(QObject):
+    finished = Signal(object)
+    error = Signal(str, str)
+
+    def __init__(
+        self,
+        *,
+        mode: str,
+        path: str,
+        previous_path: str = "",
+        project_id: int | None = None,
+    ):
+        super().__init__()
+        self.mode = mode
+        self.path = path
+        self.previous_path = previous_path
+        self.project_id = project_id
+
+    def run(self):
+        try:
+            previous_flows = self._load_previous_flows()
+
+            if self.mode == "folder":
+                files, flows = load_folder(self.path, debug=False)
+                dataset_label = f"Dataset: {self.path}"
+                stats_label = f"JSON files: {len(files)}   |   Total flow records: {len(flows)}"
+                current_folder = self.path
+            elif self.mode == "file":
+                fp = Path(self.path)
+                flows = load_json_file(fp, debug=False)
+                files = [fp]
+                dataset_label = f"Dataset file: {self.path}"
+                stats_label = f"JSON files: 1   |   Total flow records: {len(flows)}"
+                current_folder = str(fp.parent)
+            else:
+                raise ValueError(f"Unsupported dataset mode: {self.mode}")
+
+            compare_result = self._build_compare(flows, previous_flows)
+
+            self.finished.emit({
+                "mode": self.mode,
+                "path": self.path,
+                "files": files,
+                "flows": flows,
+                "compare_result": compare_result,
+                "dataset_label": dataset_label,
+                "stats_label": stats_label,
+                "current_folder": current_folder,
+                "project_id": self.project_id,
+            })
+        except Exception as e:
+            title = "Failed to load dataset folder." if self.mode == "folder" else "Failed to load JSON file."
+            self.error.emit(title, str(e))
+
+    def _load_previous_flows(self) -> list[dict]:
+        if not self.previous_path:
+            return []
+
+        try:
+            prev = Path(self.previous_path)
+            if prev.is_file():
+                return load_json_file(prev, debug=False)
+            if prev.is_dir():
+                _files, flows = load_folder(prev, debug=False)
+                return flows
+        except Exception:
+            return []
+
+        return []
+
+    def _build_compare(self, flows: list[dict], previous_flows: list[dict]) -> dict | None:
+        if not previous_flows:
+            return None
+
+        from core.compare import compare_flows, summarize_new_flows
+
+        compare_result = compare_flows(flows, previous_flows)
+        compare_result["summary_new"] = summarize_new_flows(compare_result["new"])
+        return compare_result
+
+
+class DatasetController(QObject):
     def __init__(self, app):
+        super().__init__(app)
         self.app = app
+        self._load_thread: QThread | None = None
+        self._load_worker: DatasetLoadWorker | None = None
 
     def _split_ranked_lines(self, items):
         left_lines = []
@@ -19,7 +108,7 @@ class DatasetController:
             right_lines.append(str(count))
 
         return "\n".join(left_lines), "\n".join(right_lines)
-    
+
     def load_dataset_dialog(self):
         choice = self.app._choice_dialog(
             title="Open dataset",
@@ -40,7 +129,7 @@ class DatasetController:
                 self.app,
                 "Select JSON file",
                 "",
-                "JSON files (*.json)"
+                "JSON files (*.json)",
             )
             if not file_path:
                 return
@@ -91,68 +180,8 @@ class DatasetController:
             self.app._message_dialog("Dataset", "Folder not found.", folder, width=480)
             return
 
-        previous_flows = []
-
-        if self.app.current_project_id is not None:
-            recent = list_recent_datasets(self.app.current_project_id, limit=2)
-
-            if len(recent) >= 1:
-                prev_folder = recent[0]
-
-                # ako je isti folder → ignoriraj
-                if str(prev_folder) != str(folder):
-                    try:
-                        _, previous_flows = load_folder(prev_folder)
-                    except Exception:
-                        previous_flows = []
-
-        self.app.current_folder = Path(folder)
-        files, flows = load_folder(folder, debug=False)
-        self.app.flow_controller.page_size = self.app.PAGE_SIZE
-        self.app.flow_controller.set_flows(flows)
-
-        from core.compare import compare_flows
-        from core.compare import summarize_new_flows
-
-        compare_result = None
-        if previous_flows:
-            compare_result = compare_flows(flows, previous_flows)
-
-        summary_new = None
-        if compare_result:
-            summary_new = summarize_new_flows(compare_result["new"])
-            compare_result["summary_new"] = summary_new
-
-        if hasattr(self.app, "registry_page"):
-            self.app.registry_page.set_dataset(folder, files, flows, compare_result=compare_result)
-
-        if hasattr(self.app, "listing_page"):
-            self.app.listing_page.set_dataset(folder, files, flows, compare_result=compare_result)
-
-        self.app.lbl_path.setText(f"Dataset: {folder}")
-        self.app.lbl_stats.setText(f"JSON files: {len(files)}   |   Total flow records: {len(flows)}")
-
-        if self.app.current_project_id is not None:
-            add_dataset_load(self.app.current_project_id, folder)
-            self.app.projects_ui_controller.refresh_recent_datasets(self.app.current_project_id)
-            self.app.refresh_activity_ui()
-
-        self.render_summary()
-
-        self.app.model.set_flows(self.app.flow_controller.get_loaded())
-
-        self.app.search.setText("")
-        self.app.explore_ui_controller.leave_conversation(clear_search=False)
-
-        self.app.explore_ui_controller.update_loaded_label()
-        self.app.explore_ui_controller.update_load_more_enabled()
-
-        self.app.tabs.setCurrentIndex(1)
-        self.app._flows_expanded = False
-        self.app.details_panel.show()
-        self.app.btn_expand_flows.setText("Expand Flows")
-        self.app.splitter.setSizes([920, 420])
-        self.app.explore_ui_controller.update_detail(None)
+        previous_path = self._get_previous_dataset_path(folder)
+        self._start_dataset_load("folder", folder, previous_path)
 
     def load_dataset_file(self, file_path: str):
         file_path = str(file_path)
@@ -162,51 +191,79 @@ class DatasetController:
             self.app._message_dialog("Dataset", "File not found.", file_path, width=480)
             return
 
-        previous_flows = []
+        previous_path = self._get_previous_dataset_path(file_path)
+        self._start_dataset_load("file", file_path, previous_path)
 
-        if self.app.current_project_id is not None:
-            recent = list_recent_datasets(self.app.current_project_id, limit=2)
+    def _get_previous_dataset_path(self, current_path: str) -> str:
+        if self.app.current_project_id is None:
+            return ""
 
-            if len(recent) >= 1:
-                prev_path = recent[0]
+        recent = list_recent_datasets(self.app.current_project_id, limit=2)
+        if not recent:
+            return ""
 
-                if str(prev_path) != str(file_path):
-                    try:
-                        prev_fp = Path(prev_path)
-                        if prev_fp.is_file():
-                            previous_flows = load_json_file(prev_fp, debug=False)
-                        elif prev_fp.is_dir():
-                            _, previous_flows = load_folder(prev_fp, debug=False)
-                    except Exception:
-                        previous_flows = []
+        previous_path = str(recent[0])
+        if previous_path == str(current_path):
+            return ""
 
-        self.app.current_folder = fp.parent
-        flows = load_json_file(fp, debug=False)
-        files = [fp]
+        return previous_path
+
+    def _start_dataset_load(self, mode: str, path: str, previous_path: str = ""):
+        if self._load_thread is not None:
+            self.app._message_dialog("Dataset", "A dataset is already loading.", width=420)
+            return
+
+        self._set_loading(True)
+
+        self._load_thread = QThread()
+        self._load_worker = DatasetLoadWorker(
+            mode=mode,
+            path=path,
+            previous_path=previous_path,
+            project_id=self.app.current_project_id,
+        )
+
+        self._load_worker.moveToThread(self._load_thread)
+        self._load_thread.started.connect(self._load_worker.run)
+        self._load_worker.finished.connect(self._on_dataset_loaded, Qt.QueuedConnection)
+        self._load_worker.error.connect(self._on_dataset_load_error, Qt.QueuedConnection)
+        self._load_worker.finished.connect(self._load_thread.quit)
+        self._load_worker.error.connect(self._load_thread.quit)
+        self._load_worker.finished.connect(self._load_worker.deleteLater)
+        self._load_worker.error.connect(self._load_worker.deleteLater)
+        self._load_thread.finished.connect(self._load_thread.deleteLater)
+        self._load_thread.finished.connect(self._cleanup_load_thread)
+        self._load_thread.start()
+
+    def _on_dataset_loaded(self, result: dict):
+        if result.get("project_id") != self.app.current_project_id:
+            self.app._message_dialog(
+                "Dataset",
+                "Dataset load finished, but the active project changed. The loaded data was ignored.",
+                width=520,
+            )
+            return
+
+        path = str(result["path"])
+        files = result["files"]
+        flows = result["flows"]
+        compare_result = result.get("compare_result")
+
+        self.app.current_folder = Path(result["current_folder"])
         self.app.flow_controller.page_size = self.app.PAGE_SIZE
         self.app.flow_controller.set_flows(flows)
 
-        from core.compare import compare_flows, summarize_new_flows
-
-        compare_result = None
-        if previous_flows:
-            compare_result = compare_flows(flows, previous_flows)
-
-        if compare_result:
-            summary_new = summarize_new_flows(compare_result["new"])
-            compare_result["summary_new"] = summary_new
-
         if hasattr(self.app, "registry_page"):
-            self.app.registry_page.set_dataset(str(fp), files, flows, compare_result=compare_result)
+            self.app.registry_page.set_dataset(path, files, flows, compare_result=compare_result)
 
         if hasattr(self.app, "listing_page"):
-            self.app.listing_page.set_dataset(str(fp), files, flows, compare_result=compare_result)
+            self.app.listing_page.set_dataset(path, files, flows, compare_result=compare_result)
 
-        self.app.lbl_path.setText(f"Dataset file: {file_path}")
-        self.app.lbl_stats.setText(f"JSON files: 1   |   Total flow records: {len(flows)}")
+        self.app.lbl_path.setText(str(result["dataset_label"]))
+        self.app.lbl_stats.setText(str(result["stats_label"]))
 
         if self.app.current_project_id is not None:
-            add_dataset_load(self.app.current_project_id, file_path)
+            add_dataset_load(self.app.current_project_id, path)
             self.app.projects_ui_controller.refresh_recent_datasets(self.app.current_project_id)
             self.app.refresh_activity_ui()
 
@@ -226,3 +283,18 @@ class DatasetController:
         self.app.btn_expand_flows.setText("Expand Flows")
         self.app.splitter.setSizes([920, 420])
         self.app.explore_ui_controller.update_detail(None)
+
+    def _on_dataset_load_error(self, title: str, details: str):
+        self.app._message_dialog("Dataset", title, details, width=520)
+
+    def _cleanup_load_thread(self):
+        self._load_worker = None
+        self._load_thread = None
+        self._set_loading(False)
+
+    def _set_loading(self, loading: bool):
+        if not hasattr(self.app, "btn_load"):
+            return
+
+        self.app.btn_load.setEnabled(not loading)
+        self.app.btn_load.setText("Loading..." if loading else "Load dataset")

@@ -1,9 +1,17 @@
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QFrame, QTableView, QHeaderView, QHBoxLayout, QComboBox, QPushButton, QDialog, QDialogButtonBox, QListWidget, QListWidgetItem, QMessageBox, QFileDialog
 from PySide6.QtGui import QFont
 from PySide6.QtCore import Qt, QAbstractTableModel, QModelIndex
+from core.formatters import (
+    format_duration_compact_ms,
+    format_flow_date,
+    format_flow_datetime,
+    format_flow_time,
+    human_bytes,
+)
 from core.protocols import format_ip_proto
 from core.exporters.listing_exporter import export_listing_csv, export_listing_excel, export_listing_html
 from core.parser import extract_dataset_meta
+from core.timeutils import parse_timestamp
 
 
 class ListingTableModel(QAbstractTableModel):
@@ -151,89 +159,24 @@ class ListingTableModel(QAbstractTableModel):
         if value is None:
             value = ""
 
-        def parse_first_seen(raw_value):
-            from datetime import datetime
-
-            # 1) int/float epoch
-            if isinstance(raw_value, (int, float)):
-                raw = float(raw_value)
-                if raw > 1e12:
-                    return datetime.fromtimestamp(raw / 1000)
-                return datetime.fromtimestamp(raw)
-
-            text = str(raw_value).strip()
-
-            # 2) numeric string epoch
-            if text.isdigit():
-                raw = float(text)
-                if raw > 1e12:
-                    return datetime.fromtimestamp(raw / 1000)
-                return datetime.fromtimestamp(raw)
-
-            # 3) timestamp string with microseconds
-            try:
-                return datetime.strptime(text, "%Y-%m-%d %H:%M:%S.%f")
-            except Exception:
-                pass
-
-            # 4) timestamp string without microseconds
-            try:
-                return datetime.strptime(text, "%Y-%m-%d %H:%M:%S")
-            except Exception:
-                pass
-
-            return None
-
         # ---------- DATE / TIME SPLIT ----------
         if key in ("date", "time"):
             raw_value = flow.get("bidirectional_first_seen_ms", "")
-            try:
-                dt = parse_first_seen(raw_value)
-                if dt is None:
-                    return str(raw_value)
-
-                if key == "date":
-                    return dt.strftime("%d.%m.%Y")
-                return dt.strftime("%H:%M:%S")
-            except Exception:
-                return str(raw_value)
+            if key == "date":
+                return format_flow_date(raw_value) or str(raw_value)
+            return format_flow_time(raw_value) or str(raw_value)
             
         # ---------- GENERIC TIMESTAMP (*_seen_ms) ----------
         if key.endswith("_seen_ms"):
-            try:
-                dt = parse_first_seen(value)
-                if dt is None:
-                    return str(value)
-
-                return dt.strftime("%d.%m.%Y %H:%M:%S")
-            except Exception:
-                return str(value)
+            return format_flow_datetime(value)
 
         # ---------- BYTES ----------
         if key == "bidirectional_bytes":
-            try:
-                num = float(value)
-
-                if num < 1024:
-                    return f"{int(num)} B"
-                elif num < 1024 * 1024:
-                    kb = num / 1024
-                    return f"{kb:.2f} KB"
-                else:
-                    mb = num / (1024 * 1024)
-                    return f"{mb:.2f} MB"
-            except Exception:
-                return str(value)
+            return human_bytes(value, precision=2)
 
         # ---------- DURATION ----------
         if key == "bidirectional_duration_ms":
-            try:
-                total_sec = int(float(value)) / 1000
-                minutes = int(total_sec // 60)
-                seconds = int(total_sec % 60)
-                return f"{minutes}m {seconds}s"
-            except Exception:
-                return str(value)
+            return format_duration_compact_ms(value)
             
         # ---------- PROTOCOL ----------
         if key == "protocol":
@@ -244,39 +187,6 @@ class ListingTableModel(QAbstractTableModel):
     def sort(self, column, order):
         key = self._columns[column]
 
-        def parse_first_seen(raw_value):
-            from datetime import datetime
-
-            # 1) int/float epoch
-            if isinstance(raw_value, (int, float)):
-                raw = float(raw_value)
-                if raw > 1e12:
-                    return datetime.fromtimestamp(raw / 1000)
-                return datetime.fromtimestamp(raw)
-
-            text = str(raw_value).strip()
-
-            # 2) numeric string epoch
-            if text.isdigit():
-                raw = float(text)
-                if raw > 1e12:
-                    return datetime.fromtimestamp(raw / 1000)
-                return datetime.fromtimestamp(raw)
-
-            # 3) timestamp string with microseconds
-            try:
-                return datetime.strptime(text, "%Y-%m-%d %H:%M:%S.%f")
-            except Exception:
-                pass
-
-            # 4) timestamp string without microseconds
-            try:
-                return datetime.strptime(text, "%Y-%m-%d %H:%M:%S")
-            except Exception:
-                pass
-
-            return None
-
         def get_sort_value(flow):
             value = flow.get(key)
 
@@ -284,7 +194,7 @@ class ListingTableModel(QAbstractTableModel):
             if key in ("date", "time"):
                 raw = flow.get("bidirectional_first_seen_ms")
                 try:
-                    dt = parse_first_seen(raw)
+                    dt = parse_timestamp(raw)
                     if dt is None:
                         return ""
                     return dt.timestamp()

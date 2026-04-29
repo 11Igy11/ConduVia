@@ -21,7 +21,7 @@ Name: "installai"; Description: "Install AI support (Ollama)"; GroupDescription:
 Name: "pullmodel"; Description: "Download recommended AI model (llama3)"; GroupDescription: "Additional options:"; Flags: unchecked
 
 [Files]
-Source: "..\dist\main.exe"; DestDir: "{app}"; DestName: "ViaNyquist.exe"; Flags: ignoreversion
+Source: "..\dist\ViaNyquist\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "third_party\OllamaSetup.exe"; DestDir: "{tmp}"; Flags: deleteafterinstall
 
 [Icons]

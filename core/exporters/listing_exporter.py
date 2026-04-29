@@ -6,6 +6,8 @@ import base64
 from datetime import datetime
 from pathlib import Path
 
+from core.formatters import format_short_date
+
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill
 from openpyxl.utils import get_column_letter
@@ -78,15 +80,6 @@ def export_listing_html(
 
     meta = meta or {}
 
-    def _fmt_date(value: str) -> str:
-        if not value or value == "-":
-            return "-"
-        try:
-            dt = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
-            return dt.strftime("%d.%m.%Y.")
-        except Exception:
-            return str(value)
-
     klasa = str(meta.get("OrigRegNo") or "-")
     urbroj = str(meta.get("RegNo") or "-")
     target = str(meta.get("target") or "-")
@@ -94,8 +87,8 @@ def export_listing_html(
 
     target_display = target
 
-    bt = _fmt_date(str(meta.get("bt") or ""))
-    et = _fmt_date(str(meta.get("et") or ""))
+    bt = format_short_date(meta.get("bt"), missing="-")
+    et = format_short_date(meta.get("et"), missing="-")
 
     period = "-"
     if bt != "-" or et != "-":

@@ -13,6 +13,8 @@ WORKSPACE_SUBFOLDERS = (
     "reports",
 )
 
+WORKSPACE_MARKER = ".vianyquist-workspace"
+
 
 def ensure_workspace_structure(base_folder: str) -> None:
     folder = (base_folder or "").strip()
@@ -21,6 +23,7 @@ def ensure_workspace_structure(base_folder: str) -> None:
 
     root = Path(folder)
     root.mkdir(parents=True, exist_ok=True)
+    (root / WORKSPACE_MARKER).write_text("ViaNyquist workspace\n", encoding="utf-8")
 
     for name in WORKSPACE_SUBFOLDERS:
         (root / name).mkdir(parents=True, exist_ok=True)
@@ -114,4 +117,4 @@ def looks_like_vianyquist_workspace(base_folder: str) -> bool:
     if not root.exists() or not root.is_dir():
         return False
 
-    return any((root / name).exists() and (root / name).is_dir() for name in WORKSPACE_SUBFOLDERS)
+    return (root / WORKSPACE_MARKER).exists()
