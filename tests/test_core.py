@@ -11,7 +11,15 @@ from core.ai.assistant_service import AIAssistantService, AISettings
 from core.ai.context_builder import build_dataset_context
 from core.ai.prompts import build_dataset_summary_prompt
 from core.compare import compare_flows, summarize_new_flows
-from core.db import get_app_setting, get_app_settings, init_db, set_app_setting
+from core.db import (
+    create_project,
+    get_app_setting,
+    get_app_settings,
+    get_project,
+    init_db,
+    set_app_setting,
+    set_project_target,
+)
 from core.flow_stats import compute_registry_summary, top_field_by_bytes, top_field_values
 from core.formatters import (
     format_duration_hms_ms,
@@ -23,6 +31,7 @@ from core.formatters import (
     safe_int,
 )
 from core.loader import list_json_files, load_folder, load_json_file
+from core.parser import extract_dataset_meta
 from core.protocols import describe_ip_proto, format_ip_proto_with_description
 from core.timeutils import LOCAL_TZ, parse_timestamp
 from core.workspace import (
@@ -202,6 +211,39 @@ class AppSettingsTests(unittest.TestCase):
                 get_app_settings("ai.", db_path=db_path),
                 {"ai.model": "model-a", "ai.timeout_seconds": "42"},
             )
+
+
+class ProjectTargetTests(unittest.TestCase):
+    def test_project_target_is_persisted_in_database(self):
+        with temporary_directory() as tmp:
+            db_path = Path(tmp) / "projects.db"
+            init_db(db_path)
+
+            project_id = create_project("Case A", db_path=db_path)
+            set_project_target(project_id, "385911234567", "MSISDN", db_path=db_path)
+
+            project = get_project(project_id, db_path=db_path)
+
+        self.assertIsNotNone(project)
+        self.assertEqual(project.target_identifier, "385911234567")
+        self.assertEqual(project.target_type, "MSISDN")
+
+    def test_extract_dataset_meta_normalizes_target_type_alias(self):
+        with temporary_directory() as tmp:
+            path = Path(tmp) / "sample.json"
+            path.write_text(
+                json.dumps({
+                    "target": "385911234567",
+                    "targetType": "MSISDN",
+                    "flow": [],
+                }),
+                encoding="utf-8",
+            )
+
+            meta = extract_dataset_meta(path)
+
+        self.assertEqual(meta["target"], "385911234567")
+        self.assertEqual(meta["targettype"], "MSISDN")
 
 
 class AIServiceTests(unittest.TestCase):
