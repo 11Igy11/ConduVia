@@ -37,6 +37,7 @@ from core.db import (
     file_sha256,
     list_project_pcap_device_ips,
 )
+from ui.explore_widgets import AITextWorker
 
 
 class PcapWorker(QObject):
@@ -104,6 +105,8 @@ class PcapPage(QWidget):
         self.summary: PcapSummary | None = None
         self._thread: QThread | None = None
         self._worker: PcapWorker | None = None
+        self._ai_thread: QThread | None = None
+        self._ai_worker: AITextWorker | None = None
         self._saved_source_id: int | None = None
         self._all_artifacts: list[dict[str, Any]] = []
         self._build_ui()
@@ -125,6 +128,8 @@ class PcapPage(QWidget):
         self.btn_open = QPushButton("Open PCAP")
         self.btn_save_project = QPushButton("Save to Project")
         self.btn_save_project.setEnabled(False)
+        self.btn_ai_summary = QPushButton("AI Summary")
+        self.btn_ai_summary.setEnabled(False)
         self.btn_add_notes = QPushButton("Add to Notes")
         self.btn_add_notes.setEnabled(False)
         self.btn_export = QPushButton("Export Summary")
@@ -133,6 +138,7 @@ class PcapPage(QWidget):
         top.addStretch()
         top.addWidget(self.btn_open)
         top.addWidget(self.btn_save_project)
+        top.addWidget(self.btn_ai_summary)
         top.addWidget(self.btn_add_notes)
         top.addWidget(self.btn_export)
 
@@ -149,6 +155,7 @@ class PcapPage(QWidget):
 
         self.tabs = QTabWidget()
         self.tabs.addTab(self._build_investigator_tab(), "Investigator View")
+        self.tabs.addTab(self._build_ai_tab(), "AI Summary")
         self.tabs.addTab(self._build_overview_tab(), "Overview")
         self.tabs.addTab(self._build_evidence_tab(), "Evidence")
         self.tabs.addTab(self._build_artifacts_tab(), "Artifacts")
@@ -157,6 +164,7 @@ class PcapPage(QWidget):
 
         self.btn_open.clicked.connect(self.open_pcap_dialog)
         self.btn_save_project.clicked.connect(self.save_to_project)
+        self.btn_ai_summary.clicked.connect(self.generate_ai_summary)
         self.btn_add_notes.clicked.connect(self.add_summary_to_notes)
         self.btn_export.clicked.connect(self.export_summary)
 
@@ -239,6 +247,18 @@ class PcapPage(QWidget):
 
         scroll.setWidget(content)
         page_layout.addWidget(scroll, 1)
+        return page
+
+    def _build_ai_tab(self) -> QWidget:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(8, 8, 8, 8)
+        layout.setSpacing(10)
+
+        self.txt_pcap_ai_summary = QTextEdit()
+        self.txt_pcap_ai_summary.setReadOnly(True)
+        self.txt_pcap_ai_summary.setPlaceholderText("Open a PCAP file, then generate an AI explanation grounded in the extracted evidence.")
+        layout.addWidget(self.txt_pcap_ai_summary, 1)
         return page
 
     def _build_overview_tab(self) -> QWidget:
@@ -450,6 +470,8 @@ class PcapPage(QWidget):
         self.btn_open.setEnabled(False)
         self.btn_open.setText("Loading...")
         self.btn_export.setEnabled(False)
+        self.btn_ai_summary.setEnabled(False)
+        self.txt_pcap_ai_summary.clear()
         self.lbl_file.setText(file_path)
         self.lbl_stats.setText("Analyzing capture...")
 
@@ -473,6 +495,8 @@ class PcapPage(QWidget):
         self.btn_export.setEnabled(True)
         self.btn_save_project.setEnabled(True)
         self.btn_save_project.setText("Save to Project")
+        self.btn_ai_summary.setEnabled(True)
+        self.btn_ai_summary.setText("AI Summary")
         self.btn_add_notes.setEnabled(True)
         self.lbl_file.setText(summary.file_path)
         self.lbl_stats.setText(
@@ -604,6 +628,56 @@ class PcapPage(QWidget):
         self.lbl_key_points.setText(f"Key points:\n{key_points}" if key_points else "")
         limitations = "\n".join(f"- {item}" for item in (investigator.get("limitations") or [])[:2])
         self.lbl_limitations.setText(f"Limitations:\n{limitations}" if limitations else "")
+
+    def generate_ai_summary(self):
+        if not self.summary:
+            self._info("PCAP AI", "Open a PCAP file first.")
+            return
+        if not hasattr(self.app, "ai_service"):
+            self._error("PCAP AI", "AI service is not available.")
+            return
+        if self._ai_thread is not None:
+            self._info("PCAP AI", "PCAP AI summary is already running.")
+            return
+
+        self.btn_ai_summary.setEnabled(False)
+        self.btn_ai_summary.setText("Generating...")
+        self.txt_pcap_ai_summary.setPlainText("Generating PCAP AI summary...")
+        self.tabs.setCurrentWidget(self.txt_pcap_ai_summary.parentWidget())
+
+        project_name = getattr(self.app, "current_project_name", "") or ""
+        self._ai_thread = QThread()
+        self._ai_worker = AITextWorker(
+            self.app.ai_service.generate_pcap_summary,
+            self.summary,
+            project_name,
+        )
+        self._ai_worker.moveToThread(self._ai_thread)
+        self._ai_thread.started.connect(self._ai_worker.run)
+        self._ai_worker.finished.connect(self._on_ai_summary_finished, Qt.QueuedConnection)
+        self._ai_worker.error.connect(self._on_ai_summary_error, Qt.QueuedConnection)
+        self._ai_worker.finished.connect(self._ai_thread.quit)
+        self._ai_worker.error.connect(self._ai_thread.quit)
+        self._ai_thread.finished.connect(self._cleanup_ai_thread)
+        self._ai_thread.start()
+
+    def _on_ai_summary_finished(self, result: str):
+        self.txt_pcap_ai_summary.setPlainText(result)
+        self.btn_ai_summary.setEnabled(True)
+        self.btn_ai_summary.setText("AI Summary")
+
+    def _on_ai_summary_error(self, message: str):
+        self.txt_pcap_ai_summary.setPlainText(f"AI error: {message}")
+        self.btn_ai_summary.setEnabled(True)
+        self.btn_ai_summary.setText("AI Summary")
+
+    def _cleanup_ai_thread(self):
+        if self._ai_worker is not None:
+            self._ai_worker.deleteLater()
+            self._ai_worker = None
+        if self._ai_thread is not None:
+            self._ai_thread.deleteLater()
+            self._ai_thread = None
 
     def export_summary(self):
         if not self.summary:

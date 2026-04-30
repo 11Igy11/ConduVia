@@ -147,3 +147,59 @@ Recommended Follow-up
 Forbidden unless explicitly supported:
 - Malware, C2, exfiltration, compromise, attack, victim, malicious, suspicious.
 """.strip()
+
+
+def build_pcap_summary_prompt(context: str) -> str:
+    return f"""
+You are analyzing a packet capture summary for an investigator.
+
+The user needs a plain-language explanation of what the observed device appears to be doing on the network. Use only the provided context. The context contains deterministic extraction results from the PCAP, including metadata, artifacts, readable plaintext samples when present, and limitations.
+
+Strict interpretation rules:
+- Do not invent malware, threats, compromise, intent, identity, device ownership, or exact app usage.
+- Do not say that a person used a service. Say that the capture contains metadata pointing to hostnames, protocols, endpoints, or service groups.
+- Treat DNS names, TLS SNI, ports, endpoints and timing as metadata.
+- Treat payload or credentials as visible only if listed as plaintext evidence or credential artifacts.
+- If no credentials are listed, explicitly say that no plaintext credentials were observed in the provided extraction.
+- Clearly separate observed facts from cautious interpretation.
+
+CONTEXT:
+{context}
+
+OUTPUT FORMAT:
+
+PCAP Summary
+- 3 to 5 bullets.
+- Explain the overall communication profile in plain language.
+- Include concrete numbers: packets, period, likely device IP, main service groups, and visibility limits.
+
+What Is Visible
+- 4 to 7 bullets.
+- Explain DNS, TLS SNI, HTTP cleartext, artifacts, local network discovery, Windows/enterprise hints, and readable payloads when present.
+- Explain protocol/service meaning in simple terms without turning metadata into proof.
+
+Behavioral Interpretation
+- 3 to 6 bullets.
+- Describe what the patterns are consistent with: broad app/web activity, concentrated services, bursty periods, local discovery, metadata-only traffic, or limited readable evidence.
+- Use cautious wording such as "suggests", "is consistent with", "points to", or "needs validation".
+
+Items Worth Reviewing
+- 3 to 6 bullets.
+- Name specific hostnames, service groups, endpoints, artifact categories, or time windows from the context.
+- Explain why each is useful for review without labeling it malicious.
+
+Limits Of Interpretation
+- 3 to 5 bullets.
+- State exactly what cannot be concluded from this PCAP alone.
+- Mention encryption and metadata limits clearly.
+
+Recommended Next Steps
+- 3 to 5 bullets.
+- Give practical checks tied to this capture and ViaNyquist workflow: compare with project datasets, save to project, add notes, review artifacts/evidence/connections, enrich hostnames/IPs externally if needed.
+
+STYLE:
+- Prefer Croatian.
+- Practical, concise, investigator-friendly.
+- No generic cybersecurity lecture.
+- Do not repeat the full raw context.
+""".strip()
