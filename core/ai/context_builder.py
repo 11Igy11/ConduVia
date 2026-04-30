@@ -4,6 +4,7 @@ from core.analyzer import top_applications, top_dst_ips, top_protocols, top_src_
 from core.analyst import compute_analyst_summary
 from core.flow_stats import top_field_by_bytes, top_flows_by_bytes
 from core.formatters import human_bytes
+from core.pcap_analyzer import PcapSummary, build_investigator_view
 from core.protocols import format_ip_proto, format_ip_proto_with_description
 
 
@@ -170,5 +171,109 @@ def build_finding_context(finding: dict[str, Any]) -> str:
     lines.append(str(finding.get("note", "") or ""))
     lines.append("")
     lines.append("Important: roles of IPs, hostname meaning, and traffic purpose are not confirmed unless explicitly stated above.")
+
+    return "\n".join(lines)
+
+
+def build_pcap_context(
+    summary: PcapSummary,
+    project_name: str = "",
+    limit: int = 12,
+) -> str:
+    investigator = build_investigator_view(summary)
+    artifact_counts: dict[str, int] = {}
+    for artifact in summary.artifacts or []:
+        category = str(artifact.get("category") or "Other")
+        artifact_counts[category] = artifact_counts.get(category, 0) + 1
+
+    lines: list[str] = []
+    lines.append(f"Project: {project_name or '(none)'}")
+    lines.append(f"PCAP file: {summary.file_name}")
+    lines.append(f"Source path: {summary.file_path}")
+    lines.append("Goal: explain what is visible in this packet capture for an investigator.")
+    lines.append("")
+    lines.append("Capture facts:")
+    lines.append(f"- Format: {summary.format}")
+    lines.append(f"- Packets: {summary.packet_count:,}")
+    lines.append(f"- Wire bytes: {human_bytes(summary.wire_bytes, precision=2)}")
+    lines.append(f"- Capture period: {summary.first_seen or '-'} to {summary.last_seen or '-'}")
+    lines.append(f"- Duration seconds: {summary.duration_seconds:.1f}")
+    lines.append(f"- Likely observed device IP: {summary.likely_device_ip or '-'}")
+    lines.append("")
+
+    lines.append("Plain-language investigator summary generated from deterministic analysis:")
+    lines.append(str(investigator.get("plain_summary") or "-"))
+    lines.append("")
+
+    lines.append("Key deterministic points:")
+    for point in investigator.get("key_points") or []:
+        lines.append(f"- {point}")
+    lines.append("")
+
+    lines.append("Visibility limitations that must be preserved:")
+    for item in investigator.get("limitations") or []:
+        lines.append(f"- {item}")
+    lines.append("")
+
+    lines.append("Service groups / visible service families:")
+    for row in (investigator.get("service_rows") or [])[:limit]:
+        lines.append(
+            f"- {row.get('service')}: {row.get('count')} signals, "
+            f"share {float(row.get('share') or 0.0):.1f}%, example {row.get('example') or '-'}"
+        )
+    lines.append("")
+
+    lines.append("Visibility breakdown:")
+    for row in (investigator.get("visibility_rows") or [])[:limit]:
+        lines.append(
+            f"- {row.get('visibility')}: {row.get('count')} signals, "
+            f"share {float(row.get('share') or 0.0):.1f}%"
+        )
+    lines.append("")
+
+    lines.append("Activity by hour:")
+    for row in (investigator.get("activity_rows") or [])[:limit]:
+        lines.append(f"- {row.get('hour')}: {row.get('packets')} packets, share {float(row.get('share') or 0.0):.1f}%")
+    lines.append("")
+
+    lines.append("Artifact categories:")
+    if artifact_counts:
+        for category, count in sorted(artifact_counts.items()):
+            lines.append(f"- {category}: {count}")
+    else:
+        lines.append("- No extracted artifacts.")
+    lines.append("")
+
+    lines.append("Top extracted artifacts:")
+    for artifact in (summary.artifacts or [])[:limit]:
+        lines.append(
+            f"- {artifact.get('category')} / {artifact.get('type')}: "
+            f"{artifact.get('value')} ({artifact.get('count')}x, {artifact.get('visibility')}); "
+            f"{artifact.get('explanation')}"
+        )
+    lines.append("")
+
+    lines.append("Readable evidence samples:")
+    for sample in (summary.readable_samples or [])[:limit]:
+        lines.append(
+            f"- {sample.get('time')} {sample.get('type')}: "
+            f"{sample.get('source')} -> {sample.get('destination')}; {sample.get('value')}"
+        )
+    lines.append("")
+
+    lines.append("Top connections by volume:")
+    for flow in (summary.flows or [])[:limit]:
+        lines.append(
+            "- "
+            f"{flow.get('src_ip')}:{flow.get('src_port')} -> {flow.get('dst_ip')}:{flow.get('dst_port')}, "
+            f"protocol {format_ip_proto_with_description(flow.get('protocol'))}, "
+            f"application {flow.get('application_name') or '-'}, "
+            f"host/query {flow.get('requested_server_name') or '-'}, "
+            f"bytes {human_bytes(flow.get('bidirectional_bytes', 0), precision=2)}, "
+            f"packets {flow.get('bidirectional_packets', 0)}"
+        )
+    lines.append("")
+    lines.append("Important: DNS names, TLS SNI names, endpoints, ports and timing are metadata. They show communication patterns, not message contents.")
+    lines.append("Important: Credentials or payload contents are present only if explicitly listed above as plaintext evidence or artifacts.")
 
     return "\n".join(lines)

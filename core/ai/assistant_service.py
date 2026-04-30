@@ -8,13 +8,16 @@ from core.ai.context_builder import (
     build_dataset_context,
     build_flow_context,
     build_finding_context,
+    build_pcap_context,
 )
 from core.ai.prompts import (
     SYSTEM_PROMPT,
     build_dataset_summary_prompt,
     build_flow_explanation_prompt,
     build_finding_explanation_prompt,
+    build_pcap_summary_prompt,
 )
+from core.pcap_analyzer import PcapSummary
 
 
 @dataclass
@@ -135,4 +138,16 @@ class AIAssistantService:
 
         context = build_finding_context(finding)
         prompt = SYSTEM_PROMPT + "\n\n" + build_finding_explanation_prompt(context)
+        return self._generate(prompt)
+
+    def generate_pcap_summary(
+        self,
+        summary: PcapSummary,
+        project_name: str = "",
+    ) -> str:
+        if not summary or not summary.packet_count:
+            return "No PCAP analysis loaded."
+
+        context = build_pcap_context(summary, project_name=project_name)
+        prompt = SYSTEM_PROMPT + "\n\n" + build_pcap_summary_prompt(context)
         return self._generate(prompt)

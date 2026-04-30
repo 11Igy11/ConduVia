@@ -9,8 +9,8 @@ from pathlib import Path
 from unittest.mock import patch
 
 from core.ai.assistant_service import AIAssistantService, AISettings
-from core.ai.context_builder import build_dataset_context
-from core.ai.prompts import build_dataset_summary_prompt
+from core.ai.context_builder import build_dataset_context, build_pcap_context
+from core.ai.prompts import build_dataset_summary_prompt, build_pcap_summary_prompt
 from core.compare import compare_flows, summarize_new_flows
 from core.db import (
     add_pcap_source,
@@ -402,6 +402,44 @@ class AIServiceTests(unittest.TestCase):
 
         self.assertIn("The user wants interpretation", prompt)
         self.assertIn("Do not jump into cybersecurity mode", prompt)
+        self.assertIn("Limits Of Interpretation", prompt)
+
+    def test_pcap_context_and_prompt_are_grounded_in_visible_evidence(self):
+        with temporary_directory() as tmp:
+            path = Path(tmp) / "sample.pcap"
+            _write_sample_pcap(path)
+            summary = analyze_pcap(path)
+
+        context = build_pcap_context(summary, project_name="Case A")
+        prompt = build_pcap_summary_prompt(context)
+
+        self.assertIn("PCAP file: sample.pcap", context)
+        self.assertIn("Top extracted artifacts", context)
+        self.assertIn("HTTP host", context)
+        self.assertIn("no plaintext credentials were observed", prompt)
+        self.assertIn("Do not invent malware", prompt)
+        self.assertIn("Prefer Croatian", prompt)
+
+    def test_pcap_ai_summary_uses_pcap_prompt(self):
+        class FakeResponse:
+            status_code = 200
+
+            def json(self):
+                return {"response": "pcap ok"}
+
+        with temporary_directory() as tmp:
+            path = Path(tmp) / "sample.pcap"
+            _write_sample_pcap(path)
+            summary = analyze_pcap(path)
+
+        service = AIAssistantService(AISettings(base_url="http://ai.local", model="m", timeout_seconds=7))
+        with patch.object(service, "_post_generate", return_value=FakeResponse()) as post:
+            result = service.generate_pcap_summary(summary, project_name="Case A")
+
+        self.assertEqual(result, "pcap ok")
+        prompt = post.call_args.args[0]
+        self.assertIn("You are analyzing a packet capture summary", prompt)
+        self.assertIn("PCAP file: sample.pcap", prompt)
         self.assertIn("Limits Of Interpretation", prompt)
 
 
