@@ -33,7 +33,7 @@ from core.formatters import (
 )
 from core.loader import list_json_files, load_folder, load_json_file
 from core.parser import extract_dataset_meta
-from core.pcap_analyzer import analyze_pcap
+from core.pcap_analyzer import analyze_pcap, build_investigator_view
 from core.protocols import describe_ip_proto, format_ip_proto_with_description
 from core.timeutils import LOCAL_TZ, parse_timestamp
 from core.workspace import (
@@ -263,6 +263,14 @@ class PcapAnalyzerTests(unittest.TestCase):
         self.assertEqual(summary.http_hosts[0]["host"], "example.com")
         self.assertTrue(any(sample["type"] == "HTTP cleartext" for sample in summary.readable_samples))
         self.assertEqual(len(summary.flows), 2)
+        self.assertTrue(summary.hourly_activity)
+
+        investigator = build_investigator_view(summary)
+
+        self.assertIn("The capture covers", investigator["plain_summary"])
+        self.assertTrue(investigator["service_rows"])
+        self.assertTrue(investigator["activity_rows"])
+        self.assertTrue(investigator["visibility_rows"])
 
 
 class AIServiceTests(unittest.TestCase):

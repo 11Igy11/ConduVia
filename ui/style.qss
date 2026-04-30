@@ -297,6 +297,31 @@ QGroupBox#SummaryCard::title {
 }
 
 /* =========================
+   PCAP INVESTIGATOR VIEW
+   ========================= */
+QFrame#PcapInvestigatorCard {
+    background: #273549;
+    border: 1px solid #3b82f6;
+    border-radius: 12px;
+}
+
+QLabel#PcapPlainSummary {
+    color: #f8fafc;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+QLabel#PcapKeyPoints {
+    color: #dbeafe;
+    font-size: 12px;
+}
+
+QLabel#PcapLimitations {
+    color: #cbd5e1;
+    font-size: 11px;
+}
+
+/* =========================
    TEXT AREAS
    ========================= */
 QTextEdit#SummaryTextBox {

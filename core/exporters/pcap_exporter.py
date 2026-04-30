@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from core.formatters import human_bytes
-from core.pcap_analyzer import PcapSummary
+from core.pcap_analyzer import PcapSummary, build_investigator_view
 
 
 def export_pcap_summary_html(file_path: str, summary: PcapSummary) -> None:
@@ -40,6 +40,7 @@ def export_pcap_summary_html(file_path: str, summary: PcapSummary) -> None:
         })
 
     readable = summary.readable_samples[:200]
+    investigator = build_investigator_view(summary)
     generated_at = datetime.now().strftime("%d.%m.%Y %H:%M:%S")
     period = f"{summary.first_seen or '-'} - {summary.last_seen or '-'}"
 
@@ -62,6 +63,12 @@ h2 {{ margin:24px 0 10px; font-size:18px; }}
 .hero .label {{ color:#bfdbfe; }}
 .value {{ font-size:17px; font-weight:700; word-break:break-word; }}
 .note {{ border-left:4px solid #2563eb; padding:10px 12px; background:#eff6ff; margin:8px 0; }}
+.plain {{ background:white; border:1px solid #e5e7eb; border-radius:12px; padding:18px 20px; font-size:15px; line-height:1.55; }}
+.points {{ display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:8px; margin-top:12px; }}
+.point {{ background:#f9fafb; border:1px solid #e5e7eb; border-radius:8px; padding:10px 12px; }}
+.barcell {{ min-width:190px; }}
+.bar {{ height:12px; background:#e5e7eb; border-radius:999px; overflow:hidden; }}
+.bar span {{ display:block; height:100%; background:#2563eb; }}
 table {{ width:100%; border-collapse:collapse; background:white; border:1px solid #e5e7eb; }}
 th {{ text-align:left; background:#1f2937; color:white; font-size:12px; padding:9px; position:sticky; top:0; }}
 td {{ border-top:1px solid #e5e7eb; padding:8px 9px; font-size:12px; vertical-align:top; }}
@@ -87,8 +94,33 @@ tr:nth-child(even) td {{ background:#f9fafb; }}
   </div>
 
   <div class="section">
+    <h2>Investigator View</h2>
+    <div class="plain">
+      {html.escape(str(investigator.get("plain_summary") or ""))}
+      <div class="points">
+        {''.join(f'<div class="point">{html.escape(str(point))}</div>' for point in investigator.get("key_points", []))}
+      </div>
+    </div>
+  </div>
+
+  <div class="section">
+    <h2>Visible Service Groups</h2>
+    <table><thead><tr>{headers([('service', 'Service Group'), ('count', 'Signals'), ('share', 'Share'), ('bar_html', 'Chart'), ('example', 'Example')])}</tr></thead><tbody>{_chart_rows(investigator.get("service_rows", []), [('service', 'Service Group'), ('count', 'Signals'), ('share', 'Share'), ('bar_html', 'Chart'), ('example', 'Example')])}</tbody></table>
+  </div>
+
+  <div class="section">
+    <h2>Visible vs Encrypted Indicators</h2>
+    <table><thead><tr>{headers([('label', 'Visibility'), ('count', 'Signals'), ('share', 'Share'), ('bar_html', 'Chart')])}</tr></thead><tbody>{_chart_rows(investigator.get("visibility_rows", []), [('label', 'Visibility'), ('count', 'Signals'), ('share', 'Share'), ('bar_html', 'Chart')])}</tbody></table>
+  </div>
+
+  <div class="section">
+    <h2>Activity Timeline By Hour</h2>
+    <table><thead><tr>{headers([('hour', 'Hour'), ('packets', 'Packets'), ('share', 'Share'), ('bar_html', 'Chart')])}</tr></thead><tbody>{_chart_rows(investigator.get("activity_rows", []), [('hour', 'Hour'), ('packets', 'Packets'), ('share', 'Share'), ('bar_html', 'Chart')])}</tbody></table>
+  </div>
+
+  <div class="section">
     <h2>Interpretation Notes</h2>
-    {''.join(f'<div class="note">{html.escape(note)}</div>' for note in summary.notes)}
+    {''.join(f'<div class="note">{html.escape(note)}</div>' for note in investigator.get("limitations", summary.notes))}
   </div>
 
   <div class="section">
@@ -123,3 +155,29 @@ def _endpoint(ip: Any, port: Any) -> str:
     if port_s:
         return f"{ip_s}:{port_s}"
     return ip_s
+
+
+def _chart_rows(items: list[dict[str, Any]], columns: list[tuple[str, str]]) -> str:
+    if not items:
+        return "<tr><td colspan=\"99\">No records.</td></tr>"
+
+    parts = []
+    for item in items:
+        cells = []
+        for key, _label in columns:
+            if key == "bar_html":
+                share = _safe_float(item.get("share"))
+                cells.append(f"<td class=\"barcell\"><div class=\"bar\"><span style=\"width:{share:.1f}%\"></span></div></td>")
+            elif key == "share":
+                cells.append(f"<td>{_safe_float(item.get(key)):.1f}%</td>")
+            else:
+                cells.append(f"<td>{html.escape(str(item.get(key, '')))}</td>")
+        parts.append(f"<tr>{''.join(cells)}</tr>")
+    return "\n".join(parts)
+
+
+def _safe_float(value: Any) -> float:
+    try:
+        return float(value)
+    except Exception:
+        return 0.0
