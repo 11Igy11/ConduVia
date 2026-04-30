@@ -60,6 +60,7 @@ class PcapSummary:
     tls_sni: list[dict[str, Any]] = field(default_factory=list)
     http_hosts: list[dict[str, Any]] = field(default_factory=list)
     readable_samples: list[dict[str, Any]] = field(default_factory=list)
+    hourly_activity: list[dict[str, Any]] = field(default_factory=list)
     flows: list[dict[str, Any]] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
 
@@ -99,6 +100,7 @@ class _PcapAccumulator:
         self.dns_queries: Counter[str] = Counter()
         self.tls_sni: Counter[str] = Counter()
         self.http_hosts: Counter[str] = Counter()
+        self.hourly_activity: Counter[str] = Counter()
         self.readable_samples: list[dict[str, Any]] = []
         self.flow_map: dict[tuple[Any, ...], dict[str, Any]] = {}
 
@@ -109,6 +111,7 @@ class _PcapAccumulator:
         if packet.ts is not None:
             self.first_ts = packet.ts if self.first_ts is None else min(self.first_ts, packet.ts)
             self.last_ts = packet.ts if self.last_ts is None else max(self.last_ts, packet.ts)
+            self.hourly_activity[_dt.datetime.fromtimestamp(packet.ts).strftime("%Y-%m-%d %H:00")] += 1
 
         self.protocols[packet.protocol] += 1
         self.endpoints[packet.src_ip] += 1
@@ -286,6 +289,10 @@ class _PcapAccumulator:
                 for k, v in self.http_hosts.most_common(30)
             ],
             readable_samples=self.readable_samples,
+            hourly_activity=[
+                {"hour": k, "packets": v}
+                for k, v in sorted(self.hourly_activity.items())
+            ],
             flows=flows,
             notes=notes,
         )
@@ -310,6 +317,159 @@ def analyze_pcap(path: str | Path, *, max_flows: int = 5000, max_evidence: int =
             raise ValueError("Unsupported capture format. Expected PCAP or PCAPNG.")
 
     return acc.build_summary(p, file_format)
+
+
+def build_investigator_view(summary: PcapSummary) -> dict[str, Any]:
+    service_rows = _build_service_rows(summary)
+    protocol_rows = _with_share(summary.protocols, "packets")
+    activity_rows = _with_share(summary.hourly_activity, "packets")
+    visibility_rows = _build_visibility_rows(summary)
+
+    return {
+        "plain_summary": _plain_summary(summary, service_rows, visibility_rows),
+        "key_points": _key_points(summary, service_rows),
+        "service_rows": service_rows,
+        "protocol_rows": protocol_rows,
+        "activity_rows": activity_rows,
+        "visibility_rows": visibility_rows,
+        "limitations": [
+            "Encrypted HTTPS, QUIC and app traffic content cannot be read from the capture alone.",
+            "DNS names, TLS SNI names, endpoints, ports and timing are metadata. They show communication patterns, not message contents.",
+            "Plaintext credentials are reported only when visible in unencrypted payload.",
+        ],
+    }
+
+
+def _plain_summary(
+    summary: PcapSummary,
+    service_rows: list[dict[str, Any]],
+    visibility_rows: list[dict[str, Any]],
+) -> str:
+    duration = _duration_words(summary.duration_seconds)
+    device = summary.likely_device_ip or "one main device"
+    top_services = ", ".join(row["service"] for row in service_rows[:5]) or "no clear service groups"
+    encrypted = next((row for row in visibility_rows if row["label"].startswith("Encrypted")), None)
+    encrypted_text = ""
+    if encrypted and encrypted.get("count"):
+        encrypted_text = f" Most traffic indicators are encrypted or metadata-only ({encrypted['count']:,} packets matched common encrypted service ports)."
+
+    credential_text = "No plaintext credentials were observed in this capture."
+    if any("credential" in str(sample.get("type", "")).lower() for sample in summary.readable_samples):
+        credential_text = "Potential credential-like plaintext was observed and should be reviewed carefully."
+
+    return (
+        f"The capture covers {duration}. The most active observed device appears to be {device}. "
+        f"Visible metadata points mainly to {top_services}.{encrypted_text} "
+        f"{credential_text} Review the Evidence tab for the exact visible records."
+    )
+
+
+def _key_points(summary: PcapSummary, service_rows: list[dict[str, Any]]) -> list[str]:
+    points = [
+        f"Likely device IP: {summary.likely_device_ip or '-'}",
+        f"Capture period: {summary.first_seen or '-'} to {summary.last_seen or '-'}",
+        f"Packets: {summary.packet_count:,}; volume: {summary.wire_bytes:,} bytes",
+        f"Visible DNS names: {len(summary.dns_queries)}; TLS SNI hosts: {len(summary.tls_sni)}; HTTP hosts: {len(summary.http_hosts)}",
+    ]
+    if service_rows:
+        points.append("Most visible service groups: " + ", ".join(row["service"] for row in service_rows[:5]))
+    return points
+
+
+def _build_service_rows(summary: PcapSummary) -> list[dict[str, Any]]:
+    counts: Counter[str] = Counter()
+    examples: dict[str, str] = {}
+
+    def add_host(host: str, count: int) -> None:
+        label = _service_label(host)
+        counts[label] += count
+        examples.setdefault(label, host)
+
+    for item in summary.dns_queries:
+        add_host(str(item.get("query") or ""), int(item.get("count") or 0))
+    for item in summary.tls_sni:
+        add_host(str(item.get("host") or ""), int(item.get("count") or 0))
+    for item in summary.http_hosts:
+        add_host(str(item.get("host") or ""), int(item.get("count") or 0))
+
+    rows = [
+        {"service": service, "count": count, "example": examples.get(service, "")}
+        for service, count in counts.most_common(12)
+    ]
+    return _with_share(rows, "count")
+
+
+def _service_label(host: str) -> str:
+    h = (host or "").lower()
+    checks = [
+        ("WhatsApp", ("whatsapp", "wa.me")),
+        ("Facebook / Meta", ("facebook", "fbcdn", "fb.com", "edge-mqtt", "graph.instagram", "instagram")),
+        ("Google / YouTube", ("google", "gstatic", "googleapis", "youtube", "ytimg", "doubleclick")),
+        ("TikTok", ("tiktok", "byteoversea", "pangle")),
+        ("Samsung", ("samsung",)),
+        ("Booking", ("booking.com",)),
+        ("Viber", ("viber",)),
+        ("Spotify / local media", ("spotify",)),
+        ("Advertising / tracking", ("adnxs", "adform", "criteo", "rubiconproject", "googlesyndication", "zemanta")),
+        ("Certificates / validation", ("ocsp", "cert", "crl", "godaddy")),
+        ("Cloudflare / CDN", ("cloudflare", "cloudfront", "akamai", "cdn")),
+        ("LinkedIn", ("linkedin",)),
+    ]
+    for label, needles in checks:
+        if any(needle in h for needle in needles):
+            return label
+    return "Other visible services"
+
+
+def _build_visibility_rows(summary: PcapSummary) -> list[dict[str, Any]]:
+    port_counts = {
+        (str(item.get("protocol") or ""), int(item.get("port") or 0)): int(item.get("packets") or 0)
+        for item in summary.top_ports
+    }
+    encrypted_count = (
+        port_counts.get(("TCP", 443), 0)
+        + port_counts.get(("UDP", 443), 0)
+        + port_counts.get(("TCP", 5222), 0)
+    )
+    dns_count = port_counts.get(("UDP", 53), 0) + port_counts.get(("TCP", 53), 0)
+    http_visible = sum(1 for sample in summary.readable_samples if sample.get("type") == "HTTP cleartext")
+    readable_other = max(0, len(summary.readable_samples) - http_visible)
+
+    rows = [
+        {"label": "Encrypted or metadata-only indicators", "count": encrypted_count},
+        {"label": "DNS metadata", "count": dns_count},
+        {"label": "HTTP cleartext samples", "count": http_visible},
+        {"label": "Other readable samples", "count": readable_other},
+    ]
+    return _with_share([row for row in rows if row["count"]], "count")
+
+
+def _with_share(rows: list[dict[str, Any]], count_key: str) -> list[dict[str, Any]]:
+    total = sum(int(row.get(count_key) or 0) for row in rows)
+    out = []
+    for row in rows:
+        count = int(row.get(count_key) or 0)
+        item = dict(row)
+        item["share"] = round((count / total) * 100, 1) if total else 0.0
+        item["bar"] = _bar(item["share"])
+        out.append(item)
+    return out
+
+
+def _bar(percent: float, width: int = 24) -> str:
+    filled = max(0, min(width, int(round((percent / 100) * width))))
+    return "#" * filled + "-" * (width - filled)
+
+
+def _duration_words(seconds: float) -> str:
+    seconds = max(0, int(seconds or 0))
+    hours, rem = divmod(seconds, 3600)
+    minutes, secs = divmod(rem, 60)
+    if hours:
+        return f"approximately {hours}h {minutes}m"
+    if minutes:
+        return f"approximately {minutes}m {secs}s"
+    return f"{secs}s"
 
 
 def _read_pcap(f, acc: _PcapAccumulator) -> None:

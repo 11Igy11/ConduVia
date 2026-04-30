@@ -6,6 +6,7 @@ from typing import Any
 
 from PySide6.QtCore import QAbstractTableModel, QModelIndex, QObject, QThread, Qt, Signal
 from PySide6.QtWidgets import (
+    QAbstractItemView,
     QFileDialog,
     QFrame,
     QGridLayout,
@@ -14,6 +15,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QMessageBox,
     QPushButton,
+    QScrollArea,
     QSplitter,
     QTableView,
     QTabWidget,
@@ -25,7 +27,7 @@ from PySide6.QtWidgets import (
 
 from core.exporters.pcap_exporter import export_pcap_summary_html
 from core.formatters import format_duration_compact_ms, human_bytes
-from core.pcap_analyzer import PcapSummary, analyze_pcap
+from core.pcap_analyzer import PcapSummary, analyze_pcap, build_investigator_view
 from core.protocols import format_ip_proto
 
 
@@ -79,6 +81,11 @@ class DictTableModel(QAbstractTableModel):
             return human_bytes(value, precision=2)
         if key == "bidirectional_duration_ms":
             return format_duration_compact_ms(value)
+        if key == "share":
+            try:
+                return f"{float(value):.1f}%"
+            except Exception:
+                return str(value)
         return "" if value is None else str(value)
 
 
@@ -124,6 +131,7 @@ class PcapPage(QWidget):
         root.addWidget(header)
 
         self.tabs = QTabWidget()
+        self.tabs.addTab(self._build_investigator_tab(), "Investigator View")
         self.tabs.addTab(self._build_overview_tab(), "Overview")
         self.tabs.addTab(self._build_evidence_tab(), "Evidence")
         self.tabs.addTab(self._build_connections_tab(), "Connections")
@@ -132,33 +140,137 @@ class PcapPage(QWidget):
         self.btn_open.clicked.connect(self.open_pcap_dialog)
         self.btn_export.clicked.connect(self.export_summary)
 
+    def _build_investigator_tab(self) -> QWidget:
+        page = QWidget()
+        page_layout = QVBoxLayout(page)
+        page_layout.setContentsMargins(0, 0, 0, 0)
+        page_layout.setSpacing(0)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+
+        content = QWidget()
+        layout = QVBoxLayout(content)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(14)
+
+        self.investigator_card = QFrame()
+        self.investigator_card.setObjectName("PcapInvestigatorCard")
+        self.investigator_card.setMinimumHeight(220)
+        card_layout = QVBoxLayout(self.investigator_card)
+        card_layout.setContentsMargins(14, 12, 14, 12)
+        card_layout.setSpacing(8)
+
+        self.lbl_plain_summary = QLabel("Open a PCAP file to see a plain-language investigation view.")
+        self.lbl_plain_summary.setObjectName("PcapPlainSummary")
+        self.lbl_plain_summary.setWordWrap(True)
+        self.lbl_plain_summary.setTextInteractionFlags(Qt.TextSelectableByMouse)
+
+        self.lbl_key_points = QLabel("")
+        self.lbl_key_points.setObjectName("PcapKeyPoints")
+        self.lbl_key_points.setWordWrap(True)
+        self.lbl_key_points.setTextInteractionFlags(Qt.TextSelectableByMouse)
+
+        self.lbl_limitations = QLabel("")
+        self.lbl_limitations.setObjectName("PcapLimitations")
+        self.lbl_limitations.setWordWrap(True)
+        self.lbl_limitations.setTextInteractionFlags(Qt.TextSelectableByMouse)
+
+        card_layout.addWidget(self.lbl_plain_summary)
+        card_layout.addWidget(self.lbl_key_points)
+        card_layout.addWidget(self.lbl_limitations)
+
+        self.tbl_services = self._table([
+            ("service", "Service group"),
+            ("count", "Signals"),
+            ("share", "Share"),
+            ("example", "Example"),
+        ], fixed_widths={1: 88, 2: 78}, stretch_columns=[0, 3])
+        self.tbl_visibility = self._table([
+            ("label", "Visibility"),
+            ("count", "Signals"),
+            ("share", "Share"),
+        ], fixed_widths={1: 88, 2: 78}, stretch_columns=[0])
+        self.tbl_activity = self._table([
+            ("hour", "Hour"),
+            ("packets", "Packets"),
+            ("share", "Share"),
+        ], fixed_widths={0: 170, 1: 110, 2: 78}, stretch_columns=[])
+
+        top = QHBoxLayout()
+        top.setSpacing(10)
+        self.grp_services = self._group("Visible service groups", self.tbl_services)
+        self.grp_visibility = self._group("Visible vs encrypted indicators", self.tbl_visibility)
+        self.grp_activity = self._group("Activity timeline by hour", self.tbl_activity)
+
+        self.grp_services.setMinimumHeight(260)
+        self.grp_visibility.setMinimumHeight(260)
+        self.grp_activity.setMinimumHeight(280)
+
+        top.addWidget(self.grp_services, 3)
+        top.addWidget(self.grp_visibility, 2)
+
+        layout.addWidget(self.investigator_card, 0)
+        layout.addLayout(top, 2)
+        layout.addWidget(self.grp_activity, 2)
+        layout.addStretch()
+
+        scroll.setWidget(content)
+        page_layout.addWidget(scroll, 1)
+        return page
+
     def _build_overview_tab(self) -> QWidget:
         page = QWidget()
-        layout = QVBoxLayout(page)
-        layout.setContentsMargins(8, 8, 8, 8)
-        layout.setSpacing(10)
+        page_layout = QVBoxLayout(page)
+        page_layout.setContentsMargins(0, 0, 0, 0)
+        page_layout.setSpacing(0)
 
-        self.overview_text = QTextEdit()
-        self.overview_text.setReadOnly(True)
-        self.overview_text.setPlaceholderText("Open a PCAP file to see a readable investigation overview.")
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+
+        content = QWidget()
+        layout = QVBoxLayout(content)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(14)
+
+        self.overview_card = QFrame()
+        self.overview_card.setObjectName("PcapInvestigatorCard")
+        self.overview_card.setMinimumHeight(190)
+        overview_card_layout = QVBoxLayout(self.overview_card)
+        overview_card_layout.setContentsMargins(14, 12, 14, 12)
+
+        self.lbl_overview_text = QLabel("Open a PCAP file to see a readable investigation overview.")
+        self.lbl_overview_text.setObjectName("PcapKeyPoints")
+        self.lbl_overview_text.setWordWrap(True)
+        self.lbl_overview_text.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        overview_card_layout.addWidget(self.lbl_overview_text)
 
         grid = QGridLayout()
         grid.setSpacing(10)
-        self.tbl_protocols = self._table([("protocol", "Protocol"), ("number", "Number"), ("packets", "Packets")])
-        self.tbl_endpoints = self._table([("ip", "Endpoint IP"), ("packets", "Packets")])
-        self.tbl_ports = self._table([("protocol", "Protocol"), ("port", "Port"), ("packets", "Packets")])
-        grid.addWidget(self._group("Protocols", self.tbl_protocols), 0, 0)
-        grid.addWidget(self._group("Top endpoints", self.tbl_endpoints), 0, 1)
-        grid.addWidget(self._group("Top ports", self.tbl_ports), 1, 0, 1, 2)
+        self.tbl_protocols = self._table([("protocol", "Protocol"), ("number", "Number"), ("packets", "Packets")], stretch_columns=[0])
+        self.tbl_endpoints = self._table([("ip", "Endpoint IP"), ("packets", "Packets")], stretch_columns=[0])
+        self.tbl_ports = self._table([("protocol", "Protocol"), ("port", "Port"), ("packets", "Packets")], stretch_columns=[0])
+        grp_protocols = self._group("Protocols", self.tbl_protocols)
+        grp_endpoints = self._group("Top endpoints", self.tbl_endpoints)
+        grp_ports = self._group("Top ports", self.tbl_ports)
+        grp_protocols.setMinimumHeight(250)
+        grp_endpoints.setMinimumHeight(250)
+        grp_ports.setMinimumHeight(300)
 
-        splitter = QSplitter(Qt.Vertical)
-        splitter.addWidget(self.overview_text)
-        grid_wrap = QWidget()
-        grid_wrap.setLayout(grid)
-        splitter.addWidget(grid_wrap)
-        splitter.setStretchFactor(0, 2)
-        splitter.setStretchFactor(1, 3)
-        layout.addWidget(splitter, 1)
+        grid.addWidget(grp_protocols, 0, 0)
+        grid.addWidget(grp_endpoints, 0, 1)
+        grid.addWidget(grp_ports, 1, 0, 1, 2)
+
+        layout.addWidget(self.overview_card)
+        layout.addLayout(grid)
+        layout.addStretch()
+
+        scroll.setWidget(content)
+        page_layout.addWidget(scroll, 1)
         return page
 
     def _build_evidence_tab(self) -> QWidget:
@@ -167,16 +279,16 @@ class PcapPage(QWidget):
         layout.setContentsMargins(8, 8, 8, 8)
         layout.setSpacing(10)
 
-        self.tbl_dns = self._table([("query", "DNS Query"), ("count", "Count")])
-        self.tbl_sni = self._table([("host", "TLS SNI Host"), ("count", "Count")])
-        self.tbl_http = self._table([("host", "HTTP Host"), ("count", "Count")])
+        self.tbl_dns = self._table([("query", "DNS Query"), ("count", "Count")], fixed_widths={1: 90}, stretch_columns=[0])
+        self.tbl_sni = self._table([("host", "TLS SNI Host"), ("count", "Count")], fixed_widths={1: 90}, stretch_columns=[0])
+        self.tbl_http = self._table([("host", "HTTP Host"), ("count", "Count")], fixed_widths={1: 90}, stretch_columns=[0])
         self.tbl_samples = self._table([
             ("time", "Time"),
             ("type", "Type"),
             ("source", "Source"),
             ("destination", "Destination"),
             ("value", "Visible Value"),
-        ])
+        ], fixed_widths={0: 178, 1: 130, 2: 190, 3: 190}, stretch_columns=[4])
 
         top = QSplitter(Qt.Horizontal)
         top.addWidget(self._group("DNS queries", self.tbl_dns))
@@ -208,20 +320,40 @@ class PcapPage(QWidget):
             ("bidirectional_first_seen_ms", "First Seen"),
             ("bidirectional_last_seen_ms", "Last Seen"),
             ("pcap_payload_preview", "Visible Preview"),
-        ])
+        ], stretch_columns=[11])
         layout.addWidget(self.tbl_connections)
         return page
 
-    def _table(self, columns: list[tuple[str, str]]) -> QTableView:
+    def _table(
+        self,
+        columns: list[tuple[str, str]],
+        *,
+        stretch_last: bool = False,
+        fixed_widths: dict[int, int] | None = None,
+        stretch_columns: list[int] | None = None,
+    ) -> QTableView:
         table = QTableView()
         table.setModel(DictTableModel(columns))
         table.setAlternatingRowColors(True)
         table.setSelectionBehavior(QTableView.SelectRows)
+        table.setSelectionMode(QAbstractItemView.SingleSelection)
         table.setEditTriggers(QTableView.NoEditTriggers)
         table.setWordWrap(False)
         table.verticalHeader().setVisible(False)
-        table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
-        table.horizontalHeader().setStretchLastSection(True)
+        table.setHorizontalScrollMode(QAbstractItemView.ScrollPerPixel)
+        table.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
+        table.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        table.setMinimumHeight(210)
+        header = table.horizontalHeader()
+        header.setSectionResizeMode(QHeaderView.Interactive)
+        header.setStretchLastSection(stretch_last)
+        fixed_widths = fixed_widths or {}
+        for idx, width in fixed_widths.items():
+            if 0 <= idx < len(columns):
+                table.setColumnWidth(idx, width)
+        for idx in stretch_columns or []:
+            if 0 <= idx < len(columns):
+                header.setSectionResizeMode(idx, QHeaderView.Stretch)
         return table
 
     def _group(self, title: str, widget: QWidget) -> QGroupBox:
@@ -274,7 +406,12 @@ class PcapPage(QWidget):
             f"Volume: {human_bytes(summary.wire_bytes, precision=2)} | "
             f"Period: {summary.first_seen or '-'} - {summary.last_seen or '-'}"
         )
-        self.overview_text.setPlainText(self._overview_text(summary))
+        investigator = build_investigator_view(summary)
+        self._set_investigator_text(investigator)
+        self._set_table(self.tbl_services, investigator["service_rows"])
+        self._set_table(self.tbl_visibility, investigator["visibility_rows"])
+        self._set_table(self.tbl_activity, investigator["activity_rows"])
+        self.lbl_overview_text.setText(self._overview_text(summary))
         self._set_table(self.tbl_protocols, summary.protocols)
         self._set_table(self.tbl_endpoints, summary.top_endpoints)
         self._set_table(self.tbl_ports, summary.top_ports)
@@ -321,6 +458,15 @@ class PcapPage(QWidget):
             "ViaNyquist shows the observable metadata and only the payload bytes that are actually visible.",
         ]
         return "\n".join(lines)
+
+    def _set_investigator_text(self, investigator: dict[str, Any]) -> None:
+        summary = str(investigator.get("plain_summary") or "")
+        self.lbl_plain_summary.setText(summary)
+
+        key_points = "\n".join(f"- {point}" for point in (investigator.get("key_points") or [])[:4])
+        self.lbl_key_points.setText(f"Key points:\n{key_points}" if key_points else "")
+        limitations = "\n".join(f"- {item}" for item in (investigator.get("limitations") or [])[:2])
+        self.lbl_limitations.setText(f"Limitations:\n{limitations}" if limitations else "")
 
     def export_summary(self):
         if not self.summary:
