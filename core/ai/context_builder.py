@@ -277,3 +277,64 @@ def build_pcap_context(
     lines.append("Important: Credentials or payload contents are present only if explicitly listed above as plaintext evidence or artifacts.")
 
     return "\n".join(lines)
+
+
+def build_activity_profile_context(
+    profile: dict[str, Any],
+    project_name: str = "",
+    limit: int = 12,
+) -> str:
+    lines: list[str] = []
+    lines.append(f"Project: {project_name or '(none)'}")
+    lines.append("Goal: explain the case activity profile built from saved ViaNyquist project evidence.")
+    lines.append("")
+
+    lines.append("Case snapshot:")
+    for line in profile.get("summary_lines") or []:
+        lines.append(str(line))
+    lines.append("")
+
+    lines.append("Evidence counts:")
+    for row in profile.get("evidence_counts") or []:
+        lines.append(f"- {row.get('label')}: {row.get('count')}")
+    lines.append("")
+
+    lines.append("PCAP device IP distribution:")
+    device_rows = profile.get("pcap_device_ip_rows") or []
+    if device_rows:
+        for row in device_rows[:limit]:
+            lines.append(f"- {row.get('label')}: {row.get('count')}")
+    else:
+        lines.append("- No saved PCAP device IPs.")
+    lines.append("")
+
+    lines.append("Activity event type distribution:")
+    activity_rows = profile.get("activity_type_rows") or []
+    if activity_rows:
+        for row in activity_rows[:limit]:
+            lines.append(f"- {row.get('label')}: {row.get('count')}")
+    else:
+        lines.append("- No activity events.")
+    lines.append("")
+
+    capture_range = profile.get("capture_range") or {}
+    lines.append("Observed PCAP capture range:")
+    lines.append(f"- {capture_range.get('label') or '-'}")
+    lines.append("")
+
+    lines.append("Deterministic next-review guidance:")
+    for line in profile.get("recommendation_lines") or []:
+        lines.append(str(line))
+    lines.append("")
+
+    lines.append("Recent project timeline:")
+    timeline = profile.get("timeline_lines") or []
+    if timeline:
+        for line in timeline[:limit]:
+            lines.append(str(line))
+    else:
+        lines.append("- No project activity yet.")
+    lines.append("")
+    lines.append("Important: this profile describes saved project evidence and observed device/network activity. It does not prove a person's identity, intent, or full communication content.")
+
+    return "\n".join(lines)

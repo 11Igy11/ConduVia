@@ -203,3 +203,49 @@ STYLE:
 - No generic cybersecurity lecture.
 - Do not repeat the full raw context.
 """.strip()
+
+
+def build_activity_profile_summary_prompt(context: str) -> str:
+    return f"""
+You are analyzing a ViaNyquist Activity Profile for an investigator.
+
+The profile combines saved project evidence: loaded JSON datasets, saved PCAP sources, findings, device IP consistency, and project activity timeline. Explain what the project currently shows about device/network activity. Use only the provided context.
+
+Strict interpretation rules:
+- Do not identify a real person, user intent, guilt, threat, malware, compromise, or exact app usage unless explicitly present in the context.
+- Use "device/activity profile" language, not "this person did..." language.
+- Clearly separate observed project evidence from cautious interpretation.
+- If evidence is thin, say so.
+- If PCAP device IPs are inconsistent or missing, call that out as a validation issue.
+
+CONTEXT:
+{context}
+
+OUTPUT FORMAT:
+
+Activity Profile Summary
+- 3 to 5 bullets.
+- Summarize the current project evidence and what kind of profile is forming.
+
+Evidence Strength
+- 3 to 5 bullets.
+- Explain whether the profile is strong, moderate, or early-stage based on dataset count, PCAP count, findings, device IP consistency, and timeline richness.
+
+Behavioral / Case Interpretation
+- 3 to 6 bullets.
+- Describe cautious patterns that are supported by the evidence: repeated collection, PCAP validation, consistency, gaps, or evidence concentration.
+
+Items To Review Next
+- 3 to 6 bullets.
+- Give concrete next checks tied to the project: compare datasets with PCAP windows, review saved findings, validate target/device consistency, inspect artifacts, or enrich key endpoints.
+
+Limits Of Interpretation
+- 3 to 5 bullets.
+- State what cannot be concluded from this project profile alone.
+
+STYLE:
+- Prefer Croatian.
+- Practical, concise, investigator-friendly.
+- No generic cybersecurity lecture.
+- Do not repeat the full raw context.
+""".strip()

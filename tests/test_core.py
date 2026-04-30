@@ -9,10 +9,12 @@ from pathlib import Path
 from unittest.mock import patch
 
 from core.ai.assistant_service import AIAssistantService, AISettings
-from core.ai.context_builder import build_dataset_context, build_pcap_context
-from core.ai.prompts import build_dataset_summary_prompt, build_pcap_summary_prompt
+from core.ai.context_builder import build_activity_profile_context, build_dataset_context, build_pcap_context
+from core.ai.prompts import build_activity_profile_summary_prompt, build_dataset_summary_prompt, build_pcap_summary_prompt
 from core.compare import compare_flows, summarize_new_flows
 from core.db import (
+    add_dataset_load,
+    add_finding,
     add_pcap_source,
     create_project,
     file_sha256,
@@ -38,6 +40,7 @@ from core.formatters import (
 from core.loader import list_json_files, load_folder, load_json_file
 from core.parser import extract_dataset_meta
 from core.pcap_analyzer import analyze_pcap, build_investigator_view
+from core.project_profile import build_project_activity_profile, format_project_activity_profile
 from core.protocols import describe_ip_proto, format_ip_proto_with_description
 from core.timeutils import LOCAL_TZ, parse_timestamp
 from core.workspace import (
@@ -337,6 +340,75 @@ class PcapAnalyzerTests(unittest.TestCase):
         self.assertEqual(sources[0].likely_device_ip, "10.0.0.10")
         self.assertEqual(device_ips, ["10.0.0.10"])
 
+    def test_project_activity_profile_summarizes_saved_evidence(self):
+        with temporary_directory() as tmp:
+            root = Path(tmp)
+            db_path = root / "profile.db"
+            pcap_path = root / "sample.pcap"
+            _write_sample_pcap(pcap_path)
+            init_db(db_path)
+
+            project_id = create_project("Case A", db_path=db_path)
+            empty_project_id = create_project("Empty Case", db_path=db_path)
+            add_dataset_load(project_id, str(root / "dataset"), db_path=db_path)
+
+            summary = analyze_pcap(pcap_path)
+            add_pcap_source(
+                project_id,
+                file_path=str(pcap_path),
+                file_name=pcap_path.name,
+                file_sha256_value=file_sha256(pcap_path),
+                file_size=pcap_path.stat().st_size,
+                format=summary.format,
+                packet_count=summary.packet_count,
+                wire_bytes=summary.wire_bytes,
+                first_seen=summary.first_seen,
+                last_seen=summary.last_seen,
+                duration_seconds=summary.duration_seconds,
+                likely_device_ip=summary.likely_device_ip,
+                summary_text=build_investigator_view(summary)["plain_summary"],
+                db_path=db_path,
+            )
+            add_finding(
+                project_id,
+                {
+                    "src_ip": "10.0.0.10",
+                    "dst_ip": "93.184.216.34",
+                    "protocol": 6,
+                    "application_name": "HTTP",
+                    "bidirectional_bytes": 1000,
+                },
+                title="Example flow",
+                db_path=db_path,
+            )
+
+            profile = build_project_activity_profile(project_id, db_path=db_path)
+            empty_profile = build_project_activity_profile(empty_project_id, db_path=db_path)
+            rendered = format_project_activity_profile(profile)
+
+        self.assertEqual(profile["dataset_count"], 1)
+        self.assertEqual(profile["pcap_count"], 1)
+        self.assertEqual(profile["finding_count"], 1)
+        self.assertEqual(profile["pcap_device_ips"], {"10.0.0.10": 1})
+        self.assertEqual(profile["evidence_counts"], [
+            {"label": "Datasets", "count": 1},
+            {"label": "PCAP Sources", "count": 1},
+            {"label": "Findings", "count": 1},
+        ])
+        self.assertEqual(profile["pcap_device_ip_rows"], [{"label": "10.0.0.10", "count": 1}])
+        self.assertTrue(any(row["label"] == "Dataset loaded" for row in profile["activity_type_rows"]))
+        self.assertTrue(any(row["label"] == "PCAP saved" for row in profile["activity_type_rows"]))
+        self.assertTrue(profile["capture_range"]["first_seen"])
+        self.assertTrue(profile["capture_range"]["last_seen"])
+        self.assertEqual(empty_profile["dataset_count"], 0)
+        self.assertEqual(empty_profile["evidence_counts"][0]["count"], 0)
+        self.assertEqual(empty_profile["pcap_device_ip_rows"], [])
+        self.assertEqual(empty_profile["activity_type_rows"], [])
+        self.assertEqual(empty_profile["capture_range"]["label"], "-")
+        self.assertIn("Project Activity Profile", rendered)
+        self.assertIn("Compare JSON flow datasets", rendered)
+        self.assertIn("Recent project activity", rendered)
+
 
 class AIServiceTests(unittest.TestCase):
     def test_ai_settings_builds_generate_url(self):
@@ -440,6 +512,52 @@ class AIServiceTests(unittest.TestCase):
         prompt = post.call_args.args[0]
         self.assertIn("You are analyzing a packet capture summary", prompt)
         self.assertIn("PCAP file: sample.pcap", prompt)
+        self.assertIn("Limits Of Interpretation", prompt)
+
+    def test_activity_profile_context_and_prompt_are_grounded(self):
+        profile = {
+            "summary_lines": ["Project Activity Profile", "- Target: MSISDN / 123"],
+            "evidence_counts": [
+                {"label": "Datasets", "count": 2},
+                {"label": "PCAP Sources", "count": 1},
+            ],
+            "pcap_device_ip_rows": [{"label": "10.0.0.10", "count": 1}],
+            "activity_type_rows": [{"label": "Dataset loaded", "count": 2}],
+            "capture_range": {"label": "2026-01-01 to 2026-01-02"},
+            "recommendation_lines": ["- Compare datasets with PCAP windows."],
+            "timeline_lines": ["- 2026-04-30: Dataset loaded: sample"],
+        }
+
+        context = build_activity_profile_context(profile, project_name="Case A")
+        prompt = build_activity_profile_summary_prompt(context)
+
+        self.assertIn("Project: Case A", context)
+        self.assertIn("Evidence counts", context)
+        self.assertIn("PCAP device IP distribution", context)
+        self.assertIn("Do not identify a real person", prompt)
+        self.assertIn("Activity Profile Summary", prompt)
+        self.assertIn("Prefer Croatian", prompt)
+
+    def test_activity_profile_ai_summary_uses_profile_prompt(self):
+        class FakeResponse:
+            status_code = 200
+
+            def json(self):
+                return {"response": "profile ok"}
+
+        profile = {
+            "summary_lines": ["Project Activity Profile"],
+            "evidence_counts": [{"label": "Datasets", "count": 1}],
+            "recommendation_lines": ["- Review saved findings."],
+        }
+        service = AIAssistantService(AISettings(base_url="http://ai.local", model="m", timeout_seconds=7))
+        with patch.object(service, "_post_generate", return_value=FakeResponse()) as post:
+            result = service.generate_activity_profile_summary(profile, project_name="Case A")
+
+        self.assertEqual(result, "profile ok")
+        prompt = post.call_args.args[0]
+        self.assertIn("ViaNyquist Activity Profile", prompt)
+        self.assertIn("Project: Case A", prompt)
         self.assertIn("Limits Of Interpretation", prompt)
 
 
