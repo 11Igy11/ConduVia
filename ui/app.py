@@ -4,6 +4,7 @@ from core.ai.assistant_service import AIAssistantService, AISettings
 import ipaddress
 from ui.registry_page import RegistryPage
 from ui.listing_page import ListingPage
+from ui.pcap_page import PcapPage
 import html
 from datetime import datetime
 from pathlib import Path
@@ -195,6 +196,7 @@ class App(QWidget):
         self.btn_nav_explore = QPushButton("Explore")
         self.btn_nav_registry = QPushButton("Registry")
         self.btn_nav_listing = QPushButton("Listing")
+        self.btn_nav_pcap = QPushButton("PCAP")
         self.btn_nav_help = QPushButton("Help")
 
         for b in (
@@ -202,6 +204,7 @@ class App(QWidget):
             self.btn_nav_explore,
             self.btn_nav_registry,
             self.btn_nav_listing,
+            self.btn_nav_pcap,
             self.btn_nav_help,
         ):
             b.setObjectName("NavButton")
@@ -212,13 +215,15 @@ class App(QWidget):
         self._nav_explore = self.btn_nav_explore
         self._nav_registry = self.btn_nav_registry
         self._nav_listing = self.btn_nav_listing
+        self._nav_pcap = self.btn_nav_pcap
 
         sidebar.addWidget(self.btn_nav_projects)
         sidebar.addWidget(self.btn_nav_explore)
         sidebar.addWidget(self.btn_nav_registry)
         sidebar.addWidget(self.btn_nav_listing)
-        sidebar.addWidget(self.btn_nav_help)
         sidebar.addStretch()
+        sidebar.addWidget(self.btn_nav_pcap)
+        sidebar.addWidget(self.btn_nav_help)
 
         return sidebar
 
@@ -227,6 +232,7 @@ class App(QWidget):
         self.btn_nav_explore.clicked.connect(lambda: self.go_page(self.IDX_EXPLORE, self._nav_explore))
         self.btn_nav_registry.clicked.connect(lambda: self.go_page(self.IDX_REGISTRY, self._nav_registry))
         self.btn_nav_listing.clicked.connect(lambda: self.go_page(self.IDX_LISTING, self._nav_listing))
+        self.btn_nav_pcap.clicked.connect(lambda: self.go_page(self.IDX_PCAP, self._nav_pcap))
         self.btn_nav_help.clicked.connect(self.open_user_manual)
 
     def _wire_ui(self) -> None:
@@ -510,6 +516,7 @@ class App(QWidget):
         self.IDX_EXPLORE = 1
         self.IDX_REGISTRY = 2
         self.IDX_LISTING = 3
+        self.IDX_PCAP = 4
 
         # -------- Projects page --------
         projects_page = QWidget()
@@ -1093,6 +1100,9 @@ class App(QWidget):
         self.listing_page = ListingPage()
         self.pages.addWidget(self.listing_page)
 
+        self.pcap_page = PcapPage()
+        self.pages.addWidget(self.pcap_page)
+
         self.pages.setCurrentIndex(self.IDX_PROJECTS)
         self._set_active_nav(self._nav_projects)
 
@@ -1109,7 +1119,7 @@ class App(QWidget):
         outer.addLayout(footer)
           
     def _set_active_nav(self, active: QPushButton):
-        for b in (self._nav_projects, self._nav_explore, self._nav_registry, self._nav_listing):
+        for b in (self._nav_projects, self._nav_explore, self._nav_registry, self._nav_listing, self._nav_pcap):
             b.setProperty("active", b is active)
             b.style().unpolish(b)
             b.style().polish(b)
