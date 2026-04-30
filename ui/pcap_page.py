@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import webbrowser
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -29,6 +30,12 @@ from core.exporters.pcap_exporter import export_pcap_summary_html
 from core.formatters import format_duration_compact_ms, human_bytes
 from core.pcap_analyzer import PcapSummary, analyze_pcap, build_investigator_view
 from core.protocols import format_ip_proto
+from core.db import (
+    add_activity,
+    add_pcap_source,
+    file_sha256,
+    list_project_pcap_device_ips,
+)
 
 
 class PcapWorker(QObject):
@@ -92,9 +99,11 @@ class DictTableModel(QAbstractTableModel):
 class PcapPage(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.app = parent
         self.summary: PcapSummary | None = None
         self._thread: QThread | None = None
         self._worker: PcapWorker | None = None
+        self._saved_source_id: int | None = None
         self._build_ui()
 
     def _build_ui(self):
@@ -112,11 +121,17 @@ class PcapPage(QWidget):
         self.lbl_title = QLabel("PCAP analysis")
         self.lbl_title.setObjectName("HeaderProjectLabel")
         self.btn_open = QPushButton("Open PCAP")
+        self.btn_save_project = QPushButton("Save to Project")
+        self.btn_save_project.setEnabled(False)
+        self.btn_add_notes = QPushButton("Add to Notes")
+        self.btn_add_notes.setEnabled(False)
         self.btn_export = QPushButton("Export Summary")
         self.btn_export.setEnabled(False)
         top.addWidget(self.lbl_title)
         top.addStretch()
         top.addWidget(self.btn_open)
+        top.addWidget(self.btn_save_project)
+        top.addWidget(self.btn_add_notes)
         top.addWidget(self.btn_export)
 
         self.lbl_file = QLabel("No PCAP loaded")
@@ -138,6 +153,8 @@ class PcapPage(QWidget):
         root.addWidget(self.tabs, 1)
 
         self.btn_open.clicked.connect(self.open_pcap_dialog)
+        self.btn_save_project.clicked.connect(self.save_to_project)
+        self.btn_add_notes.clicked.connect(self.add_summary_to_notes)
         self.btn_export.clicked.connect(self.export_summary)
 
     def _build_investigator_tab(self) -> QWidget:
@@ -399,7 +416,11 @@ class PcapPage(QWidget):
 
     def _on_loaded(self, summary: PcapSummary):
         self.summary = summary
+        self._saved_source_id = None
         self.btn_export.setEnabled(True)
+        self.btn_save_project.setEnabled(True)
+        self.btn_save_project.setText("Save to Project")
+        self.btn_add_notes.setEnabled(True)
         self.lbl_file.setText(summary.file_path)
         self.lbl_stats.setText(
             f"{summary.format} | Packets: {summary.packet_count:,} | "
@@ -490,3 +511,178 @@ class PcapPage(QWidget):
             webbrowser.open(Path(file_path).resolve().as_uri())
         except Exception as exc:
             QMessageBox.critical(self, "PCAP export failed", str(exc))
+
+    def save_to_project(self):
+        if not self.summary:
+            self._info("PCAP", "Open a PCAP file first.")
+            return
+
+        project_id = self._current_project_id()
+        if project_id is None:
+            self._info(
+                "PCAP",
+                "Open an active project first.",
+                "PCAP analyses must be tied to a project before they can be used in notes or future activity profiles.",
+            )
+            return
+
+        if not self._confirm_project_device_match(project_id):
+            return
+
+        try:
+            digest = file_sha256(self.summary.file_path)
+            investigator = build_investigator_view(self.summary)
+            source_id = add_pcap_source(
+                project_id,
+                file_path=self.summary.file_path,
+                file_name=self.summary.file_name,
+                file_sha256_value=digest,
+                file_size=self.summary.file_size,
+                format=self.summary.format,
+                packet_count=self.summary.packet_count,
+                wire_bytes=self.summary.wire_bytes,
+                first_seen=self.summary.first_seen,
+                last_seen=self.summary.last_seen,
+                duration_seconds=self.summary.duration_seconds,
+                likely_device_ip=self.summary.likely_device_ip,
+                summary_text=str(investigator.get("plain_summary") or ""),
+            )
+        except Exception as exc:
+            self._error("PCAP", "Failed to save PCAP analysis to project.", str(exc))
+            return
+
+        self._saved_source_id = source_id
+        self.btn_save_project.setText("Saved to Project")
+        self._info("PCAP", "PCAP analysis saved to active project.", f"Source id: {source_id}")
+        self._refresh_activity()
+
+    def add_summary_to_notes(self):
+        if not self.summary:
+            self._info("Notes", "Open a PCAP file first.")
+            return
+
+        project_id = self._current_project_id()
+        if project_id is None:
+            self._info("Notes", "Open an active project first.")
+            return
+
+        block = self._make_notes_block()
+        if not block:
+            return
+
+        try:
+            existing = self.app.txt_notes.toPlainText() or ""
+            if existing.strip():
+                if not existing.endswith("\n"):
+                    existing += "\n"
+                new_text = existing + "\n" + block
+            else:
+                new_text = block
+
+            self.app.txt_notes.setPlainText(new_text)
+            self.app._notes_dirty = True
+            self.app._flush_notes()
+            add_activity(project_id, "pcap_notes_added", self.summary.file_name)
+            self._refresh_activity()
+        except Exception as exc:
+            self._error("Notes", "Failed to add PCAP summary to notes.", str(exc))
+            return
+
+        if hasattr(self.app, "tabs"):
+            self.app.tabs.setCurrentIndex(3)
+        self._info("Notes", "PCAP summary added to project notes.")
+
+    def _make_notes_block(self) -> str:
+        if not self.summary:
+            return ""
+
+        investigator = build_investigator_view(self.summary)
+        ts = datetime.now().strftime("%d.%m.%Y. %H:%M:%S")
+        lines = [
+            f"[PCAP summary added: {ts}]",
+            f"File: {self.summary.file_name}",
+            f"Source: {self.summary.file_path}",
+            f"Likely device IP: {self.summary.likely_device_ip or '-'}",
+            f"Capture period: {self.summary.first_seen or '-'} - {self.summary.last_seen or '-'}",
+            f"Packets: {self.summary.packet_count:,}",
+            f"Volume: {human_bytes(self.summary.wire_bytes, precision=2)}",
+            "",
+            str(investigator.get("plain_summary") or ""),
+            "",
+            "Key points:",
+        ]
+        for point in investigator.get("key_points") or []:
+            lines.append(f"- {point}")
+        lines.extend([
+            "",
+            "Limitations:",
+        ])
+        for item in investigator.get("limitations") or []:
+            lines.append(f"- {item}")
+        lines.append("-" * 60)
+        return "\n".join(lines) + "\n"
+
+    def _confirm_project_device_match(self, project_id: int) -> bool:
+        current_ip = (self.summary.likely_device_ip if self.summary else "").strip()
+        if not current_ip:
+            return self._confirm(
+                "PCAP",
+                "Likely device IP could not be determined.",
+                "The PCAP can still be saved, but ViaNyquist cannot compare it with previous PCAP sources in this project.",
+                ok_text="Save anyway",
+                cancel_text="Cancel",
+            )
+
+        previous_ips = [ip for ip in list_project_pcap_device_ips(project_id) if ip and ip != current_ip]
+        if not previous_ips:
+            return True
+
+        return self._confirm(
+            "PCAP device mismatch",
+            "This PCAP appears to describe a different device IP than previous PCAP sources in this project.",
+            (
+                f"Current likely device IP: {current_ip}\n"
+                f"Previous project PCAP device IPs: {', '.join(previous_ips[:8])}\n\n"
+                "Save only if this capture belongs to the same target/project."
+            ),
+            ok_text="Save anyway",
+            cancel_text="Cancel",
+        )
+
+    def _current_project_id(self) -> int | None:
+        return getattr(self.app, "current_project_id", None)
+
+    def _info(self, title: str, message: str, details: str = "") -> None:
+        if hasattr(self.app, "_message_dialog"):
+            self.app._message_dialog(title, message, details, width=520)
+        else:
+            QMessageBox.information(self, title, message if not details else f"{message}\n\n{details}")
+
+    def _error(self, title: str, message: str, details: str = "") -> None:
+        if hasattr(self.app, "_message_dialog"):
+            self.app._message_dialog(title, message, details, width=560)
+        else:
+            QMessageBox.critical(self, title, message if not details else f"{message}\n\n{details}")
+
+    def _confirm(
+        self,
+        title: str,
+        message: str,
+        details: str = "",
+        ok_text: str = "OK",
+        cancel_text: str = "Cancel",
+    ) -> bool:
+        if hasattr(self.app, "_confirm_dialog"):
+            return self.app._confirm_dialog(
+                title=title,
+                message=message,
+                details=details,
+                ok_text=ok_text,
+                cancel_text=cancel_text,
+                width=560,
+            )
+        return QMessageBox.question(self, title, message) == QMessageBox.Yes
+
+    def _refresh_activity(self) -> None:
+        if hasattr(self.app, "refresh_activity_ui"):
+            self.app.refresh_activity_ui()

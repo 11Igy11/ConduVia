@@ -1100,7 +1100,7 @@ class App(QWidget):
         self.listing_page = ListingPage()
         self.pages.addWidget(self.listing_page)
 
-        self.pcap_page = PcapPage()
+        self.pcap_page = PcapPage(self)
         self.pages.addWidget(self.pcap_page)
 
         self.pages.setCurrentIndex(self.IDX_PROJECTS)
