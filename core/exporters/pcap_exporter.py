@@ -40,6 +40,7 @@ def export_pcap_summary_html(file_path: str, summary: PcapSummary) -> None:
         })
 
     readable = summary.readable_samples[:200]
+    artifacts = summary.artifacts[:400]
     investigator = build_investigator_view(summary)
     generated_at = datetime.now().strftime("%d.%m.%Y %H:%M:%S")
     period = f"{summary.first_seen or '-'} - {summary.last_seen or '-'}"
@@ -136,6 +137,11 @@ tr:nth-child(even) td {{ background:#f9fafb; }}
   <div class="section">
     <h2>Readable Evidence</h2>
     <table><thead><tr>{headers([('time', 'Time'), ('type', 'Type'), ('source', 'Source'), ('destination', 'Destination'), ('value', 'Visible Value')])}</tr></thead><tbody>{rows(readable, [('time', 'Time'), ('type', 'Type'), ('source', 'Source'), ('destination', 'Destination'), ('value', 'Visible Value')])}</tbody></table>
+  </div>
+
+  <div class="section">
+    <h2>Extracted Artifacts</h2>
+    <table><thead><tr>{headers([('category', 'Category'), ('type', 'Type'), ('value', 'Value'), ('visibility', 'Visibility'), ('source', 'Source'), ('destination', 'Destination'), ('count', 'Count'), ('explanation', 'Explanation')])}</tr></thead><tbody>{rows(artifacts, [('category', 'Category'), ('type', 'Type'), ('value', 'Value'), ('visibility', 'Visibility'), ('source', 'Source'), ('destination', 'Destination'), ('count', 'Count'), ('explanation', 'Explanation')])}</tbody></table>
   </div>
 
   <div class="section">

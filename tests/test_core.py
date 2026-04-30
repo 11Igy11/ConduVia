@@ -268,6 +268,8 @@ class PcapAnalyzerTests(unittest.TestCase):
         self.assertTrue(any(sample["type"] == "HTTP cleartext" for sample in summary.readable_samples))
         self.assertEqual(len(summary.flows), 2)
         self.assertTrue(summary.hourly_activity)
+        self.assertTrue(any(a["category"] == "Web" and a["type"] == "HTTP host" for a in summary.artifacts))
+        self.assertTrue(any(a["category"] == "Web" and a["type"] == "HTTP user-agent" for a in summary.artifacts))
 
         investigator = build_investigator_view(summary)
 
@@ -275,6 +277,28 @@ class PcapAnalyzerTests(unittest.TestCase):
         self.assertTrue(investigator["service_rows"])
         self.assertTrue(investigator["activity_rows"])
         self.assertTrue(investigator["visibility_rows"])
+
+    def test_pcap_artifacts_redact_sensitive_http_values(self):
+        with temporary_directory() as tmp:
+            path = Path(tmp) / "sensitive.pcap"
+            _write_sample_pcap(
+                path,
+                http_payload=(
+                    b"GET /private HTTP/1.1\r\n"
+                    b"Host: example.com\r\n"
+                    b"Authorization: Basic dXNlcjpwYXNz\r\n"
+                    b"Cookie: session=abcdef1234567890\r\n"
+                    b"\r\n"
+                ),
+            )
+
+            summary = analyze_pcap(path)
+
+        sensitive = [a for a in summary.artifacts if a["category"] == "Credentials"]
+
+        self.assertTrue(any(a["type"] == "HTTP Basic credentials" for a in sensitive))
+        self.assertTrue(any("[redacted]" in a["value"] or set(a["value"]) == {"*"} for a in sensitive))
+        self.assertFalse(any("user:pass" == a["value"] for a in sensitive))
 
     def test_pcap_sources_are_persisted_per_project(self):
         with temporary_directory() as tmp:
@@ -381,7 +405,8 @@ class AIServiceTests(unittest.TestCase):
         self.assertIn("Limits Of Interpretation", prompt)
 
 
-def _write_sample_pcap(path: Path) -> None:
+def _write_sample_pcap(path: Path, http_payload: bytes | None = None) -> None:
+    http_payload = http_payload or b"GET / HTTP/1.1\r\nHost: example.com\r\nUser-Agent: ViaNyquistTest\r\n\r\n"
     packets = [
         _ether_ipv4_udp_packet(
             "10.0.0.10",
@@ -395,7 +420,7 @@ def _write_sample_pcap(path: Path) -> None:
             "93.184.216.34",
             50000,
             80,
-            b"GET / HTTP/1.1\r\nHost: example.com\r\nUser-Agent: ViaNyquistTest\r\n\r\n",
+            http_payload,
         ),
     ]
 
