@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import datetime as _dt
+import base64
+import re
 import socket
 import string
 import struct
@@ -38,6 +40,8 @@ APP_PORT_HINTS = {
 
 PRINTABLE_BYTES = set(bytes(string.printable, "ascii")) | {9, 10, 13}
 
+ARTIFACT_LIMIT_PER_KIND = 300
+
 
 @dataclass
 class PcapSummary:
@@ -60,6 +64,7 @@ class PcapSummary:
     tls_sni: list[dict[str, Any]] = field(default_factory=list)
     http_hosts: list[dict[str, Any]] = field(default_factory=list)
     readable_samples: list[dict[str, Any]] = field(default_factory=list)
+    artifacts: list[dict[str, Any]] = field(default_factory=list)
     hourly_activity: list[dict[str, Any]] = field(default_factory=list)
     flows: list[dict[str, Any]] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
@@ -102,6 +107,7 @@ class _PcapAccumulator:
         self.http_hosts: Counter[str] = Counter()
         self.hourly_activity: Counter[str] = Counter()
         self.readable_samples: list[dict[str, Any]] = []
+        self.artifacts: dict[tuple[str, str, str], dict[str, Any]] = {}
         self.flow_map: dict[tuple[Any, ...], dict[str, Any]] = {}
 
     def add_packet(self, packet: _Packet) -> None:
@@ -203,6 +209,99 @@ class _PcapAccumulator:
             self._store_sample(packet, evidence_type, value)
             self._annotate_flow(packet, evidence_type, value)
 
+        self._inspect_artifacts(packet, text or "")
+
+    def _inspect_artifacts(self, packet: _Packet, text: str) -> None:
+        payload = packet.payload or b""
+
+        if packet.protocol in (6, 17) and (packet.src_port == 53 or packet.dst_port == 53):
+            query = _parse_dns_query(payload)
+            if query:
+                self._add_artifact("Web", "DNS query", query, packet, "metadata", "DNS request name visible in plaintext metadata.")
+
+        if packet.protocol == 6:
+            sni = _parse_tls_sni(payload)
+            if sni:
+                self._add_artifact("Web", "TLS SNI", sni, packet, "metadata", "TLS server name indication visible before encrypted content.")
+
+        if packet.protocol == 17 and (packet.src_port in (5353, 5355) or packet.dst_port in (5353, 5355)):
+            name = _parse_dns_query(payload)
+            if name:
+                label = "mDNS query" if packet.src_port == 5353 or packet.dst_port == 5353 else "LLMNR query"
+                self._add_artifact("Local Network", label, name, packet, "metadata", "Local name discovery request.")
+
+        if packet.protocol == 17 and (packet.src_port == 1900 or packet.dst_port == 1900) and text:
+            self._add_artifact("Local Network", "SSDP discovery", text[:500], packet, "plaintext", "Local UPnP/SSDP discovery payload.")
+
+        if packet.protocol == 17 and (packet.src_port == 137 or packet.dst_port == 137):
+            nb_name = _parse_nbns_name(payload)
+            if nb_name:
+                self._add_artifact("Windows / Enterprise", "NBNS name", nb_name, packet, "metadata", "NetBIOS name service query.")
+
+        if packet.protocol == 17 and (packet.src_port in (67, 68) or packet.dst_port in (67, 68)):
+            for artifact_type, value in _parse_dhcp_artifacts(payload):
+                self._add_artifact("Local Network", artifact_type, value, packet, "metadata", "DHCP option visible in plaintext.")
+
+        if text:
+            for artifact_type, value, sensitive in _parse_http_artifacts(text):
+                category = "Credentials" if sensitive else "Web"
+                visibility = "plaintext-sensitive" if sensitive else "plaintext"
+                explanation = "Sensitive HTTP value visible in plaintext." if sensitive else "HTTP header/request visible in plaintext."
+                self._add_artifact(category, artifact_type, value, packet, visibility, explanation, sensitive=sensitive)
+
+            for artifact_type, value, sensitive in _parse_plaintext_credentials(text):
+                visibility = "plaintext-sensitive" if sensitive else "plaintext"
+                self._add_artifact("Credentials", artifact_type, value, packet, visibility, "Credential-like command visible in plaintext.", sensitive=sensitive)
+
+        for artifact_type, value in _parse_ntlm_strings(payload):
+            self._add_artifact("Windows / Enterprise", artifact_type, value, packet, "metadata", "NTLMSSP string visible in captured payload.")
+
+    def _add_artifact(
+        self,
+        category: str,
+        artifact_type: str,
+        value: str,
+        packet: _Packet,
+        visibility: str,
+        explanation: str,
+        *,
+        sensitive: bool = False,
+    ) -> None:
+        value = (value or "").strip()
+        if not value:
+            return
+
+        redacted = _redact_value(value) if sensitive else value
+        key = (category, artifact_type, redacted.casefold())
+        existing = self.artifacts.get(key)
+        if existing:
+            existing["count"] += 1
+            existing["last_seen"] = _format_ts(packet.ts)
+            return
+
+        kind_count = sum(
+            1
+            for item in self.artifacts.values()
+            if item.get("category") == category and item.get("type") == artifact_type
+        )
+        if kind_count >= ARTIFACT_LIMIT_PER_KIND:
+            return
+
+        self.artifacts[key] = {
+            "category": category,
+            "type": artifact_type,
+            "value": redacted[:500],
+            "raw_value": "" if sensitive else value[:500],
+            "sensitive": sensitive,
+            "visibility": visibility,
+            "source": _endpoint(packet.src_ip, packet.src_port),
+            "destination": _endpoint(packet.dst_ip, packet.dst_port),
+            "first_seen": _format_ts(packet.ts),
+            "last_seen": _format_ts(packet.ts),
+            "count": 1,
+            "explanation": explanation,
+        }
+
     def _store_sample(self, packet: _Packet, evidence_type: str, value: str) -> None:
         if len(self.readable_samples) >= self.max_evidence:
             return
@@ -289,6 +388,10 @@ class _PcapAccumulator:
                 for k, v in self.http_hosts.most_common(30)
             ],
             readable_samples=self.readable_samples,
+            artifacts=sorted(
+                self.artifacts.values(),
+                key=lambda item: (str(item.get("category", "")), str(item.get("type", "")), -int(item.get("count", 0))),
+            ),
             hourly_activity=[
                 {"hour": k, "packets": v}
                 for k, v in sorted(self.hourly_activity.items())
@@ -653,6 +756,65 @@ def _parse_dns_query(payload: bytes) -> str | None:
     return ".".join(labels) if labels else None
 
 
+def _parse_nbns_name(payload: bytes) -> str | None:
+    if len(payload) < 45:
+        return None
+    flags = struct.unpack("!H", payload[2:4])[0]
+    if flags & 0x8000:
+        return None
+    qd_count = struct.unpack("!H", payload[4:6])[0]
+    if qd_count < 1:
+        return None
+    length = payload[12]
+    if length != 32 or len(payload) < 45:
+        return None
+    encoded = payload[13:45]
+    try:
+        raw = []
+        for i in range(0, 32, 2):
+            high = encoded[i] - 65
+            low = encoded[i + 1] - 65
+            if high < 0 or low < 0:
+                return None
+            raw.append((high << 4) | low)
+        name = bytes(raw[:15]).rstrip(b" \x00").decode("ascii", "ignore").strip()
+    except Exception:
+        return None
+    return name or None
+
+
+def _parse_dhcp_artifacts(payload: bytes) -> list[tuple[str, str]]:
+    if len(payload) < 240 or payload[236:240] != b"\x63\x82\x53\x63":
+        return []
+
+    artifacts: list[tuple[str, str]] = []
+    offset = 240
+    while offset < len(payload):
+        code = payload[offset]
+        offset += 1
+        if code == 255:
+            break
+        if code == 0:
+            continue
+        if offset >= len(payload):
+            break
+        length = payload[offset]
+        offset += 1
+        value = payload[offset:offset + length]
+        offset += length
+
+        if code == 12:
+            artifacts.append(("DHCP hostname", value.decode("ascii", "ignore")))
+        elif code == 15:
+            artifacts.append(("DHCP domain", value.decode("ascii", "ignore")))
+        elif code == 60:
+            artifacts.append(("DHCP vendor class", value.decode("ascii", "ignore")))
+        elif code == 81 and len(value) > 3:
+            artifacts.append(("DHCP FQDN", value[3:].decode("ascii", "ignore")))
+
+    return [(kind, val.strip()) for kind, val in artifacts if val.strip()]
+
+
 def _parse_tls_sni(payload: bytes) -> str | None:
     try:
         if len(payload) < 43 or payload[0] != 22 or payload[5] != 1:
@@ -694,6 +856,131 @@ def _payload_text(payload: bytes) -> str | None:
     text = sample.decode("utf-8", "replace")
     lines = [line.strip() for line in text.replace("\r", "\n").split("\n") if line.strip()]
     return " | ".join(lines[:5])[:500] if lines else None
+
+
+def _payload_lines(text: str) -> list[str]:
+    if not text:
+        return []
+    normalized = text.replace("\r", "\n").replace("|", "\n")
+    return [line.strip() for line in normalized.split("\n") if line.strip()]
+
+
+def _parse_http_artifacts(text: str) -> list[tuple[str, str, bool]]:
+    lines = _payload_lines(text)
+    if not lines:
+        return []
+
+    out: list[tuple[str, str, bool]] = []
+    first = lines[0]
+    if re.match(r"^(GET|POST|PUT|DELETE|HEAD|OPTIONS|PATCH)\s+", first, re.I):
+        out.append(("HTTP request", first, False))
+    elif first.upper().startswith("HTTP/"):
+        out.append(("HTTP response", first, False))
+
+    for line in lines[:100]:
+        low = line.lower()
+        if low.startswith("host:"):
+            out.append(("HTTP host", line[5:].strip(), False))
+        elif low.startswith("user-agent:"):
+            out.append(("HTTP user-agent", line[11:].strip(), False))
+        elif low.startswith("authorization:"):
+            out.append(("HTTP authorization", line, True))
+            match = re.match(r"authorization:\s*basic\s+(.+)", line, re.I)
+            if match:
+                decoded = _decode_basic_auth(match.group(1).strip())
+                if decoded:
+                    out.append(("HTTP Basic credentials", decoded, True))
+        elif low.startswith("proxy-authorization:"):
+            out.append(("HTTP proxy authorization", line, True))
+        elif low.startswith("cookie:"):
+            out.append(("HTTP cookie", line, True))
+        elif low.startswith("set-cookie:"):
+            out.append(("HTTP set-cookie", line, True))
+        elif _looks_like_secret_parameter(line):
+            out.append(("Possible web secret parameter", line, True))
+
+    return out
+
+
+def _parse_plaintext_credentials(text: str) -> list[tuple[str, str, bool]]:
+    out: list[tuple[str, str, bool]] = []
+    for line in _payload_lines(text)[:100]:
+        low = line.lower()
+        if re.match(r"^(user|acct)\s+\S+", low):
+            out.append(("Plaintext username command", line, False))
+        elif re.match(r"^pass\s+\S+", low):
+            out.append(("Plaintext password command", line, True))
+        elif re.match(r"^a\d+\s+login\s+\S+", low) or re.match(r"^login\s+\S+", low):
+            out.append(("IMAP login command", line, True))
+        elif low.startswith("auth login") or low.startswith("auth plain"):
+            out.append(("SMTP auth command", line, True))
+        elif re.search(r"(^|[&; ])(password|passwd|pwd)=", low):
+            out.append(("Possible plaintext password parameter", line, True))
+    return out
+
+
+def _parse_ntlm_strings(payload: bytes) -> list[tuple[str, str]]:
+    idx = payload.find(b"NTLMSSP\x00")
+    if idx < 0:
+        return []
+
+    region = payload[max(0, idx - 600):idx + 5000]
+    out: list[tuple[str, str]] = [("NTLMSSP marker", "NTLMSSP visible")]
+    seen: set[str] = set()
+
+    for match in re.finditer(rb"[A-Za-z0-9_.\\$@-]{4,}", region):
+        value = match.group(0).decode("ascii", "ignore")
+        if value not in seen and _useful_ntlm_string(value):
+            seen.add(value)
+            out.append(("NTLMSSP visible string", value))
+
+    chars: list[str] = []
+    for i in range(0, len(region) - 1, 2):
+        c, z = region[i], region[i + 1]
+        if z == 0 and 32 <= c < 127:
+            chars.append(chr(c))
+            continue
+        if len(chars) >= 4:
+            value = "".join(chars)
+            if value not in seen and _useful_ntlm_string(value):
+                seen.add(value)
+                out.append(("NTLMSSP visible string", value))
+        chars = []
+    if len(chars) >= 4:
+        value = "".join(chars)
+        if value not in seen and _useful_ntlm_string(value):
+            out.append(("NTLMSSP visible string", value))
+
+    return out[:25]
+
+
+def _decode_basic_auth(value: str) -> str:
+    try:
+        return base64.b64decode(value.encode("ascii"), validate=True).decode("utf-8", "replace")
+    except Exception:
+        return ""
+
+
+def _looks_like_secret_parameter(line: str) -> bool:
+    low = line.lower()
+    return bool(re.search(r"(^|[?&; ])(password|passwd|pwd|token|auth|session|sid)=", low))
+
+
+def _useful_ntlm_string(value: str) -> bool:
+    if not value or len(value) < 4:
+        return False
+    if value.upper() in {"NTLMSSP", "HTTP", "SMB"}:
+        return False
+    return any(ch.isalpha() for ch in value)
+
+
+def _redact_value(value: str) -> str:
+    value = value.strip()
+    if not value:
+        return ""
+    if len(value) <= 8:
+        return "*" * len(value)
+    return f"{value[:4]}...{value[-2:]} [redacted]"
 
 
 def _looks_like_http(packet: _Packet, text: str) -> bool:

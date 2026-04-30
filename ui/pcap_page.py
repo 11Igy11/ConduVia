@@ -8,6 +8,7 @@ from typing import Any
 from PySide6.QtCore import QAbstractTableModel, QModelIndex, QObject, QThread, Qt, Signal
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QComboBox,
     QFileDialog,
     QFrame,
     QGridLayout,
@@ -104,6 +105,7 @@ class PcapPage(QWidget):
         self._thread: QThread | None = None
         self._worker: PcapWorker | None = None
         self._saved_source_id: int | None = None
+        self._all_artifacts: list[dict[str, Any]] = []
         self._build_ui()
 
     def _build_ui(self):
@@ -149,6 +151,7 @@ class PcapPage(QWidget):
         self.tabs.addTab(self._build_investigator_tab(), "Investigator View")
         self.tabs.addTab(self._build_overview_tab(), "Overview")
         self.tabs.addTab(self._build_evidence_tab(), "Evidence")
+        self.tabs.addTab(self._build_artifacts_tab(), "Artifacts")
         self.tabs.addTab(self._build_connections_tab(), "Connections")
         root.addWidget(self.tabs, 1)
 
@@ -320,6 +323,56 @@ class PcapPage(QWidget):
         layout.addWidget(splitter, 1)
         return page
 
+    def _build_artifacts_tab(self) -> QWidget:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(8, 8, 8, 8)
+        layout.setSpacing(10)
+
+        controls = QHBoxLayout()
+        controls.setSpacing(10)
+        controls.addWidget(QLabel("Category"))
+        self.cmb_artifact_category = QComboBox()
+        self.cmb_artifact_category.setMinimumWidth(240)
+        self.cmb_artifact_category.currentIndexChanged.connect(self._apply_artifact_filter)
+        self.lbl_artifact_count = QLabel("")
+        self.lbl_artifact_count.setObjectName("MutedLabel")
+        controls.addWidget(self.cmb_artifact_category)
+        controls.addWidget(self.lbl_artifact_count)
+        controls.addStretch()
+        layout.addLayout(controls)
+
+        columns = [
+            ("category", "Category"),
+            ("type", "Type"),
+            ("value", "Value"),
+            ("count", "Count"),
+            ("visibility", "Visibility"),
+            ("first_seen", "First Seen"),
+            ("last_seen", "Last Seen"),
+        ]
+
+        self.tbl_artifacts = self._table(
+            columns,
+            fixed_widths={0: 150, 1: 180, 3: 80, 4: 150, 5: 170, 6: 170},
+            stretch_columns=[2],
+        )
+        self.tbl_artifacts.setMinimumHeight(420)
+        self.tbl_artifacts.selectionModel().currentRowChanged.connect(self._on_artifact_selected)
+
+        self.txt_artifact_detail = QTextEdit()
+        self.txt_artifact_detail.setReadOnly(True)
+        self.txt_artifact_detail.setMinimumWidth(360)
+        self.txt_artifact_detail.setPlaceholderText("Select an artifact to see source, destination and explanation.")
+
+        splitter = QSplitter(Qt.Horizontal)
+        splitter.addWidget(self._group("Extracted artifacts", self.tbl_artifacts))
+        splitter.addWidget(self._group("Artifact details", self.txt_artifact_detail))
+        splitter.setStretchFactor(0, 1)
+        splitter.setStretchFactor(1, 0)
+        layout.addWidget(splitter, 1)
+        return page
+
     def _build_connections_tab(self) -> QWidget:
         page = QWidget()
         layout = QVBoxLayout(page)
@@ -440,6 +493,7 @@ class PcapPage(QWidget):
         self._set_table(self.tbl_sni, summary.tls_sni)
         self._set_table(self.tbl_http, summary.http_hosts)
         self._set_table(self.tbl_samples, summary.readable_samples)
+        self._set_artifact_tables(summary.artifacts)
         self._set_table(self.tbl_connections, summary.flows)
 
     def _on_error(self, message: str):
@@ -456,6 +510,68 @@ class PcapPage(QWidget):
         model = table.model()
         if isinstance(model, DictTableModel):
             model.set_rows(rows)
+
+    def _set_artifact_tables(self, artifacts: list[dict[str, Any]]) -> None:
+        self._all_artifacts = artifacts or []
+        counts: dict[str, int] = {}
+        for artifact in self._all_artifacts:
+            category = str(artifact.get("category") or "Other")
+            counts[category] = counts.get(category, 0) + 1
+
+        self.cmb_artifact_category.blockSignals(True)
+        self.cmb_artifact_category.clear()
+        self.cmb_artifact_category.addItem(f"All artifacts ({len(self._all_artifacts)})", "")
+        for category, count in sorted(counts.items()):
+            self.cmb_artifact_category.addItem(f"{category} ({count})", category)
+        self.cmb_artifact_category.blockSignals(False)
+        self._apply_artifact_filter()
+
+    def _apply_artifact_filter(self, *args) -> None:
+        category = self.cmb_artifact_category.currentData() if hasattr(self, "cmb_artifact_category") else ""
+        rows = [
+            artifact
+            for artifact in self._all_artifacts
+            if not category or str(artifact.get("category") or "Other") == category
+        ]
+        self._set_table(self.tbl_artifacts, rows)
+        self.lbl_artifact_count.setText(f"{len(rows)} shown")
+        if rows:
+            self.tbl_artifacts.selectRow(0)
+        else:
+            self.txt_artifact_detail.clear()
+
+    def _on_artifact_selected(self, current: QModelIndex, previous: QModelIndex | None = None) -> None:
+        model = self.tbl_artifacts.model()
+        if not isinstance(model, DictTableModel) or not current.isValid():
+            self.txt_artifact_detail.clear()
+            return
+        if current.row() < 0 or current.row() >= len(model.rows):
+            self.txt_artifact_detail.clear()
+            return
+
+        artifact = model.rows[current.row()]
+        detail_lines = [
+            f"Category: {artifact.get('category') or '-'}",
+            f"Type: {artifact.get('type') or '-'}",
+            f"Value: {artifact.get('value') or '-'}",
+            f"Count: {artifact.get('count') or 0}",
+            f"Visibility: {artifact.get('visibility') or '-'}",
+            "",
+            f"Source: {artifact.get('source') or '-'}",
+            f"Destination: {artifact.get('destination') or '-'}",
+            f"First seen: {artifact.get('first_seen') or '-'}",
+            f"Last seen: {artifact.get('last_seen') or '-'}",
+            "",
+            "Meaning:",
+            str(artifact.get("explanation") or "-"),
+        ]
+        if artifact.get("sensitive"):
+            detail_lines.extend([
+                "",
+                "Sensitive value:",
+                "The value was visible in plaintext capture data and is redacted in ViaNyquist.",
+            ])
+        self.txt_artifact_detail.setPlainText("\n".join(detail_lines))
 
     def _overview_text(self, summary: PcapSummary) -> str:
         lines = [
@@ -615,12 +731,30 @@ class PcapPage(QWidget):
             lines.append(f"- {point}")
         lines.extend([
             "",
+            "Artifact categories:",
+        ])
+        for row in self._artifact_category_counts():
+            lines.append(f"- {row['category']}: {row['count']}")
+        lines.extend([
+            "",
             "Limitations:",
         ])
         for item in investigator.get("limitations") or []:
             lines.append(f"- {item}")
         lines.append("-" * 60)
         return "\n".join(lines) + "\n"
+
+    def _artifact_category_counts(self) -> list[dict[str, Any]]:
+        if not self.summary:
+            return []
+        counts: dict[str, int] = {}
+        for artifact in self.summary.artifacts or []:
+            category = str(artifact.get("category") or "Other")
+            counts[category] = counts.get(category, 0) + 1
+        return [
+            {"category": category, "count": count}
+            for category, count in sorted(counts.items())
+        ]
 
     def _confirm_project_device_match(self, project_id: int) -> bool:
         current_ip = (self.summary.likely_device_ip if self.summary else "").strip()
