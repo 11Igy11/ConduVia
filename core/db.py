@@ -5,6 +5,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 import os
+import hashlib
 from typing import Optional, Iterable
 
 # Project root = parent of /core
@@ -21,6 +22,26 @@ class Project:
     updated_at: str
     target_identifier: str = ""
     target_type: str = ""
+
+@dataclass
+class PcapSource:
+    id: int
+    project_id: int
+    file_path: str
+    file_name: str
+    file_sha256: str
+    file_size: int
+    analyzed_at: str
+    format: str
+    packet_count: int
+    wire_bytes: int
+    first_seen: str
+    last_seen: str
+    duration_seconds: float
+    likely_device_ip: str
+    summary_text: str
+    created_at: str
+    updated_at: str
 
 @contextmanager
 def _connect(db_path: Path):
@@ -82,6 +103,33 @@ def init_db(db_path: Path = DEFAULT_DB_PATH) -> None:
                 folder_path TEXT NOT NULL,
                 loaded_at TEXT NOT NULL DEFAULT (datetime('now')),
                 FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
+            );
+            """
+        )
+
+        # --- PCAP sources (project evidence inputs) ---
+        con.execute(
+            """
+            CREATE TABLE IF NOT EXISTS pcap_sources (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_id INTEGER NOT NULL,
+                file_path TEXT NOT NULL,
+                file_name TEXT NOT NULL DEFAULT '',
+                file_sha256 TEXT NOT NULL DEFAULT '',
+                file_size INTEGER NOT NULL DEFAULT 0,
+                analyzed_at TEXT NOT NULL DEFAULT (datetime('now')),
+                format TEXT NOT NULL DEFAULT '',
+                packet_count INTEGER NOT NULL DEFAULT 0,
+                wire_bytes INTEGER NOT NULL DEFAULT 0,
+                first_seen TEXT NOT NULL DEFAULT '',
+                last_seen TEXT NOT NULL DEFAULT '',
+                duration_seconds REAL NOT NULL DEFAULT 0,
+                likely_device_ip TEXT NOT NULL DEFAULT '',
+                summary_text TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+                FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE,
+                UNIQUE(project_id, file_sha256)
             );
             """
         )
@@ -155,6 +203,8 @@ def init_db(db_path: Path = DEFAULT_DB_PATH) -> None:
 
         # --- Indexes (performance) ---
         con.execute("CREATE INDEX IF NOT EXISTS idx_datasets_project_loaded ON datasets(project_id, loaded_at);")
+        con.execute("CREATE INDEX IF NOT EXISTS idx_pcap_sources_project_created ON pcap_sources(project_id, created_at);")
+        con.execute("CREATE INDEX IF NOT EXISTS idx_pcap_sources_project_device ON pcap_sources(project_id, likely_device_ip);")
         con.execute("CREATE INDEX IF NOT EXISTS idx_findings_project_created ON findings(project_id, created_at);")
         con.execute("CREATE INDEX IF NOT EXISTS idx_activity_project_created ON activity_log(project_id, created_at);")
 
@@ -429,6 +479,187 @@ def list_recent_datasets(project_id: int, limit: int = 10, db_path: Path = DEFAU
             (project_id, limit),
         ).fetchall()
     return [str(r["folder_path"]) for r in rows]
+
+# ---------------- PCAP sources ----------------
+def file_sha256(file_path: str | Path, *, chunk_size: int = 1024 * 1024) -> str:
+    h = hashlib.sha256()
+    with Path(file_path).open("rb") as f:
+        while True:
+            chunk = f.read(chunk_size)
+            if not chunk:
+                break
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def add_pcap_source(
+    project_id: int,
+    *,
+    file_path: str,
+    file_sha256_value: str,
+    file_size: int,
+    file_name: str = "",
+    format: str = "",
+    packet_count: int = 0,
+    wire_bytes: int = 0,
+    first_seen: str = "",
+    last_seen: str = "",
+    duration_seconds: float = 0.0,
+    likely_device_ip: str = "",
+    summary_text: str = "",
+    db_path: Path = DEFAULT_DB_PATH,
+) -> int:
+    file_path = (file_path or "").strip()
+    file_sha256_value = (file_sha256_value or "").strip()
+    if not file_path:
+        raise ValueError("PCAP file path is required.")
+    if not file_sha256_value:
+        raise ValueError("PCAP file hash is required.")
+
+    file_name = file_name or Path(file_path).name
+
+    with _connect(db_path) as con:
+        existing = con.execute(
+            """
+            SELECT id
+            FROM pcap_sources
+            WHERE project_id = ? AND file_sha256 = ?;
+            """,
+            (project_id, file_sha256_value),
+        ).fetchone()
+
+        if existing:
+            source_id = int(existing["id"])
+            con.execute(
+                """
+                UPDATE pcap_sources
+                SET
+                    file_path = ?,
+                    file_name = ?,
+                    file_size = ?,
+                    analyzed_at = datetime('now'),
+                    format = ?,
+                    packet_count = ?,
+                    wire_bytes = ?,
+                    first_seen = ?,
+                    last_seen = ?,
+                    duration_seconds = ?,
+                    likely_device_ip = ?,
+                    summary_text = ?,
+                    updated_at = datetime('now')
+                WHERE id = ?;
+                """,
+                (
+                    file_path,
+                    file_name,
+                    int(file_size or 0),
+                    format or "",
+                    int(packet_count or 0),
+                    int(wire_bytes or 0),
+                    first_seen or "",
+                    last_seen or "",
+                    float(duration_seconds or 0.0),
+                    likely_device_ip or "",
+                    summary_text or "",
+                    source_id,
+                ),
+            )
+        else:
+            cur = con.execute(
+                """
+                INSERT INTO pcap_sources (
+                    project_id,
+                    file_path,
+                    file_name,
+                    file_sha256,
+                    file_size,
+                    format,
+                    packet_count,
+                    wire_bytes,
+                    first_seen,
+                    last_seen,
+                    duration_seconds,
+                    likely_device_ip,
+                    summary_text
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+                """,
+                (
+                    project_id,
+                    file_path,
+                    file_name,
+                    file_sha256_value,
+                    int(file_size or 0),
+                    format or "",
+                    int(packet_count or 0),
+                    int(wire_bytes or 0),
+                    first_seen or "",
+                    last_seen or "",
+                    float(duration_seconds or 0.0),
+                    likely_device_ip or "",
+                    summary_text or "",
+                ),
+            )
+            source_id = int(cur.lastrowid)
+
+    touch_project(project_id, db_path=db_path)
+    add_activity(project_id, "pcap_saved", f"#{source_id} {file_name}", db_path=db_path)
+    return source_id
+
+
+def list_pcap_sources(project_id: int, limit: int = 50, db_path: Path = DEFAULT_DB_PATH) -> list[PcapSource]:
+    with _connect(db_path) as con:
+        rows = con.execute(
+            """
+            SELECT *
+            FROM pcap_sources
+            WHERE project_id = ?
+            ORDER BY created_at DESC, id DESC
+            LIMIT ?;
+            """,
+            (project_id, limit),
+        ).fetchall()
+
+    return [_pcap_source_from_row(r) for r in rows]
+
+
+def list_project_pcap_device_ips(project_id: int, db_path: Path = DEFAULT_DB_PATH) -> list[str]:
+    with _connect(db_path) as con:
+        rows = con.execute(
+            """
+            SELECT DISTINCT likely_device_ip
+            FROM pcap_sources
+            WHERE project_id = ?
+              AND likely_device_ip IS NOT NULL
+              AND likely_device_ip != ''
+            ORDER BY likely_device_ip;
+            """,
+            (project_id,),
+        ).fetchall()
+
+    return [str(r["likely_device_ip"] or "") for r in rows if str(r["likely_device_ip"] or "").strip()]
+
+
+def _pcap_source_from_row(r: sqlite3.Row) -> PcapSource:
+    return PcapSource(
+        id=int(r["id"]),
+        project_id=int(r["project_id"]),
+        file_path=str(r["file_path"] or ""),
+        file_name=str(r["file_name"] or ""),
+        file_sha256=str(r["file_sha256"] or ""),
+        file_size=int(r["file_size"] or 0),
+        analyzed_at=str(r["analyzed_at"] or ""),
+        format=str(r["format"] or ""),
+        packet_count=int(r["packet_count"] or 0),
+        wire_bytes=int(r["wire_bytes"] or 0),
+        first_seen=str(r["first_seen"] or ""),
+        last_seen=str(r["last_seen"] or ""),
+        duration_seconds=float(r["duration_seconds"] or 0.0),
+        likely_device_ip=str(r["likely_device_ip"] or ""),
+        summary_text=str(r["summary_text"] or ""),
+        created_at=str(r["created_at"] or ""),
+        updated_at=str(r["updated_at"] or ""),
+    )
 
 # ---------------- Findings ----------------
 def add_finding(

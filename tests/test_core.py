@@ -13,11 +13,15 @@ from core.ai.context_builder import build_dataset_context
 from core.ai.prompts import build_dataset_summary_prompt
 from core.compare import compare_flows, summarize_new_flows
 from core.db import (
+    add_pcap_source,
     create_project,
+    file_sha256,
     get_app_setting,
     get_app_settings,
     get_project,
     init_db,
+    list_pcap_sources,
+    list_project_pcap_device_ips,
     set_app_setting,
     set_project_target,
 )
@@ -271,6 +275,43 @@ class PcapAnalyzerTests(unittest.TestCase):
         self.assertTrue(investigator["service_rows"])
         self.assertTrue(investigator["activity_rows"])
         self.assertTrue(investigator["visibility_rows"])
+
+    def test_pcap_sources_are_persisted_per_project(self):
+        with temporary_directory() as tmp:
+            root = Path(tmp)
+            db_path = root / "pcap-sources.db"
+            pcap_path = root / "sample.pcap"
+            _write_sample_pcap(pcap_path)
+            init_db(db_path)
+
+            project_id = create_project("Case A", db_path=db_path)
+            summary = analyze_pcap(pcap_path)
+            digest = file_sha256(pcap_path)
+            source_id = add_pcap_source(
+                project_id,
+                file_path=str(pcap_path),
+                file_name=pcap_path.name,
+                file_sha256_value=digest,
+                file_size=pcap_path.stat().st_size,
+                format=summary.format,
+                packet_count=summary.packet_count,
+                wire_bytes=summary.wire_bytes,
+                first_seen=summary.first_seen,
+                last_seen=summary.last_seen,
+                duration_seconds=summary.duration_seconds,
+                likely_device_ip=summary.likely_device_ip,
+                summary_text=build_investigator_view(summary)["plain_summary"],
+                db_path=db_path,
+            )
+
+            sources = list_pcap_sources(project_id, db_path=db_path)
+            device_ips = list_project_pcap_device_ips(project_id, db_path=db_path)
+
+        self.assertEqual(len(sources), 1)
+        self.assertEqual(sources[0].id, source_id)
+        self.assertEqual(sources[0].file_sha256, digest)
+        self.assertEqual(sources[0].likely_device_ip, "10.0.0.10")
+        self.assertEqual(device_ips, ["10.0.0.10"])
 
 
 class AIServiceTests(unittest.TestCase):
