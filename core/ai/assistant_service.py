@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from core.ai.context_builder import (
+    build_activity_profile_context,
     build_dataset_context,
     build_flow_context,
     build_finding_context,
@@ -12,6 +13,7 @@ from core.ai.context_builder import (
 )
 from core.ai.prompts import (
     SYSTEM_PROMPT,
+    build_activity_profile_summary_prompt,
     build_dataset_summary_prompt,
     build_flow_explanation_prompt,
     build_finding_explanation_prompt,
@@ -150,4 +152,16 @@ class AIAssistantService:
 
         context = build_pcap_context(summary, project_name=project_name)
         prompt = SYSTEM_PROMPT + "\n\n" + build_pcap_summary_prompt(context)
+        return self._generate(prompt)
+
+    def generate_activity_profile_summary(
+        self,
+        profile: dict[str, Any],
+        project_name: str = "",
+    ) -> str:
+        if not profile:
+            return "No activity profile loaded."
+
+        context = build_activity_profile_context(profile, project_name=project_name)
+        prompt = SYSTEM_PROMPT + "\n\n" + build_activity_profile_summary_prompt(context)
         return self._generate(prompt)

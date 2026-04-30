@@ -34,6 +34,7 @@ class ProjectsUIController:
 
         self.app.projects_info.setText("Select a project to see details.")
         self.app.recent_list.clear()
+        self.app.refresh_activity_profile_ui()
         self.app.refresh_activity_ui_for_project(None)
 
     def create_project_dialog(self):
@@ -187,6 +188,7 @@ class ProjectsUIController:
 
             self.app.refresh_findings_ui()
             self.app.refresh_notes_ui()
+            self.app.refresh_activity_profile_ui()
 
         self.refresh_projects()
 
@@ -332,6 +334,7 @@ class ProjectsUIController:
             self.app.current_project_name = name
             self.app.lbl_active_project.setText(f"Active project: {name}")
             self.app.lbl_project_banner.setText(f"Project: {name}")
+            self.app.refresh_activity_profile_ui()
 
     def set_active_project(self, project_id: int):
         p = get_project(project_id)
@@ -353,6 +356,7 @@ class ProjectsUIController:
         self.refresh_recent_datasets(p.id)
         self.app.refresh_findings_ui()
         self.app.refresh_notes_ui()
+        self.app.refresh_activity_profile_ui()
 
     def refresh_recent_datasets(self, project_id: int):
         self.app.recent_list.clear()

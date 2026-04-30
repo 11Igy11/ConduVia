@@ -5,6 +5,7 @@ import ipaddress
 from ui.registry_page import RegistryPage
 from ui.listing_page import ListingPage
 from ui.pcap_page import PcapPage
+from ui.activity_profile_page import ActivityProfilePage
 import html
 from datetime import datetime
 from pathlib import Path
@@ -193,6 +194,7 @@ class App(QWidget):
         sidebar = QVBoxLayout()
 
         self.btn_nav_projects = QPushButton("Projects")
+        self.btn_nav_profile = QPushButton("Profile")
         self.btn_nav_explore = QPushButton("Explore")
         self.btn_nav_registry = QPushButton("Registry")
         self.btn_nav_listing = QPushButton("Listing")
@@ -201,6 +203,7 @@ class App(QWidget):
 
         for b in (
             self.btn_nav_projects,
+            self.btn_nav_profile,
             self.btn_nav_explore,
             self.btn_nav_registry,
             self.btn_nav_listing,
@@ -212,12 +215,14 @@ class App(QWidget):
 
         # activ button reference (for highlight)
         self._nav_projects = self.btn_nav_projects
+        self._nav_profile = self.btn_nav_profile
         self._nav_explore = self.btn_nav_explore
         self._nav_registry = self.btn_nav_registry
         self._nav_listing = self.btn_nav_listing
         self._nav_pcap = self.btn_nav_pcap
 
         sidebar.addWidget(self.btn_nav_projects)
+        sidebar.addWidget(self.btn_nav_profile)
         sidebar.addWidget(self.btn_nav_explore)
         sidebar.addWidget(self.btn_nav_registry)
         sidebar.addWidget(self.btn_nav_listing)
@@ -229,6 +234,7 @@ class App(QWidget):
 
     def _wire_navigation(self) -> None:
         self.btn_nav_projects.clicked.connect(lambda: self.go_page(self.IDX_PROJECTS, self._nav_projects))
+        self.btn_nav_profile.clicked.connect(lambda: self.go_page(self.IDX_PROFILE, self._nav_profile))
         self.btn_nav_explore.clicked.connect(lambda: self.go_page(self.IDX_EXPLORE, self._nav_explore))
         self.btn_nav_registry.clicked.connect(lambda: self.go_page(self.IDX_REGISTRY, self._nav_registry))
         self.btn_nav_listing.clicked.connect(lambda: self.go_page(self.IDX_LISTING, self._nav_listing))
@@ -513,10 +519,11 @@ class App(QWidget):
         # Pages + indexes
         self.pages = QStackedWidget()
         self.IDX_PROJECTS = 0
-        self.IDX_EXPLORE = 1
-        self.IDX_REGISTRY = 2
-        self.IDX_LISTING = 3
-        self.IDX_PCAP = 4
+        self.IDX_PROFILE = 1
+        self.IDX_EXPLORE = 2
+        self.IDX_REGISTRY = 3
+        self.IDX_LISTING = 4
+        self.IDX_PCAP = 5
 
         # -------- Projects page --------
         projects_page = QWidget()
@@ -1092,6 +1099,10 @@ class App(QWidget):
 
         # Pages
         self.pages.addWidget(projects_page)
+
+        self.activity_profile_page = ActivityProfilePage(self)
+        self.pages.addWidget(self.activity_profile_page)
+
         self.pages.addWidget(explore_container)
 
         self.registry_page = RegistryPage()
@@ -1119,15 +1130,21 @@ class App(QWidget):
         outer.addLayout(footer)
           
     def _set_active_nav(self, active: QPushButton):
-        for b in (self._nav_projects, self._nav_explore, self._nav_registry, self._nav_listing, self._nav_pcap):
+        for b in (self._nav_projects, self._nav_profile, self._nav_explore, self._nav_registry, self._nav_listing, self._nav_pcap):
             b.setProperty("active", b is active)
             b.style().unpolish(b)
             b.style().polish(b)
             b.update()
 
     def go_page(self, idx: int, active_btn: QPushButton):
+        if idx == self.IDX_PROFILE:
+            self.refresh_activity_profile_ui()
         self.pages.setCurrentIndex(idx)
         self._set_active_nav(active_btn)
+
+    def refresh_activity_profile_ui(self):
+        if hasattr(self, "activity_profile_page"):
+            self.activity_profile_page.refresh(self.current_project_id, self.current_project_name)
 
     def _open_from_registry(self, src: str, dst: str):
         self.go_to_explore_flows()
@@ -1621,6 +1638,7 @@ class App(QWidget):
 
     def refresh_activity_ui(self):
         self.refresh_activity_ui_for_project(self.current_project_id)
+        self.refresh_activity_profile_ui()
 
     def on_notes_changed(self):
         if self.current_project_id is None:
