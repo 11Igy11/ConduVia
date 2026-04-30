@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import struct
 import tempfile
 import unittest
 from pathlib import Path
@@ -32,6 +33,7 @@ from core.formatters import (
 )
 from core.loader import list_json_files, load_folder, load_json_file
 from core.parser import extract_dataset_meta
+from core.pcap_analyzer import analyze_pcap
 from core.protocols import describe_ip_proto, format_ip_proto_with_description
 from core.timeutils import LOCAL_TZ, parse_timestamp
 from core.workspace import (
@@ -246,6 +248,23 @@ class ProjectTargetTests(unittest.TestCase):
         self.assertEqual(meta["targettype"], "MSISDN")
 
 
+class PcapAnalyzerTests(unittest.TestCase):
+    def test_analyze_pcap_extracts_dns_http_and_flows(self):
+        with temporary_directory() as tmp:
+            path = Path(tmp) / "sample.pcap"
+            _write_sample_pcap(path)
+
+            summary = analyze_pcap(path)
+
+        self.assertEqual(summary.format, "PCAP")
+        self.assertEqual(summary.packet_count, 2)
+        self.assertEqual(summary.likely_device_ip, "10.0.0.10")
+        self.assertEqual(summary.dns_queries[0]["query"], "example.com")
+        self.assertEqual(summary.http_hosts[0]["host"], "example.com")
+        self.assertTrue(any(sample["type"] == "HTTP cleartext" for sample in summary.readable_samples))
+        self.assertEqual(len(summary.flows), 2)
+
+
 class AIServiceTests(unittest.TestCase):
     def test_ai_settings_builds_generate_url(self):
         settings = AISettings(base_url="http://localhost:11434/", model="m", timeout_seconds=5)
@@ -311,6 +330,82 @@ class AIServiceTests(unittest.TestCase):
         self.assertIn("The user wants interpretation", prompt)
         self.assertIn("Do not jump into cybersecurity mode", prompt)
         self.assertIn("Limits Of Interpretation", prompt)
+
+
+def _write_sample_pcap(path: Path) -> None:
+    packets = [
+        _ether_ipv4_udp_packet(
+            "10.0.0.10",
+            "8.8.8.8",
+            53000,
+            53,
+            _dns_query_payload("example.com"),
+        ),
+        _ether_ipv4_tcp_packet(
+            "10.0.0.10",
+            "93.184.216.34",
+            50000,
+            80,
+            b"GET / HTTP/1.1\r\nHost: example.com\r\nUser-Agent: ViaNyquistTest\r\n\r\n",
+        ),
+    ]
+
+    with path.open("wb") as f:
+        f.write(struct.pack("<IHHiiii", 0xA1B2C3D4, 2, 4, 0, 0, 65535, 1))
+        for i, packet in enumerate(packets, start=1):
+            f.write(struct.pack("<IIII", 1_704_067_200 + i, 0, len(packet), len(packet)))
+            f.write(packet)
+
+
+def _dns_query_payload(name: str) -> bytes:
+    labels = b"".join(bytes([len(part)]) + part.encode("ascii") for part in name.split("."))
+    qname = labels + b"\x00"
+    return (
+        b"\x12\x34"
+        + b"\x01\x00"
+        + b"\x00\x01"
+        + b"\x00\x00"
+        + b"\x00\x00"
+        + b"\x00\x00"
+        + qname
+        + b"\x00\x01"
+        + b"\x00\x01"
+    )
+
+
+def _ether_ipv4_udp_packet(src_ip: str, dst_ip: str, src_port: int, dst_port: int, payload: bytes) -> bytes:
+    udp_len = 8 + len(payload)
+    udp = struct.pack("!HHHH", src_port, dst_port, udp_len, 0) + payload
+    return _ether_ipv4_packet(src_ip, dst_ip, 17, udp)
+
+
+def _ether_ipv4_tcp_packet(src_ip: str, dst_ip: str, src_port: int, dst_port: int, payload: bytes) -> bytes:
+    tcp = (
+        struct.pack("!HHII", src_port, dst_port, 1, 0)
+        + bytes([0x50, 0x18])
+        + struct.pack("!HHH", 8192, 0, 0)
+        + payload
+    )
+    return _ether_ipv4_packet(src_ip, dst_ip, 6, tcp)
+
+
+def _ether_ipv4_packet(src_ip: str, dst_ip: str, proto: int, l4: bytes) -> bytes:
+    import socket
+
+    eth = b"\xaa\xbb\xcc\xdd\xee\xff" + b"\x11\x22\x33\x44\x55\x66" + struct.pack("!H", 0x0800)
+    total_len = 20 + len(l4)
+    ip = (
+        b"\x45\x00"
+        + struct.pack("!H", total_len)
+        + b"\x00\x01"
+        + b"\x00\x00"
+        + b"\x40"
+        + bytes([proto])
+        + b"\x00\x00"
+        + socket.inet_aton(src_ip)
+        + socket.inet_aton(dst_ip)
+    )
+    return eth + ip + l4
 
 
 if __name__ == "__main__":
