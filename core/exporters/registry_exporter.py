@@ -6,6 +6,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from core.db import Project
+from core.exporters.case_context import build_case_context, context_cards_html
 from core.formatters import (
     format_duration_hms_ms,
     format_flow_datetime,
@@ -248,6 +250,8 @@ def export_registry_html(
     tab_defs: list[tuple[str, str, tuple[str, str]]],
     compare_result: dict[str, Any] | None = None,
     include_full: bool = False,
+    project: Project | None = None,
+    project_name: str = "",
 ) -> None:
     meta = meta or {}
     summary = summary or {}
@@ -265,6 +269,8 @@ def export_registry_html(
     period = "—"
     if bt or et:
         period = f"{_fmt_dt_short(bt)} – {_fmt_dt_short(et)}"
+
+    case_context = build_case_context(project, project_name=project_name, dataset_meta=meta)
 
     total_flows = _safe_int(summary.get("total_flows", len(flows)))
     uniq_src = len({str(f.get("src_ip") or "") for f in flows if f.get("src_ip")})
@@ -371,6 +377,7 @@ def export_registry_html(
         .replace("{{LOGO}}", _esc(_logo_data_uri()))
         .replace("{{FOLDER}}", _esc(Path(folder).name if folder else "—"))
         .replace("{{EXPORTED_AT}}", datetime.now().strftime("%d.%m.%Y %H:%M:%S"))
+        .replace("{{CASE_CONTEXT_CARDS}}", context_cards_html(case_context, card_class="chip"))
         .replace("{{KLASA}}", _esc(klasa))
         .replace("{{URBROJ}}", _esc(urbroj))
         .replace("{{TARGET}}", _esc(target))

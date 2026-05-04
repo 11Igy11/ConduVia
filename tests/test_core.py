@@ -39,8 +39,10 @@ from core.formatters import (
     human_bytes,
     safe_int,
 )
+from core.exporters.listing_exporter import export_listing_html
 from core.exporters.profile_exporter import export_activity_profile_html
 from core.exporters.pcap_exporter import export_pcap_summary_html
+from core.exporters.registry_exporter import export_registry_html
 from core.loader import list_json_files, load_folder, load_json_file
 from core.parser import extract_dataset_meta
 from core.pcap_analyzer import analyze_pcap, build_communication_rows, build_investigator_view
@@ -273,6 +275,80 @@ class BehaviorProfileTests(unittest.TestCase):
         self.assertIn("Behavior Insights", content)
         self.assertIn("WhatsApp", content)
         self.assertIn("Most active hour", content)
+
+
+class ExportContextTests(unittest.TestCase):
+    def test_listing_html_export_includes_project_case_context(self):
+        with temporary_directory() as tmp:
+            root = Path(tmp)
+            db_path = root / "listing-export.db"
+            output = root / "listing.html"
+            init_db(db_path)
+
+            project_id = create_project("Case A", db_path=db_path)
+            set_project_subject(
+                project_id,
+                first_name="Ana",
+                last_name="Horvat",
+                msisdn="385911234567",
+                oib="12345678901",
+                db_path=db_path,
+            )
+            project = get_project(project_id, db_path=db_path)
+
+            export_listing_html(
+                file_path=str(output),
+                headers=["Time", "Application"],
+                rows=[["09:00", "WhatsApp"]],
+                dataset=str(root / "dataset.json"),
+                view_mode="All",
+                files_count=1,
+                meta={"target": "385911234567", "targettype": "MSISDN"},
+                project=project,
+            )
+            content = output.read_text(encoding="utf-8")
+
+        self.assertIn("Case Subject", content)
+        self.assertIn("Ana Horvat", content)
+        self.assertIn("MSISDN: 385911234567", content)
+        self.assertIn("Dataset Target", content)
+
+    def test_registry_html_export_includes_project_case_context(self):
+        with temporary_directory() as tmp:
+            root = Path(tmp)
+            db_path = root / "registry-export.db"
+            output = root / "registry.html"
+            init_db(db_path)
+
+            project_id = create_project("Case B", db_path=db_path)
+            set_project_subject(
+                project_id,
+                first_name="Pero",
+                last_name="Peric",
+                msisdn="38598111222",
+                ip="10.0.0.5",
+                db_path=db_path,
+            )
+            project = get_project(project_id, db_path=db_path)
+
+            export_registry_html(
+                file_path=str(output),
+                folder=root,
+                files=[root / "dataset.json"],
+                flows=[{"src_ip": "10.0.0.5", "dst_ip": "8.8.8.8", "application_name": "DNS", "bidirectional_bytes": 100}],
+                meta={"target": "38598111222", "targettype": "MSISDN"},
+                summary={"total_flows": 1, "total_bytes": 100},
+                analyst={},
+                columns=["src_ip", "dst_ip", "application_name"],
+                tab_defs=[],
+                project=project,
+            )
+            content = output.read_text(encoding="utf-8")
+
+        self.assertIn("Case B", content)
+        self.assertIn("Pero Peric", content)
+        self.assertIn("MSISDN: 38598111222", content)
+        self.assertIn("Known IP", content)
 
 
 class CompareTests(unittest.TestCase):

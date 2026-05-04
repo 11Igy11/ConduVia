@@ -6,6 +6,8 @@ import base64
 from datetime import datetime
 from pathlib import Path
 
+from core.db import Project
+from core.exporters.case_context import build_case_context, context_cards_html
 from core.formatters import format_short_date
 
 from openpyxl import Workbook
@@ -75,6 +77,8 @@ def export_listing_html(
     view_mode: str,
     files_count: int,
     meta: dict | None = None,
+    project: Project | None = None,
+    project_name: str = "",
 ) -> None:
     path = Path(file_path)
 
@@ -86,6 +90,7 @@ def export_listing_html(
     targettype = str(meta.get("targettype") or "")
 
     target_display = target
+    case_context = build_case_context(project, project_name=project_name, dataset_meta=meta)
 
     bt = format_short_date(meta.get("bt"), missing="-")
     et = format_short_date(meta.get("et"), missing="-")
@@ -127,6 +132,7 @@ def export_listing_html(
         .replace("{{DATASET}}", html.escape(dataset_name))
         .replace("{{EXPORTED_AT}}", datetime.now().strftime("%d.%m.%Y %H:%M:%S"))
         .replace("{{VIEW_MODE}}", html.escape(view_mode or "Unknown"))
+        .replace("{{CASE_CONTEXT_CARDS}}", context_cards_html(case_context, card_class="info"))
         .replace("{{KLASA}}", html.escape(klasa))
         .replace("{{URBROJ}}", html.escape(urbroj))
         .replace("{{TARGET}}", html.escape(target_display))
