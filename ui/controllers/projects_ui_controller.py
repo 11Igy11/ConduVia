@@ -12,6 +12,7 @@ from core.db import (
     update_project,
 )
 from core.project_identity import project_identifiers_text, subject_display_label
+from core.project_profile import build_project_activity_profile
 from core.workspace import (
     ensure_workspace_structure,
     build_workspace_path,
@@ -36,6 +37,7 @@ class ProjectsUIController:
 
         self.app.projects_info.setText("Select a project to see details.")
         self.app.recent_list.clear()
+        self.refresh_case_dashboard(None)
         self.app.refresh_activity_profile_ui()
         self.app.refresh_activity_ui_for_project(None)
 
@@ -116,6 +118,7 @@ class ProjectsUIController:
         if not item:
             self.app.projects_info.setText("Select a project to see details.")
             self.app.recent_list.clear()
+            self.refresh_case_dashboard(None)
             return
 
         pid = int(item.data(Qt.UserRole))
@@ -124,23 +127,31 @@ class ProjectsUIController:
             return
 
         info = []
+        info.append("Selected project")
+        info.append("")
         info.append(f"Name: {p.name}")
         info.append(f"ID: {p.id}")
-        info.append(f"Case subject: {subject_display_label(p)}")
-        info.append(f"Known identifiers: {project_identifiers_text(p)}")
+        info.append(f"Subject: {subject_display_label(p)}")
+        info.append(f"Identifiers: {project_identifiers_text(p)}")
         if p.subject_oib:
             info.append(f"OIB: {p.subject_oib}")
-        info.append(f"Target fallback: {p.target_identifier or '-'}")
-        info.append(f"Target type: {p.target_type or '-'}")
-        info.append(f"Workspace folder: {p.base_folder or '-'}")
-        info.append(f"Created: {p.created_at}")
-        info.append(f"Updated: {p.updated_at}")
+        if p.subject_ip:
+            info.append(f"Known IP: {p.subject_ip}")
         info.append("")
-        info.append(p.description or "")
+        if p.description:
+            info.append("Description:")
+            info.append(p.description)
+            info.append("")
+        if p.target_identifier or p.target_type:
+            info.append(f"Legacy target fallback: {p.target_type or '-'} / {p.target_identifier or '-'}")
+        info.append("")
+        info.append(f"Workspace: {p.base_folder or '-'}")
+        info.append(f"Created / updated: {p.created_at} / {p.updated_at}")
         self.app.projects_info.setText("\n".join(info))
 
         self.refresh_recent_datasets(pid)
         self.app.refresh_activity_ui_for_project(pid)
+        self.refresh_case_dashboard(pid)
 
     def open_selected_project(self):
         item = self.app.projects_list.currentItem()
@@ -346,6 +357,7 @@ class ProjectsUIController:
         self.app.lbl_project_banner.setText(f"Project: {p.name}")
 
         self.refresh_recent_datasets(p.id)
+        self.refresh_case_dashboard(p.id)
         self.app.refresh_findings_ui()
         self.app.refresh_notes_ui()
         self.app.refresh_activity_profile_ui()
@@ -372,6 +384,79 @@ class ProjectsUIController:
             item.setToolTip(str(fp))
             item.setData(Qt.UserRole, str(fp))
             self.app.recent_list.addItem(item)
+
+    def refresh_case_dashboard(self, project_id: int | None):
+        if not hasattr(self.app, "lbl_case_dashboard_title"):
+            return
+
+        if project_id is None:
+            self.app.lbl_case_dashboard_title.setText("Case Dashboard")
+            self.app.lbl_case_dashboard_subject.setText("Select a project to see case context.")
+            for idx, title in enumerate(("Datasets", "PCAP", "Findings", "Device IPs")):
+                self.app.case_metric_cards[idx].setText(f"{title}: 0")
+            self.app.lbl_case_dashboard_warnings.setText("")
+            return
+
+        project = get_project(project_id)
+        if not project:
+            self.refresh_case_dashboard(None)
+            return
+
+        profile = build_project_activity_profile(project_id)
+        active_suffix = "active" if self.app.current_project_id == project_id else "selected"
+        self.app.lbl_case_dashboard_title.setText(f"Case Dashboard: {project.name} ({active_suffix})")
+        self.app.lbl_case_dashboard_subject.setText(
+            f"Subject: {subject_display_label(project)}\n"
+            f"Known identifiers: {project_identifiers_text(project)}"
+        )
+
+        values = [
+            ("Datasets", profile.get("dataset_count", 0)),
+            ("PCAP", profile.get("pcap_count", 0)),
+            ("Findings", profile.get("finding_count", 0)),
+            ("Device IPs", len(profile.get("pcap_device_ips") or {})),
+        ]
+        for idx, (title, value) in enumerate(values):
+            self.app.case_metric_cards[idx].setText(f"{title}: {value}")
+
+        warnings = self._case_dashboard_warnings(project, profile)
+        self.app.lbl_case_dashboard_warnings.setText(
+            "Review: " + " | ".join(warnings) if warnings else "Review: no immediate project consistency warnings."
+        )
+
+    def _case_dashboard_warnings(self, project, profile: dict) -> list[str]:
+        warnings: list[str] = []
+        if project_identifiers_text(project) == "-":
+            warnings.append("add known identifiers")
+        if not profile.get("dataset_count"):
+            warnings.append("no JSON datasets saved")
+        if not profile.get("pcap_count"):
+            warnings.append("no PCAP sources saved")
+
+        pcap_ips = profile.get("pcap_device_ips") or {}
+        if len(pcap_ips) > 1:
+            warnings.append("multiple PCAP device IPs observed")
+
+        known_ip = (project.subject_ip or "").strip()
+        if known_ip and pcap_ips and known_ip not in pcap_ips:
+            warnings.append("known project IP differs from saved PCAP device IPs")
+
+        return warnings
+
+    def activity_label(self, event_type: str, message: str = "") -> str:
+        labels = {
+            "dataset_loaded": "Dataset loaded",
+            "pcap_saved": "PCAP saved",
+            "pcap_notes_added": "PCAP notes added",
+            "finding_created": "Finding created",
+            "finding_updated": "Finding updated",
+            "finding_deleted": "Finding deleted",
+        }
+        label = labels.get(event_type, event_type.replace("_", " ").title())
+        detail = Path(message).name if message else ""
+        if detail:
+            return f"{label}: {detail}"
+        return label
 
     def open_selected_dataset(self):
         item = self.app.recent_list.currentItem()
