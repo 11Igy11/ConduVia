@@ -110,8 +110,9 @@ class ProjectsUIController:
         )
 
         if should_open:
-            self.app.dataset_controller.load_dataset_dialog()
-            self.app.go_page(self.app.IDX_EXPLORE, self.app._nav_explore)
+            opened = self.app.dataset_controller.load_dataset_dialog()
+            if opened == "json":
+                self.app.go_page(self.app.IDX_EXPLORE, self.app._nav_explore)
 
     def on_project_selected_preview(self):
         item = self.app.projects_list.currentItem()
@@ -488,10 +489,11 @@ class ProjectsUIController:
             )
             return
 
-        self.app.dataset_controller.load_dataset_dialog()
-        self.app.go_page(
-            self.app.IDX_EXPLORE,
-            self.app._nav_explore
-        )
+        opened = self.app.dataset_controller.load_dataset_dialog()
+        if opened == "json":
+            self.app.go_page(
+                self.app.IDX_EXPLORE,
+                self.app._nav_explore
+            )
 
     

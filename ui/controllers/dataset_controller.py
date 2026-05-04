@@ -129,7 +129,7 @@ class DatasetController(QObject):
 
     def load_dataset_dialog(self):
         if not self._ensure_active_project():
-            return
+            return None
 
         choice = self.app._choice_dialog(
             title="Open dataset",
@@ -141,9 +141,9 @@ class DatasetController(QObject):
         if choice == "Folder":
             folder = QFileDialog.getExistingDirectory(self.app, "Select dataset folder")
             if not folder:
-                return
+                return None
             self.load_dataset_path(folder)
-            return
+            return "json"
 
         if choice == "JSON file":
             file_path, _ = QFileDialog.getOpenFileName(
@@ -153,9 +153,9 @@ class DatasetController(QObject):
                 "JSON files (*.json)",
             )
             if not file_path:
-                return
+                return None
             self.load_dataset_file(file_path)
-            return
+            return "json"
 
         if choice == "PCAP file":
             file_path, _ = QFileDialog.getOpenFileName(
@@ -165,11 +165,13 @@ class DatasetController(QObject):
                 "Capture files (*.pcap *.pcapng);;All files (*.*)",
             )
             if not file_path:
-                return
+                return None
             if hasattr(self.app, "pcap_page"):
                 self.app.go_page(self.app.IDX_PCAP, self.app._nav_pcap)
                 self.app.pcap_page.load_pcap(file_path)
-            return
+            return "pcap"
+
+        return None
 
     def render_summary(self):
         flows = self.app.flow_controller.get_all()

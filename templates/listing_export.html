@@ -127,7 +127,7 @@ h1{
 .info-strip{
     margin-top:20px;
     display:grid;
-    grid-template-columns:1fr 1fr 1.45fr 1.1fr;
+    grid-template-columns:repeat(auto-fit, minmax(180px, 1fr));
     gap:10px;
 }
 
@@ -156,7 +156,6 @@ h1{
     word-break:break-word;
 }
 .info:last-child .value{
-    white-space:nowrap;
     font-size:14px;
 }
 
@@ -329,6 +328,7 @@ tbody tr:hover{
             </div>
 
             <div class="info-strip">
+                {{CASE_CONTEXT_CARDS}}
 
                 <div class="info">
                     <div class="label">Klasa</div>

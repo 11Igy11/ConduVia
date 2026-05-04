@@ -6,6 +6,7 @@ from typing import Any
 from core.formatters import human_bytes, safe_int, format_short_date
 from core.timeutils import parse_flow_timestamp
 from core.exporters.registry_exporter import export_registry_html
+from core.db import get_project
 
 from PySide6.QtCore import Qt, Signal, QAbstractTableModel, QModelIndex, QSortFilterProxyModel, QSize, QRectF
 from PySide6.QtGui import QPainter, QColor, QPen, QFontMetrics
@@ -649,6 +650,7 @@ class RegistryPage(QWidget):
 
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
+        self.app = parent
 
         self._folder: Path | None = None
         self._files: list[Path] = []
@@ -1518,12 +1520,20 @@ class RegistryPage(QWidget):
                 tab_defs=self._tab_defs,
                 compare_result=self._compare_result,
                 include_full=bool(self.chk_full.isChecked()),
+                project=self._current_project(),
+                project_name=getattr(self.app, "current_project_name", "") or "",
             )
 
             QMessageBox.information(self, "Export", f"Report saved:\n{out_path}")
 
         except Exception as e:
             QMessageBox.critical(self, "Export failed", str(e))
+
+    def _current_project(self):
+        project_id = getattr(self.app, "current_project_id", None)
+        if project_id is None:
+            return None
+        return get_project(project_id)
 
     def _on_dataset_double_clicked(self, index: QModelIndex):
         if not index.isValid():

@@ -10,6 +10,7 @@ from core.formatters import (
 )
 from core.protocols import format_ip_proto
 from core.exporters.listing_exporter import export_listing_csv, export_listing_excel, export_listing_html
+from core.db import get_project
 from core.parser import extract_dataset_meta
 from core.timeutils import parse_timestamp
 
@@ -399,6 +400,7 @@ class ColumnPickerDialog(QDialog):
 class ListingPage(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.app = parent
 
         self.dataset_path = ""
         self.files = []
@@ -734,6 +736,8 @@ class ListingPage(QWidget):
                 view_mode=self.cmb_view_mode.currentText(),
                 files_count=len(self.files),
                 meta=meta,
+                project=self._current_project(),
+                project_name=getattr(self.app, "current_project_name", "") or "",
             )
 
             QMessageBox.information(
@@ -747,3 +751,9 @@ class ListingPage(QWidget):
                 "Export Error",
                 f"Failed to export HTML.\n\n{str(e)}"
             )
+
+    def _current_project(self):
+        project_id = getattr(self.app, "current_project_id", None)
+        if project_id is None:
+            return None
+        return get_project(project_id)

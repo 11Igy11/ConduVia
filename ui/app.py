@@ -1156,10 +1156,10 @@ class App(QWidget):
 
         self.pages.addWidget(explore_container)
 
-        self.registry_page = RegistryPage()
+        self.registry_page = RegistryPage(self)
         self.pages.addWidget(self.registry_page)
 
-        self.listing_page = ListingPage()
+        self.listing_page = ListingPage(self)
         self.pages.addWidget(self.listing_page)
 
         self.pcap_page = PcapPage(self)

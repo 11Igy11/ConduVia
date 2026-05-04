@@ -6,9 +6,9 @@ from pathlib import Path
 from typing import Any
 
 from core.db import Project
-from core.formatters import human_bytes
+from core.exporters.case_context import build_case_context, context_cards_html
+from core.formatters import format_flow_datetime, human_bytes
 from core.pcap_analyzer import PcapSummary, build_investigator_view
-from core.project_identity import project_identifiers_text, subject_display_label
 
 
 def export_pcap_summary_html(
@@ -60,10 +60,10 @@ def export_pcap_summary_html(
     communication_brief = _communication_brief(summary.communication_rows or [])
     investigator = build_investigator_view(summary)
     generated_at = datetime.now().strftime("%d.%m.%Y %H:%M:%S")
-    period = f"{summary.first_seen or '-'} - {summary.last_seen or '-'}"
-    project_label = project.name if project else (project_name or "-")
-    subject_label = subject_display_label(project) if project else "-"
-    identifiers_label = project_identifiers_text(project) if project else "-"
+    first_seen = format_flow_datetime(summary.first_seen, milliseconds=True)
+    last_seen = format_flow_datetime(summary.last_seen, milliseconds=True)
+    period = f"{first_seen or '-'} - {last_seen or '-'}"
+    case_context = build_case_context(project, project_name=project_name)
 
     html_doc = f"""<!DOCTYPE html>
 <html lang="en">
@@ -115,9 +115,7 @@ tr:nth-child(even) td {{ background:#f9fafb; }}
     <h1>ViaNyquist PCAP Summary</h1>
     <div class="muted">{html.escape(summary.file_name)} | Exported: {html.escape(generated_at)}</div>
     <div class="grid">
-      <div class="card"><div class="label">Project</div><div class="value">{html.escape(project_label)}</div></div>
-      <div class="card"><div class="label">Case Subject</div><div class="value">{html.escape(subject_label)}</div></div>
-      <div class="card"><div class="label">Known Identifiers</div><div class="value">{html.escape(identifiers_label)}</div></div>
+      {context_cards_html(case_context, card_class="card", include_dataset_target=False)}
       <div class="card"><div class="label">Format</div><div class="value">{html.escape(summary.format)}</div></div>
       <div class="card"><div class="label">Packets</div><div class="value">{summary.packet_count:,}</div></div>
       <div class="card"><div class="label">Traffic Volume</div><div class="value">{html.escape(human_bytes(summary.wire_bytes, precision=2))}</div></div>

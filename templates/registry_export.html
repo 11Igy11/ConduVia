@@ -109,7 +109,7 @@ h1{
 .chips{
     margin-top:18px;
     display:grid;
-    grid-template-columns:repeat(4,1fr);
+    grid-template-columns:repeat(auto-fit,minmax(180px,1fr));
     gap:12px;
 }
 
@@ -539,6 +539,7 @@ td.num,th.num{
 </div>
 
 <div class="chips">
+{{CASE_CONTEXT_CARDS}}
 <div class="chip">
 <div class="label">Klasa</div>
 <div class="value">{{KLASA}}</div>

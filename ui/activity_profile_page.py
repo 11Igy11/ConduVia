@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
 )
 
 from core.behavior_profile import build_flow_behavior_profile
+from core.db import get_project
 from core.exporters.profile_exporter import export_activity_profile_html
 from core.project_datasets import load_project_dataset_flows
 from core.project_profile import build_project_activity_profile
@@ -322,6 +323,7 @@ class ActivityProfilePage(QWidget):
                 file_path,
                 profile=self.profile,
                 project_name=self.project_name,
+                project=self._current_project(),
             )
             webbrowser.open(Path(file_path).resolve().as_uri())
         except Exception as exc:
@@ -337,6 +339,12 @@ class ActivityProfilePage(QWidget):
         self.txt_ai_summary.setPlainText(result)
         self.btn_ai_summary.setEnabled(True)
         self.btn_ai_summary.setText("AI Case Summary")
+
+    def _current_project(self):
+        project_id = getattr(self.app, "current_project_id", None) if self.app else None
+        if project_id is None:
+            return None
+        return get_project(project_id)
 
     def _on_ai_error(self, message: str):
         self.txt_ai_summary.setPlainText(f"AI error: {message}")

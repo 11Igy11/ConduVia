@@ -5,16 +5,21 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from core.db import Project
+from core.exporters.case_context import build_case_context, context_cards_html
+
 
 def export_activity_profile_html(
     file_path: str,
     *,
     profile: dict[str, Any],
     project_name: str = "",
+    project: Project | None = None,
 ) -> None:
     path = Path(file_path)
     generated_at = datetime.now().strftime("%d.%m.%Y %H:%M:%S")
     behavior = dict(profile.get("behavior_profile") or {})
+    case_context = build_case_context(project, project_name=project_name)
 
     html_doc = f"""<!DOCTYPE html>
 <html lang="en">
@@ -52,6 +57,7 @@ tr:nth-child(even) td {{ background:#f9fafb; }}
     <h1>ViaNyquist Activity Profile</h1>
     <div class="muted">Project: {html.escape(project_name or 'Project')} | Exported: {html.escape(generated_at)}</div>
     <div class="grid">
+      {context_cards_html(case_context, card_class="card", include_dataset_target=False)}
       {_metric_cards(profile)}
     </div>
   </div>
