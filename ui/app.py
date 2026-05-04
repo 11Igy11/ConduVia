@@ -6,6 +6,7 @@ from ui.registry_page import RegistryPage
 from ui.listing_page import ListingPage
 from ui.pcap_page import PcapPage
 from ui.activity_profile_page import ActivityProfilePage
+from ui.settings_page import SettingsPage
 import html
 from datetime import datetime
 from pathlib import Path
@@ -199,6 +200,7 @@ class App(QWidget):
         self.btn_nav_registry = QPushButton("Registry")
         self.btn_nav_listing = QPushButton("Listing")
         self.btn_nav_pcap = QPushButton("PCAP")
+        self.btn_nav_settings = QPushButton("Settings")
         self.btn_nav_help = QPushButton("Help")
 
         for b in (
@@ -208,6 +210,7 @@ class App(QWidget):
             self.btn_nav_registry,
             self.btn_nav_listing,
             self.btn_nav_pcap,
+            self.btn_nav_settings,
             self.btn_nav_help,
         ):
             b.setObjectName("NavButton")
@@ -220,6 +223,7 @@ class App(QWidget):
         self._nav_registry = self.btn_nav_registry
         self._nav_listing = self.btn_nav_listing
         self._nav_pcap = self.btn_nav_pcap
+        self._nav_settings = self.btn_nav_settings
 
         sidebar.addWidget(self.btn_nav_projects)
         sidebar.addWidget(self.btn_nav_profile)
@@ -228,6 +232,7 @@ class App(QWidget):
         sidebar.addWidget(self.btn_nav_listing)
         sidebar.addStretch()
         sidebar.addWidget(self.btn_nav_pcap)
+        sidebar.addWidget(self.btn_nav_settings)
         sidebar.addWidget(self.btn_nav_help)
 
         return sidebar
@@ -239,6 +244,7 @@ class App(QWidget):
         self.btn_nav_registry.clicked.connect(lambda: self.go_page(self.IDX_REGISTRY, self._nav_registry))
         self.btn_nav_listing.clicked.connect(lambda: self.go_page(self.IDX_LISTING, self._nav_listing))
         self.btn_nav_pcap.clicked.connect(lambda: self.go_page(self.IDX_PCAP, self._nav_pcap))
+        self.btn_nav_settings.clicked.connect(lambda: self.go_page(self.IDX_SETTINGS, self._nav_settings))
         self.btn_nav_help.clicked.connect(self.open_user_manual)
 
     def _wire_ui(self) -> None:
@@ -262,7 +268,7 @@ class App(QWidget):
         self.btn_load.clicked.connect(self.dataset_controller.load_dataset_dialog)
         self.btn_ai_summary.clicked.connect(self.explore_ui_controller.generate_ai_summary)
         self.btn_add_ai_to_notes.clicked.connect(self.add_ai_summary_to_notes)
-        self.btn_ai_settings.clicked.connect(self.configure_ai_settings)
+        self.btn_ai_settings.clicked.connect(lambda: self.go_page(self.IDX_SETTINGS, self._nav_settings))
         self.btn_toggle_conv.clicked.connect(self.explore_ui_controller.toggle_conversation)
         self.btn_expand_flows.clicked.connect(self.explore_ui_controller.toggle_flows_expanded)
         self.btn_mark_finding.clicked.connect(self.mark_as_finding)
@@ -524,6 +530,7 @@ class App(QWidget):
         self.IDX_REGISTRY = 3
         self.IDX_LISTING = 4
         self.IDX_PCAP = 5
+        self.IDX_SETTINGS = 6
 
         # -------- Projects page --------
         projects_page = QWidget()
@@ -1114,6 +1121,9 @@ class App(QWidget):
         self.pcap_page = PcapPage(self)
         self.pages.addWidget(self.pcap_page)
 
+        self.settings_page = SettingsPage(self)
+        self.pages.addWidget(self.settings_page)
+
         self.pages.setCurrentIndex(self.IDX_PROJECTS)
         self._set_active_nav(self._nav_projects)
 
@@ -1130,7 +1140,15 @@ class App(QWidget):
         outer.addLayout(footer)
           
     def _set_active_nav(self, active: QPushButton):
-        for b in (self._nav_projects, self._nav_profile, self._nav_explore, self._nav_registry, self._nav_listing, self._nav_pcap):
+        for b in (
+            self._nav_projects,
+            self._nav_profile,
+            self._nav_explore,
+            self._nav_registry,
+            self._nav_listing,
+            self._nav_pcap,
+            self._nav_settings,
+        ):
             b.setProperty("active", b is active)
             b.style().unpolish(b)
             b.style().polish(b)
@@ -1139,6 +1157,8 @@ class App(QWidget):
     def go_page(self, idx: int, active_btn: QPushButton):
         if idx == self.IDX_PROFILE:
             self.refresh_activity_profile_ui()
+        if idx == self.IDX_SETTINGS and hasattr(self, "settings_page"):
+            self.settings_page.refresh()
         self.pages.setCurrentIndex(idx)
         self._set_active_nav(active_btn)
 

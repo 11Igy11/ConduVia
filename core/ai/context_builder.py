@@ -236,6 +236,19 @@ def build_pcap_context(
         lines.append(f"- {row.get('hour')}: {row.get('packets')} packets, share {float(row.get('share') or 0.0):.1f}%")
     lines.append("")
 
+    lines.append("Communication highlights / app activity indicators:")
+    communication_rows = summary.communication_rows or []
+    if communication_rows:
+        for row in communication_rows[:limit]:
+            lines.append(
+                f"- {row.get('service')}: {row.get('activity_type')} "
+                f"({row.get('confidence')} confidence); host {row.get('host') or '-'}; "
+                f"evidence: {row.get('evidence')}"
+            )
+    else:
+        lines.append("- No app communication indicators were classified.")
+    lines.append("")
+
     lines.append("Artifact categories:")
     if artifact_counts:
         for category, count in sorted(artifact_counts.items()):
@@ -321,6 +334,41 @@ def build_activity_profile_context(
     lines.append("Observed PCAP capture range:")
     lines.append(f"- {capture_range.get('label') or '-'}")
     lines.append("")
+
+    behavior = profile.get("behavior_profile") or {}
+    if behavior:
+        lines.append("Loaded-dataset behavior indicators:")
+        lines.append(f"- Flow count: {behavior.get('flow_count', 0)}")
+        lines.append(f"- Total volume: {behavior.get('total_bytes_label') or human_bytes(behavior.get('total_bytes', 0), precision=2)}")
+        dataset_info = behavior.get("project_dataset_info") or {}
+        if dataset_info:
+            lines.append(
+                "- Project JSON sources included: "
+                f"{dataset_info.get('loaded_source_count', 0)} / {dataset_info.get('source_count', 0)}; "
+                f"deduped paths {dataset_info.get('deduped_path_count', 0)}; "
+                f"missing/error paths {len(dataset_info.get('missing_rows') or [])}"
+            )
+        lines.append("Service groups by volume:")
+        service_rows = behavior.get("service_rows") or []
+        if service_rows:
+            for row in service_rows[:limit]:
+                lines.append(
+                    f"- {row.get('label')}: {row.get('bytes_label')}, "
+                    f"{row.get('count')} flows, example {row.get('example') or '-'}"
+                )
+        else:
+            lines.append("- No visible service groups.")
+        lines.append("Observed domains by volume:")
+        domain_rows = behavior.get("domain_rows") or []
+        if domain_rows:
+            for row in domain_rows[:limit]:
+                lines.append(f"- {row.get('label')}: {row.get('bytes_label')}, {row.get('count')} flows")
+        else:
+            lines.append("- No visible hostnames.")
+        lines.append("Activity rhythm:")
+        for line in behavior.get("routine_lines") or []:
+            lines.append(f"- {line}")
+        lines.append("")
 
     lines.append("Deterministic next-review guidance:")
     for line in profile.get("recommendation_lines") or []:

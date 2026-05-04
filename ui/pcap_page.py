@@ -35,7 +35,9 @@ from core.db import (
     add_activity,
     add_pcap_source,
     file_sha256,
+    get_project,
     list_project_pcap_device_ips,
+    set_project_subject,
 )
 from ui.explore_widgets import AITextWorker
 
@@ -80,15 +82,17 @@ class DictTableModel(QAbstractTableModel):
         return None
 
     def data(self, index, role=Qt.DisplayRole):
-        if not index.isValid() or role != Qt.DisplayRole:
+        if not index.isValid() or role not in (Qt.DisplayRole, Qt.ToolTipRole):
             return None
         key = self.columns[index.column()][0]
         value = self.rows[index.row()].get(key, "")
+        if role == Qt.ToolTipRole:
+            return "" if value is None else str(value)
         if key in ("protocol", "protocol_number") and isinstance(value, int):
             return format_ip_proto(value)
         if key in ("bytes", "bidirectional_bytes"):
             return human_bytes(value, precision=2)
-        if key == "bidirectional_duration_ms":
+        if key in ("bidirectional_duration_ms", "duration_ms"):
             return format_duration_compact_ms(value)
         if key == "share":
             try:
@@ -154,6 +158,7 @@ class PcapPage(QWidget):
         root.addWidget(header)
 
         self.tabs = QTabWidget()
+        self.tabs.addTab(self._build_highlights_tab(), "Highlights")
         self.tabs.addTab(self._build_investigator_tab(), "Investigator View")
         self.tabs.addTab(self._build_ai_tab(), "AI Summary")
         self.tabs.addTab(self._build_overview_tab(), "Overview")
@@ -167,6 +172,62 @@ class PcapPage(QWidget):
         self.btn_ai_summary.clicked.connect(self.generate_ai_summary)
         self.btn_add_notes.clicked.connect(self.add_summary_to_notes)
         self.btn_export.clicked.connect(self.export_summary)
+
+    def _build_highlights_tab(self) -> QWidget:
+        page = QWidget()
+        page_layout = QVBoxLayout(page)
+        page_layout.setContentsMargins(0, 0, 0, 0)
+        page_layout.setSpacing(0)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+
+        content = QWidget()
+        layout = QVBoxLayout(content)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(14)
+
+        self.lbl_highlights_brief = QLabel("Open a PCAP file to see communication highlights.")
+        self.lbl_highlights_brief.setObjectName("PcapPlainSummary")
+        self.lbl_highlights_brief.setWordWrap(True)
+        self.lbl_highlights_brief.setTextInteractionFlags(Qt.TextSelectableByMouse)
+
+        self.tbl_communications = self._table([
+            ("service", "Service"),
+            ("activity_type", "Indicator"),
+            ("confidence", "Confidence"),
+            ("host", "Host / Signal"),
+            ("protocol", "Protocol"),
+            ("bytes", "Volume"),
+            ("packets", "Packets"),
+            ("duration_ms", "Duration"),
+            ("first_seen", "First Seen"),
+        ], fixed_widths={0: 170, 2: 92, 4: 78, 5: 92, 6: 82, 7: 96, 8: 178}, stretch_columns=[1, 3])
+        self.tbl_communications.setMinimumHeight(330)
+        self.tbl_communications.setWordWrap(True)
+        self.tbl_communications.verticalHeader().setDefaultSectionSize(44)
+        self.tbl_communications.selectionModel().currentRowChanged.connect(self._on_communication_selected)
+
+        self.txt_communication_detail = QTextEdit()
+        self.txt_communication_detail.setReadOnly(True)
+        self.txt_communication_detail.setMinimumHeight(150)
+        self.txt_communication_detail.setPlaceholderText("Select a communication indicator to see the evidence used for classification.")
+
+        splitter = QSplitter(Qt.Vertical)
+        splitter.addWidget(self._group("Communication indicators", self.tbl_communications))
+        splitter.addWidget(self._group("Selected indicator evidence", self.txt_communication_detail))
+        splitter.setStretchFactor(0, 3)
+        splitter.setStretchFactor(1, 1)
+
+        layout.addWidget(self._group("Investigation brief", self.lbl_highlights_brief))
+        layout.addWidget(splitter, 1)
+        layout.addStretch()
+
+        scroll.setWidget(content)
+        page_layout.addWidget(scroll, 1)
+        return page
 
     def _build_investigator_tab(self) -> QWidget:
         page = QWidget()
@@ -505,6 +566,7 @@ class PcapPage(QWidget):
             f"Period: {summary.first_seen or '-'} - {summary.last_seen or '-'}"
         )
         investigator = build_investigator_view(summary)
+        self._set_highlights(summary)
         self._set_investigator_text(investigator)
         self._set_table(self.tbl_services, investigator["service_rows"])
         self._set_table(self.tbl_visibility, investigator["visibility_rows"])
@@ -519,6 +581,63 @@ class PcapPage(QWidget):
         self._set_table(self.tbl_samples, summary.readable_samples)
         self._set_artifact_tables(summary.artifacts)
         self._set_table(self.tbl_connections, summary.flows)
+
+    def _set_highlights(self, summary: PcapSummary) -> None:
+        rows = summary.communication_rows or []
+        media_like = sum(1 for row in rows if "media" in str(row.get("activity_type") or "").lower() or "call" in str(row.get("activity_type") or "").lower())
+        messaging_like = sum(1 for row in rows if "messaging" in str(row.get("activity_type") or "").lower() or "push" in str(row.get("activity_type") or "").lower())
+        services = []
+        seen = set()
+        for row in rows:
+            service = str(row.get("service") or "").strip()
+            if service and service not in seen:
+                seen.add(service)
+                services.append(service)
+
+        lines = [
+            f"Visible app/service indicators: {', '.join(services[:8]) if services else '-'}",
+            f"Messaging/push-like indicators: {messaging_like}",
+            f"Possible call/media indicators: {media_like}",
+            "Classification is based on metadata such as host names, ports, protocol, duration and volume. It is an investigative indicator, not content proof.",
+        ]
+        self.lbl_highlights_brief.setText("\n".join(lines))
+        self._set_table(self.tbl_communications, rows)
+        if rows:
+            self.tbl_communications.selectRow(0)
+        else:
+            self.txt_communication_detail.clear()
+
+    def _on_communication_selected(self, current: QModelIndex, previous: QModelIndex | None = None) -> None:
+        model = self.tbl_communications.model()
+        if not isinstance(model, DictTableModel) or not current.isValid():
+            self.txt_communication_detail.clear()
+            return
+        if current.row() < 0 or current.row() >= len(model.rows):
+            self.txt_communication_detail.clear()
+            return
+
+        row = model.rows[current.row()]
+        lines = [
+            f"Service: {row.get('service') or '-'}",
+            f"Indicator: {row.get('activity_type') or '-'}",
+            f"Confidence: {row.get('confidence') or '-'}",
+            f"Host / signal: {row.get('host') or '-'}",
+            f"Source: {row.get('source') or '-'}",
+            f"Destination: {row.get('destination') or '-'}",
+            f"Protocol: {row.get('protocol') or '-'}",
+            f"Volume: {human_bytes(row.get('bytes'), precision=2)}",
+            f"Packets: {row.get('packets') or 0}",
+            f"Duration: {format_duration_compact_ms(row.get('duration_ms'))}",
+            f"First seen: {row.get('first_seen') or '-'}",
+            f"Last seen: {row.get('last_seen') or '-'}",
+            "",
+            "Evidence:",
+            str(row.get("evidence") or "-"),
+            "",
+            "Interpretation limit:",
+            "This is a metadata-based indicator. It does not prove message content or confirm a call by itself.",
+        ]
+        self.txt_communication_detail.setPlainText("\n".join(lines))
 
     def _on_error(self, message: str):
         QMessageBox.critical(self, "PCAP analysis failed", message)
@@ -697,7 +816,13 @@ class PcapPage(QWidget):
             file_path += ".html"
 
         try:
-            export_pcap_summary_html(file_path, self.summary)
+            project = get_project(self._current_project_id()) if self._current_project_id() is not None else None
+            export_pcap_summary_html(
+                file_path,
+                self.summary,
+                project=project,
+                project_name=getattr(self.app, "current_project_name", "") or "",
+            )
             webbrowser.open(Path(file_path).resolve().as_uri())
         except Exception as exc:
             QMessageBox.critical(self, "PCAP export failed", str(exc))
@@ -737,13 +862,17 @@ class PcapPage(QWidget):
                 likely_device_ip=self.summary.likely_device_ip,
                 summary_text=str(investigator.get("plain_summary") or ""),
             )
+            bound_project_ip = self._bind_project_device_ip_if_empty(project_id)
         except Exception as exc:
             self._error("PCAP", "Failed to save PCAP analysis to project.", str(exc))
             return
 
         self._saved_source_id = source_id
         self.btn_save_project.setText("Saved to Project")
-        self._info("PCAP", "PCAP analysis saved to active project.", f"Source id: {source_id}")
+        details = [f"Source id: {source_id}"]
+        if bound_project_ip:
+            details.append(f"Project known IP was set to: {bound_project_ip}")
+        self._info("PCAP", "PCAP analysis saved to active project.", "\n".join(details))
         self._refresh_activity()
 
     def add_summary_to_notes(self):
@@ -803,6 +932,16 @@ class PcapPage(QWidget):
         ]
         for point in investigator.get("key_points") or []:
             lines.append(f"- {point}")
+        if self.summary.communication_rows:
+            lines.extend([
+                "",
+                "Communication highlights:",
+            ])
+            for row in self.summary.communication_rows[:8]:
+                lines.append(
+                    f"- {row.get('service')}: {row.get('activity_type')} "
+                    f"({row.get('confidence')} confidence) - {row.get('evidence')}"
+                )
         lines.extend([
             "",
             "Artifact categories:",
@@ -841,6 +980,23 @@ class PcapPage(QWidget):
                 cancel_text="Cancel",
             )
 
+        project = get_project(project_id)
+        project_ip = (project.subject_ip if project else "").strip()
+        if project_ip and project_ip.casefold() != current_ip.casefold():
+            ok = self._confirm(
+                "PCAP project IP mismatch",
+                "This PCAP likely describes a different device IP than the active project.",
+                (
+                    f"Project known IP: {project_ip}\n"
+                    f"Current PCAP likely device IP: {current_ip}\n\n"
+                    "Save only if this capture belongs to the same target/project or if the known project IP should be reviewed."
+                ),
+                ok_text="Save anyway",
+                cancel_text="Cancel",
+            )
+            if not ok:
+                return False
+
         previous_ips = [ip for ip in list_project_pcap_device_ips(project_id) if ip and ip != current_ip]
         if not previous_ips:
             return True
@@ -856,6 +1012,28 @@ class PcapPage(QWidget):
             ok_text="Save anyway",
             cancel_text="Cancel",
         )
+
+    def _bind_project_device_ip_if_empty(self, project_id: int) -> str:
+        current_ip = (self.summary.likely_device_ip if self.summary else "").strip()
+        if not current_ip:
+            return ""
+
+        project = get_project(project_id)
+        if not project or (project.subject_ip or "").strip():
+            return ""
+
+        set_project_subject(
+            project_id,
+            first_name=project.subject_first_name,
+            last_name=project.subject_last_name,
+            oib=project.subject_oib,
+            msisdn=project.subject_msisdn,
+            imsi=project.subject_imsi,
+            imei=project.subject_imei,
+            ip=current_ip,
+            extra_identifiers=project.subject_extra_identifiers,
+        )
+        return current_ip
 
     def _current_project_id(self) -> int | None:
         return getattr(self.app, "current_project_id", None)

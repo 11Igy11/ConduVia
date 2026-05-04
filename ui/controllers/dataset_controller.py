@@ -9,6 +9,12 @@ from core.analyzer import top_applications, top_dst_ips, top_protocols, top_src_
 from core.db import add_dataset_load, get_project, list_recent_datasets, set_project_target
 from core.loader import load_folder, load_json_file
 from core.parser import extract_dataset_meta
+from core.project_identity import (
+    identifier_values_match,
+    project_identifier_rows,
+    project_identifiers_text,
+    target_display_label,
+)
 from core.protocols import format_ip_proto
 
 
@@ -128,8 +134,8 @@ class DatasetController(QObject):
         choice = self.app._choice_dialog(
             title="Open dataset",
             message="What do you want to open?",
-            choices=["Folder", "JSON file"],
-            width=420,
+            choices=["Folder", "JSON file", "PCAP file"],
+            width=560,
         )
 
         if choice == "Folder":
@@ -149,6 +155,20 @@ class DatasetController(QObject):
             if not file_path:
                 return
             self.load_dataset_file(file_path)
+            return
+
+        if choice == "PCAP file":
+            file_path, _ = QFileDialog.getOpenFileName(
+                self.app,
+                "Select PCAP file",
+                "",
+                "Capture files (*.pcap *.pcapng);;All files (*.*)",
+            )
+            if not file_path:
+                return
+            if hasattr(self.app, "pcap_page"):
+                self.app.go_page(self.app.IDX_PCAP, self.app._nav_pcap)
+                self.app.pcap_page.load_pcap(file_path)
             return
 
     def render_summary(self):
@@ -330,6 +350,17 @@ class DatasetController(QObject):
             return f"{target_identifier} ({target_type})"
         return target_identifier or target_type or "-"
 
+    def _project_target_details(self, project) -> str:
+        known = project_identifiers_text(project)
+        fallback = target_display_label(project)
+        if known == "-" and fallback == "-":
+            return "-"
+        if known == "-":
+            return fallback
+        if fallback == "-" or fallback in known:
+            return known
+        return f"{known}\nLegacy target: {fallback}"
+
     def _target_matches(
         self,
         project_identifier: str,
@@ -337,7 +368,12 @@ class DatasetController(QObject):
         dataset_identifier: str,
         dataset_type: str,
     ) -> bool:
-        same_identifier = project_identifier.strip().casefold() == dataset_identifier.strip().casefold()
+        same_identifier = identifier_values_match(
+            project_identifier,
+            dataset_identifier,
+            project_type=project_type,
+            dataset_type=dataset_type,
+        )
         if not same_identifier:
             return False
 
@@ -345,6 +381,29 @@ class DatasetController(QObject):
             return project_type.strip().casefold() == dataset_type.strip().casefold()
 
         return True
+
+    def _target_matches_project(self, project, dataset_identifier: str, dataset_type: str) -> bool:
+        rows = project_identifier_rows(project)
+        if not rows and (project.target_identifier or "").strip():
+            return self._target_matches(
+                project.target_identifier,
+                project.target_type,
+                dataset_identifier,
+                dataset_type,
+            )
+
+        for row in rows:
+            value = str(row.get("value") or "").strip()
+            kind = str(row.get("type") or "").strip()
+            if identifier_values_match(
+                value,
+                dataset_identifier,
+                project_type=kind,
+                dataset_type=dataset_type,
+            ):
+                return True
+
+        return False
 
     def _refresh_selected_project_preview(self, project_id: int) -> None:
         selected_item = self.app.projects_list.currentItem()
@@ -364,10 +423,11 @@ class DatasetController(QObject):
         dataset_identifier, dataset_type = self._dataset_target_from_meta(meta)
         project_identifier = (project.target_identifier or "").strip()
         project_type = (project.target_type or "").strip()
+        project_details = self._project_target_details(project)
 
         if not dataset_identifier:
             details = (
-                f"Project target: {self._format_target(project_identifier, project_type)}\n"
+                f"Project identifiers: {project_details}\n"
                 "Dataset target: -\n\n"
                 "ViaNyquist cannot verify whether this dataset belongs to the active project."
             )
@@ -380,12 +440,17 @@ class DatasetController(QObject):
                 width=520,
             )
 
-        if not project_identifier:
+        if not project_identifier and not project_identifier_rows(project):
             set_project_target(project_id, dataset_identifier, dataset_type)
             self._refresh_selected_project_preview(project_id)
             return True
 
-        same_identifier = project_identifier.casefold() == dataset_identifier.casefold()
+        same_identifier = identifier_values_match(
+            project_identifier,
+            dataset_identifier,
+            project_type=project_type,
+            dataset_type=dataset_type,
+        )
         if same_identifier and not project_type and dataset_type:
             set_project_target(project_id, project_identifier, dataset_type)
             self._refresh_selected_project_preview(project_id)
@@ -393,7 +458,7 @@ class DatasetController(QObject):
 
         if same_identifier and project_type and not dataset_type:
             details = (
-                f"Project target: {self._format_target(project_identifier, project_type)}\n"
+                f"Project identifiers: {project_details}\n"
                 f"Dataset target: {self._format_target(dataset_identifier, dataset_type)}\n\n"
                 "The identifier matches, but the dataset does not contain a target type."
             )
@@ -406,11 +471,11 @@ class DatasetController(QObject):
                 width=540,
             )
 
-        if self._target_matches(project_identifier, project_type, dataset_identifier, dataset_type):
+        if self._target_matches_project(project, dataset_identifier, dataset_type):
             return True
 
         details = (
-            f"Project target: {self._format_target(project_identifier, project_type)}\n"
+            f"Project identifiers: {project_details}\n"
             f"Dataset target: {self._format_target(dataset_identifier, dataset_type)}\n\n"
             "This may mean the selected dataset belongs to a different target than the active project."
         )

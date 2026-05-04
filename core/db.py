@@ -22,6 +22,14 @@ class Project:
     updated_at: str
     target_identifier: str = ""
     target_type: str = ""
+    subject_first_name: str = ""
+    subject_last_name: str = ""
+    subject_oib: str = ""
+    subject_msisdn: str = ""
+    subject_imsi: str = ""
+    subject_imei: str = ""
+    subject_ip: str = ""
+    subject_extra_identifiers: str = ""
 
 @dataclass
 class PcapSource:
@@ -92,6 +100,14 @@ def init_db(db_path: Path = DEFAULT_DB_PATH) -> None:
             ("notes", "TEXT NOT NULL DEFAULT ''"),
             ("target_identifier", "TEXT NOT NULL DEFAULT ''"),
             ("target_type", "TEXT NOT NULL DEFAULT ''"),
+            ("subject_first_name", "TEXT NOT NULL DEFAULT ''"),
+            ("subject_last_name", "TEXT NOT NULL DEFAULT ''"),
+            ("subject_oib", "TEXT NOT NULL DEFAULT ''"),
+            ("subject_msisdn", "TEXT NOT NULL DEFAULT ''"),
+            ("subject_imsi", "TEXT NOT NULL DEFAULT ''"),
+            ("subject_imei", "TEXT NOT NULL DEFAULT ''"),
+            ("subject_ip", "TEXT NOT NULL DEFAULT ''"),
+            ("subject_extra_identifiers", "TEXT NOT NULL DEFAULT ''"),
         ])
 
         # --- Datasets (load history) ---
@@ -263,6 +279,14 @@ def create_project(
     name: str,
     description: str = "",
     base_folder: str = "",
+    subject_first_name: str = "",
+    subject_last_name: str = "",
+    subject_oib: str = "",
+    subject_msisdn: str = "",
+    subject_imsi: str = "",
+    subject_imei: str = "",
+    subject_ip: str = "",
+    subject_extra_identifiers: str = "",
     db_path: Path = DEFAULT_DB_PATH,
 ) -> int:
     name = (name or "").strip()
@@ -272,10 +296,35 @@ def create_project(
     with _connect(db_path) as con:
         cur = con.execute(
             """
-            INSERT INTO projects (name, description, base_folder, updated_at)
-            VALUES (?, ?, ?, datetime('now'));
+            INSERT INTO projects (
+                name,
+                description,
+                base_folder,
+                subject_first_name,
+                subject_last_name,
+                subject_oib,
+                subject_msisdn,
+                subject_imsi,
+                subject_imei,
+                subject_ip,
+                subject_extra_identifiers,
+                updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'));
             """,
-            (name, description or "", base_folder or ""),
+            (
+                name,
+                description or "",
+                base_folder or "",
+                (subject_first_name or "").strip(),
+                (subject_last_name or "").strip(),
+                (subject_oib or "").strip(),
+                (subject_msisdn or "").strip(),
+                (subject_imsi or "").strip(),
+                (subject_imei or "").strip(),
+                (subject_ip or "").strip(),
+                (subject_extra_identifiers or "").strip(),
+            ),
         )
         return int(cur.lastrowid)
     
@@ -284,6 +333,14 @@ def update_project(
     name: str,
     description: str = "",
     base_folder: str = "",
+    subject_first_name: str = "",
+    subject_last_name: str = "",
+    subject_oib: str = "",
+    subject_msisdn: str = "",
+    subject_imsi: str = "",
+    subject_imei: str = "",
+    subject_ip: str = "",
+    subject_extra_identifiers: str = "",
     db_path: Path = DEFAULT_DB_PATH,
 ) -> None:
     name = (name or "").strip()
@@ -299,6 +356,14 @@ def update_project(
                 name = ?,
                 description = ?,
                 base_folder = ?,
+                subject_first_name = ?,
+                subject_last_name = ?,
+                subject_oib = ?,
+                subject_msisdn = ?,
+                subject_imsi = ?,
+                subject_imei = ?,
+                subject_ip = ?,
+                subject_extra_identifiers = ?,
                 updated_at = datetime('now')
             WHERE id = ?
             """,
@@ -306,6 +371,14 @@ def update_project(
                 name,
                 description or "",
                 base_folder or "",
+                (subject_first_name or "").strip(),
+                (subject_last_name or "").strip(),
+                (subject_oib or "").strip(),
+                (subject_msisdn or "").strip(),
+                (subject_imsi or "").strip(),
+                (subject_imei or "").strip(),
+                (subject_ip or "").strip(),
+                (subject_extra_identifiers or "").strip(),
                 project_id,
             ),
         )
@@ -322,7 +395,15 @@ def list_projects(db_path: Path = DEFAULT_DB_PATH) -> list[Project]:
                 created_at,
                 updated_at,
                 target_identifier,
-                target_type
+                target_type,
+                subject_first_name,
+                subject_last_name,
+                subject_oib,
+                subject_msisdn,
+                subject_imsi,
+                subject_imei,
+                subject_ip,
+                subject_extra_identifiers
             FROM projects
             ORDER BY updated_at DESC;
             """
@@ -338,6 +419,14 @@ def list_projects(db_path: Path = DEFAULT_DB_PATH) -> list[Project]:
             updated_at=str(r["updated_at"]),
             target_identifier=str(r["target_identifier"] or ""),
             target_type=str(r["target_type"] or ""),
+            subject_first_name=str(r["subject_first_name"] or ""),
+            subject_last_name=str(r["subject_last_name"] or ""),
+            subject_oib=str(r["subject_oib"] or ""),
+            subject_msisdn=str(r["subject_msisdn"] or ""),
+            subject_imsi=str(r["subject_imsi"] or ""),
+            subject_imei=str(r["subject_imei"] or ""),
+            subject_ip=str(r["subject_ip"] or ""),
+            subject_extra_identifiers=str(r["subject_extra_identifiers"] or ""),
         )
         for r in rows
     ]
@@ -354,7 +443,15 @@ def get_project(project_id: int, db_path: Path = DEFAULT_DB_PATH) -> Optional[Pr
                 created_at,
                 updated_at,
                 target_identifier,
-                target_type
+                target_type,
+                subject_first_name,
+                subject_last_name,
+                subject_oib,
+                subject_msisdn,
+                subject_imsi,
+                subject_imei,
+                subject_ip,
+                subject_extra_identifiers
             FROM projects
             WHERE id = ?;
             """,
@@ -373,6 +470,14 @@ def get_project(project_id: int, db_path: Path = DEFAULT_DB_PATH) -> Optional[Pr
         updated_at=str(r["updated_at"]),
         target_identifier=str(r["target_identifier"] or ""),
         target_type=str(r["target_type"] or ""),
+        subject_first_name=str(r["subject_first_name"] or ""),
+        subject_last_name=str(r["subject_last_name"] or ""),
+        subject_oib=str(r["subject_oib"] or ""),
+        subject_msisdn=str(r["subject_msisdn"] or ""),
+        subject_imsi=str(r["subject_imsi"] or ""),
+        subject_imei=str(r["subject_imei"] or ""),
+        subject_ip=str(r["subject_ip"] or ""),
+        subject_extra_identifiers=str(r["subject_extra_identifiers"] or ""),
     )
 
 def touch_project(project_id: int, db_path: Path = DEFAULT_DB_PATH) -> None:
@@ -401,6 +506,48 @@ def set_project_target(
             (
                 (target_identifier or "").strip(),
                 (target_type or "").strip(),
+                project_id,
+            ),
+        )
+
+def set_project_subject(
+    project_id: int,
+    *,
+    first_name: str = "",
+    last_name: str = "",
+    oib: str = "",
+    msisdn: str = "",
+    imsi: str = "",
+    imei: str = "",
+    ip: str = "",
+    extra_identifiers: str = "",
+    db_path: Path = DEFAULT_DB_PATH,
+) -> None:
+    with _connect(db_path) as con:
+        con.execute(
+            """
+            UPDATE projects
+            SET
+                subject_first_name = ?,
+                subject_last_name = ?,
+                subject_oib = ?,
+                subject_msisdn = ?,
+                subject_imsi = ?,
+                subject_imei = ?,
+                subject_ip = ?,
+                subject_extra_identifiers = ?,
+                updated_at = datetime('now')
+            WHERE id = ?;
+            """,
+            (
+                (first_name or "").strip(),
+                (last_name or "").strip(),
+                (oib or "").strip(),
+                (msisdn or "").strip(),
+                (imsi or "").strip(),
+                (imei or "").strip(),
+                (ip or "").strip(),
+                (extra_identifiers or "").strip(),
                 project_id,
             ),
         )
