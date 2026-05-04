@@ -11,6 +11,7 @@ from unittest.mock import patch
 from core.ai.assistant_service import AIAssistantService, AISettings
 from core.ai.context_builder import build_activity_profile_context, build_dataset_context, build_pcap_context
 from core.ai.prompts import build_activity_profile_summary_prompt, build_dataset_summary_prompt, build_pcap_summary_prompt
+from core.behavior_profile import build_flow_behavior_profile
 from core.compare import compare_flows, summarize_new_flows
 from core.db import (
     add_dataset_load,
@@ -25,6 +26,7 @@ from core.db import (
     list_pcap_sources,
     list_project_pcap_device_ips,
     set_app_setting,
+    set_project_subject,
     set_project_target,
 )
 from core.flow_stats import compute_registry_summary, top_field_by_bytes, top_field_values
@@ -37,9 +39,13 @@ from core.formatters import (
     human_bytes,
     safe_int,
 )
+from core.exporters.profile_exporter import export_activity_profile_html
+from core.exporters.pcap_exporter import export_pcap_summary_html
 from core.loader import list_json_files, load_folder, load_json_file
 from core.parser import extract_dataset_meta
-from core.pcap_analyzer import analyze_pcap, build_investigator_view
+from core.pcap_analyzer import analyze_pcap, build_communication_rows, build_investigator_view
+from core.project_datasets import load_project_dataset_flows
+from core.project_identity import identifier_values_match, normalize_identifier_value
 from core.project_profile import build_project_activity_profile, format_project_activity_profile
 from core.protocols import describe_ip_proto, format_ip_proto_with_description
 from core.timeutils import LOCAL_TZ, parse_timestamp
@@ -161,6 +167,114 @@ class FlowStatsTests(unittest.TestCase):
         self.assertEqual(summary["top_hour"], [("2024-01-01 10", 1), ("2024-01-01 11", 1)])
 
 
+class BehaviorProfileTests(unittest.TestCase):
+    def test_project_dataset_loader_aggregates_saved_project_sources(self):
+        with temporary_directory() as tmp:
+            root = Path(tmp)
+            db_path = root / "project-datasets.db"
+            one = root / "one.json"
+            two = root / "two.json"
+            missing = root / "missing.json"
+            one.write_text(json.dumps([{"id": "one", "requested_server_name": "web.facebook.com"}]), encoding="utf-8")
+            two.write_text(json.dumps([{"id": "two", "requested_server_name": "www.youtube.com"}]), encoding="utf-8")
+            init_db(db_path)
+            project_id = create_project("Case A", db_path=db_path)
+            add_dataset_load(project_id, str(one), db_path=db_path)
+            add_dataset_load(project_id, str(two), db_path=db_path)
+            add_dataset_load(project_id, str(one), db_path=db_path)
+            add_dataset_load(project_id, str(missing), db_path=db_path)
+
+            result = load_project_dataset_flows(project_id, db_path=db_path)
+
+        self.assertEqual(result["saved_path_count"], 4)
+        self.assertEqual(result["deduped_path_count"], 3)
+        self.assertEqual(result["loaded_source_count"], 2)
+        self.assertEqual(result["source_count"], 3)
+        self.assertEqual(result["flow_count"], 2)
+        self.assertEqual([flow["id"] for flow in result["flows"]], ["one", "two"])
+        self.assertEqual(len(result["missing_rows"]), 1)
+
+    def test_behavior_profile_groups_services_domains_and_hours(self):
+        flows = [
+            {
+                "requested_server_name": "web.facebook.com",
+                "application_name": "TLS",
+                "bidirectional_bytes": 2048,
+                "bidirectional_first_seen_ms": "2026-01-04 07:10:00",
+            },
+            {
+                "requested_server_name": "video.twimg.com",
+                "application_name": "TLS",
+                "bidirectional_bytes": 1024,
+                "bidirectional_first_seen_ms": "2026-01-04 23:05:00",
+            },
+            {
+                "requested_server_name": "rr4---sn.googlevideo.com",
+                "application_name": "TLS",
+                "bidirectional_bytes": 4096,
+                "bidirectional_first_seen_ms": "2026-01-04 23:30:00",
+            },
+            {
+                "requested_server_name": "api.tiktokv.com",
+                "application_name": "TLS",
+                "bidirectional_bytes": 512,
+                "bidirectional_first_seen_ms": "2026-01-04 12:00:00",
+            },
+        ]
+
+        profile = build_flow_behavior_profile(flows)
+
+        self.assertEqual(profile["flow_count"], 4)
+        self.assertEqual(profile["timestamp_count"], 4)
+        self.assertEqual(profile["total_bytes"], 7680)
+        self.assertTrue(any(row["label"] == "Facebook / Meta" for row in profile["service_rows"]))
+        self.assertTrue(any(row["label"] == "Google / YouTube" for row in profile["service_rows"]))
+        self.assertTrue(any(row["label"] == "TikTok" for row in profile["service_rows"]))
+        self.assertEqual(profile["domain_rows"][0]["label"], "rr4---sn.googlevideo.com")
+        self.assertTrue(any(row["label"] == "23:00" and row["count"] == 2 for row in profile["hour_rows"]))
+        self.assertTrue(any(line.startswith("Most active hour: 23:00") for line in profile["routine_lines"]))
+        self.assertTrue(any("not proof" in line for line in profile["routine_lines"]))
+
+    def test_behavior_profile_returns_valid_empty_structures(self):
+        profile = build_flow_behavior_profile([])
+
+        self.assertEqual(profile["flow_count"], 0)
+        self.assertEqual(profile["total_bytes"], 0)
+        self.assertEqual(profile["service_rows"], [])
+        self.assertEqual(profile["domain_rows"], [])
+        self.assertEqual(profile["hour_rows"], [])
+        self.assertTrue(profile["routine_lines"])
+
+    def test_activity_profile_html_export_includes_behavior_sections(self):
+        with temporary_directory() as tmp:
+            output = Path(tmp) / "profile.html"
+            profile = {
+                "summary_lines": ["Project Activity Profile", "- Case subject: Ana Horvat"],
+                "recommendation_lines": ["- Compare JSON and PCAP evidence."],
+                "timeline_lines": ["- 2026-01-04 09:00:00: Dataset loaded"],
+                "metrics": [{"label": "Datasets", "value": 1}],
+                "evidence_counts": [{"label": "Datasets", "count": 1}],
+                "pcap_device_ip_rows": [{"label": "10.0.0.10", "count": 1}],
+                "capture_range": {"label": "04/01/2026 09:00:00.000"},
+                "total_pcap_bytes_label": "86.10 MB",
+                "behavior_profile": {
+                    "service_rows": [{"label": "WhatsApp", "bytes": 2048, "bytes_label": "2.00 KB"}],
+                    "domain_rows": [{"label": "web.whatsapp.com", "bytes": 2048, "bytes_label": "2.00 KB"}],
+                    "hour_rows": [{"label": "09:00", "count": 4}],
+                    "routine_lines": ["Most active hour: 09:00 (4 flows)."],
+                },
+            }
+
+            export_activity_profile_html(str(output), profile=profile, project_name="Case A")
+            content = output.read_text(encoding="utf-8")
+
+        self.assertIn("ViaNyquist Activity Profile", content)
+        self.assertIn("Case A", content)
+        self.assertIn("Behavior Insights", content)
+        self.assertIn("WhatsApp", content)
+        self.assertIn("Most active hour", content)
+
+
 class CompareTests(unittest.TestCase):
     def test_compare_flows_reports_new_and_known_fingerprints(self):
         previous = [
@@ -237,6 +351,56 @@ class ProjectTargetTests(unittest.TestCase):
         self.assertEqual(project.target_identifier, "385911234567")
         self.assertEqual(project.target_type, "MSISDN")
 
+    def test_project_subject_identifiers_are_persisted_in_database(self):
+        with temporary_directory() as tmp:
+            db_path = Path(tmp) / "projects.db"
+            init_db(db_path)
+
+            project_id = create_project("Case A", db_path=db_path)
+            set_project_subject(
+                project_id,
+                first_name="Ana",
+                last_name="Horvat",
+                oib="12345678901",
+                msisdn="385911234567",
+                imsi="219011234567890",
+                imei="356789012345678",
+                ip="10.0.0.10",
+                extra_identifiers="email: ana@example.test",
+                db_path=db_path,
+            )
+
+            project = get_project(project_id, db_path=db_path)
+
+        self.assertIsNotNone(project)
+        self.assertEqual(project.subject_first_name, "Ana")
+        self.assertEqual(project.subject_last_name, "Horvat")
+        self.assertEqual(project.subject_oib, "12345678901")
+        self.assertEqual(project.subject_msisdn, "385911234567")
+        self.assertEqual(project.subject_imsi, "219011234567890")
+        self.assertEqual(project.subject_imei, "356789012345678")
+        self.assertEqual(project.subject_ip, "10.0.0.10")
+        self.assertIn("ana@example.test", project.subject_extra_identifiers)
+
+    def test_identifier_matching_tolerates_phone_formatting_and_dataset_aliases(self):
+        self.assertEqual(normalize_identifier_value("+385 91 123-4567", "MSISDN"), "385911234567")
+        self.assertTrue(
+            identifier_values_match(
+                "+385 91 123 4567",
+                "385911234567",
+                project_type="MSISDN",
+                dataset_type="ISDNDataOnly",
+            )
+        )
+        self.assertFalse(
+            identifier_values_match(
+                "+385 91 123 4567",
+                "385981111111",
+                project_type="MSISDN",
+                dataset_type="ISDNDataOnly",
+            )
+        )
+
     def test_extract_dataset_meta_normalizes_target_type_alias(self):
         with temporary_directory() as tmp:
             path = Path(tmp) / "sample.json"
@@ -256,6 +420,45 @@ class ProjectTargetTests(unittest.TestCase):
 
 
 class PcapAnalyzerTests(unittest.TestCase):
+    def test_pcap_communication_rows_classify_app_activity_indicators(self):
+        flows = [
+            {
+                "src_ip": "10.0.0.10",
+                "src_port": 51000,
+                "dst_ip": "31.13.84.51",
+                "dst_port": 443,
+                "protocol": 17,
+                "application_name": "QUIC/HTTP3",
+                "requested_server_name": "media.whatsapp.net",
+                "bidirectional_bytes": 900000,
+                "bidirectional_packets": 350,
+                "bidirectional_duration_ms": 65000,
+                "bidirectional_first_seen_ms": "2026-01-04 09:00:00.000",
+                "bidirectional_last_seen_ms": "2026-01-04 09:01:05.000",
+            },
+            {
+                "src_ip": "10.0.0.10",
+                "src_port": 52000,
+                "dst_ip": "31.13.84.52",
+                "dst_port": 443,
+                "protocol": 6,
+                "application_name": "TLS/HTTPS",
+                "requested_server_name": "edge-mqtt.facebook.com",
+                "bidirectional_bytes": 12000,
+                "bidirectional_packets": 8,
+                "bidirectional_duration_ms": 3000,
+                "bidirectional_first_seen_ms": "2026-01-04 09:05:00.000",
+                "bidirectional_last_seen_ms": "2026-01-04 09:05:03.000",
+            },
+        ]
+
+        rows = build_communication_rows(flows)
+
+        self.assertEqual(rows[0]["service"], "WhatsApp")
+        self.assertEqual(rows[0]["activity_type"], "Possible voice/video media session")
+        self.assertEqual(rows[0]["confidence"], "medium")
+        self.assertTrue(any(row["activity_type"] == "Push/background messaging transport" for row in rows))
+
     def test_analyze_pcap_extracts_dns_http_and_flows(self):
         with temporary_directory() as tmp:
             path = Path(tmp) / "sample.pcap"
@@ -340,6 +543,35 @@ class PcapAnalyzerTests(unittest.TestCase):
         self.assertEqual(sources[0].likely_device_ip, "10.0.0.10")
         self.assertEqual(device_ips, ["10.0.0.10"])
 
+    def test_pcap_html_export_includes_project_context_when_available(self):
+        with temporary_directory() as tmp:
+            root = Path(tmp)
+            db_path = root / "pcap-export.db"
+            pcap_path = root / "sample.pcap"
+            output = root / "pcap.html"
+            _write_sample_pcap(pcap_path)
+            init_db(db_path)
+
+            project_id = create_project("Case A", db_path=db_path)
+            set_project_subject(
+                project_id,
+                first_name="Ana",
+                last_name="Horvat",
+                msisdn="385911234567",
+                ip="10.0.0.10",
+                db_path=db_path,
+            )
+            project = get_project(project_id, db_path=db_path)
+            summary = analyze_pcap(pcap_path)
+
+            export_pcap_summary_html(str(output), summary, project=project)
+            content = output.read_text(encoding="utf-8")
+
+        self.assertIn("Case A", content)
+        self.assertIn("Ana Horvat", content)
+        self.assertIn("MSISDN: 385911234567", content)
+        self.assertIn("Likely Device IP", content)
+
     def test_project_activity_profile_summarizes_saved_evidence(self):
         with temporary_directory() as tmp:
             root = Path(tmp)
@@ -349,6 +581,13 @@ class PcapAnalyzerTests(unittest.TestCase):
             init_db(db_path)
 
             project_id = create_project("Case A", db_path=db_path)
+            set_project_subject(
+                project_id,
+                first_name="Ana",
+                last_name="Horvat",
+                msisdn="385911234567",
+                db_path=db_path,
+            )
             empty_project_id = create_project("Empty Case", db_path=db_path)
             add_dataset_load(project_id, str(root / "dataset"), db_path=db_path)
 
@@ -406,6 +645,8 @@ class PcapAnalyzerTests(unittest.TestCase):
         self.assertEqual(empty_profile["activity_type_rows"], [])
         self.assertEqual(empty_profile["capture_range"]["label"], "-")
         self.assertIn("Project Activity Profile", rendered)
+        self.assertIn("Case subject: Ana Horvat", rendered)
+        self.assertIn("MSISDN: 385911234567", rendered)
         self.assertIn("Compare JSON flow datasets", rendered)
         self.assertIn("Recent project activity", rendered)
 
@@ -524,6 +765,13 @@ class AIServiceTests(unittest.TestCase):
             "pcap_device_ip_rows": [{"label": "10.0.0.10", "count": 1}],
             "activity_type_rows": [{"label": "Dataset loaded", "count": 2}],
             "capture_range": {"label": "2026-01-01 to 2026-01-02"},
+            "behavior_profile": {
+                "flow_count": 3,
+                "total_bytes_label": "7.5 KB",
+                "service_rows": [{"label": "Facebook / Meta", "count": 2, "bytes_label": "6.0 KB", "example": "web.facebook.com"}],
+                "domain_rows": [{"label": "web.facebook.com", "count": 2, "bytes_label": "6.0 KB"}],
+                "routine_lines": ["Most active hour: 23:00 (2 flows)."],
+            },
             "recommendation_lines": ["- Compare datasets with PCAP windows."],
             "timeline_lines": ["- 2026-04-30: Dataset loaded: sample"],
         }
@@ -534,6 +782,8 @@ class AIServiceTests(unittest.TestCase):
         self.assertIn("Project: Case A", context)
         self.assertIn("Evidence counts", context)
         self.assertIn("PCAP device IP distribution", context)
+        self.assertIn("Loaded-dataset behavior indicators", context)
+        self.assertIn("Facebook / Meta", context)
         self.assertIn("Do not identify a real person", prompt)
         self.assertIn("Activity Profile Summary", prompt)
         self.assertIn("Prefer Croatian", prompt)

@@ -5,11 +5,19 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from core.db import Project
 from core.formatters import human_bytes
 from core.pcap_analyzer import PcapSummary, build_investigator_view
+from core.project_identity import project_identifiers_text, subject_display_label
 
 
-def export_pcap_summary_html(file_path: str, summary: PcapSummary) -> None:
+def export_pcap_summary_html(
+    file_path: str,
+    summary: PcapSummary,
+    *,
+    project: Project | None = None,
+    project_name: str = "",
+) -> None:
     path = Path(file_path)
 
     def rows(items: list[dict[str, Any]], columns: list[tuple[str, str]]) -> str:
@@ -41,9 +49,21 @@ def export_pcap_summary_html(file_path: str, summary: PcapSummary) -> None:
 
     readable = summary.readable_samples[:200]
     artifacts = summary.artifacts[:400]
+    communications = [
+        {
+            **row,
+            "bytes": human_bytes(row.get("bytes"), precision=2),
+            "duration": _duration_compact(row.get("duration_ms")),
+        }
+        for row in (summary.communication_rows or [])[:200]
+    ]
+    communication_brief = _communication_brief(summary.communication_rows or [])
     investigator = build_investigator_view(summary)
     generated_at = datetime.now().strftime("%d.%m.%Y %H:%M:%S")
     period = f"{summary.first_seen or '-'} - {summary.last_seen or '-'}"
+    project_label = project.name if project else (project_name or "-")
+    subject_label = subject_display_label(project) if project else "-"
+    identifiers_label = project_identifiers_text(project) if project else "-"
 
     html_doc = f"""<!DOCTYPE html>
 <html lang="en">
@@ -67,6 +87,18 @@ h2 {{ margin:24px 0 10px; font-size:18px; }}
 .plain {{ background:white; border:1px solid #e5e7eb; border-radius:12px; padding:18px 20px; font-size:15px; line-height:1.55; }}
 .points {{ display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:8px; margin-top:12px; }}
 .point {{ background:#f9fafb; border:1px solid #e5e7eb; border-radius:8px; padding:10px 12px; }}
+.briefgrid {{ display:grid; grid-template-columns:repeat(4, minmax(0, 1fr)); gap:10px; margin:10px 0 12px; }}
+.briefcard {{ background:white; border:1px solid #dbeafe; border-radius:10px; padding:12px 14px; }}
+.briefcard .value {{ font-size:20px; color:#1d4ed8; }}
+.tag {{ display:inline-block; border-radius:999px; padding:3px 8px; font-size:11px; font-weight:700; background:#e5e7eb; color:#111827; }}
+.tag.high {{ background:#dcfce7; color:#166534; }}
+.tag.medium {{ background:#dbeafe; color:#1e40af; }}
+.tag.low {{ background:#f3f4f6; color:#4b5563; }}
+.evidence-grid {{ display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:10px; margin-top:10px; }}
+.evidence-card {{ background:white; border:1px solid #e5e7eb; border-radius:10px; padding:12px 14px; }}
+.evidence-title {{ font-weight:700; margin-bottom:6px; }}
+.evidence-meta {{ color:#4b5563; font-size:12px; margin-bottom:8px; }}
+.evidence-text {{ font-size:12px; line-height:1.45; }}
 .barcell {{ min-width:190px; }}
 .bar {{ height:12px; background:#e5e7eb; border-radius:999px; overflow:hidden; }}
 .bar span {{ display:block; height:100%; background:#2563eb; }}
@@ -83,6 +115,9 @@ tr:nth-child(even) td {{ background:#f9fafb; }}
     <h1>ViaNyquist PCAP Summary</h1>
     <div class="muted">{html.escape(summary.file_name)} | Exported: {html.escape(generated_at)}</div>
     <div class="grid">
+      <div class="card"><div class="label">Project</div><div class="value">{html.escape(project_label)}</div></div>
+      <div class="card"><div class="label">Case Subject</div><div class="value">{html.escape(subject_label)}</div></div>
+      <div class="card"><div class="label">Known Identifiers</div><div class="value">{html.escape(identifiers_label)}</div></div>
       <div class="card"><div class="label">Format</div><div class="value">{html.escape(summary.format)}</div></div>
       <div class="card"><div class="label">Packets</div><div class="value">{summary.packet_count:,}</div></div>
       <div class="card"><div class="label">Traffic Volume</div><div class="value">{html.escape(human_bytes(summary.wire_bytes, precision=2))}</div></div>
@@ -101,6 +136,22 @@ tr:nth-child(even) td {{ background:#f9fafb; }}
       <div class="points">
         {''.join(f'<div class="point">{html.escape(str(point))}</div>' for point in investigator.get("key_points", []))}
       </div>
+    </div>
+  </div>
+
+  <div class="section">
+    <h2>Communication Highlights</h2>
+    <div class="note">These rows are investigative indicators based on metadata such as host names, ports, protocol, duration and traffic volume. They do not prove message content or confirm a call by themselves.</div>
+    <div class="briefgrid">
+      <div class="briefcard"><div class="label">Classified indicators</div><div class="value">{communication_brief['total']}</div></div>
+      <div class="briefcard"><div class="label">Messaging / push</div><div class="value">{communication_brief['messaging']}</div></div>
+      <div class="briefcard"><div class="label">Call / media candidates</div><div class="value">{communication_brief['media']}</div></div>
+      <div class="briefcard"><div class="label">Visible services</div><div class="value">{html.escape(communication_brief['services'])}</div></div>
+    </div>
+    <table><thead><tr>{headers([('service', 'Service'), ('activity_type', 'Indicator'), ('confidence_html', 'Confidence'), ('host', 'Host / Signal'), ('protocol', 'Protocol'), ('bytes', 'Volume'), ('packets', 'Packets'), ('duration', 'Duration'), ('first_seen', 'First Seen')])}</tr></thead><tbody>{_communication_rows(communications)}</tbody></table>
+    <h2>Communication Evidence Details</h2>
+    <div class="evidence-grid">
+      {_communication_evidence_cards(communications[:12])}
     </div>
   </div>
 
@@ -182,8 +233,99 @@ def _chart_rows(items: list[dict[str, Any]], columns: list[tuple[str, str]]) -> 
     return "\n".join(parts)
 
 
+def _communication_brief(items: list[dict[str, Any]]) -> dict[str, Any]:
+    services: list[str] = []
+    seen = set()
+    messaging = 0
+    media = 0
+    for item in items:
+        service = str(item.get("service") or "").strip()
+        if service and service not in seen:
+            seen.add(service)
+            services.append(service)
+        indicator = str(item.get("activity_type") or "").lower()
+        if any(token in indicator for token in ("messaging", "push")):
+            messaging += 1
+        if any(token in indicator for token in ("media", "call")):
+            media += 1
+
+    return {
+        "total": len(items),
+        "messaging": messaging,
+        "media": media,
+        "services": ", ".join(services[:4]) if services else "-",
+    }
+
+
+def _communication_rows(items: list[dict[str, Any]]) -> str:
+    if not items:
+        return "<tr><td colspan=\"99\">No communication indicators.</td></tr>"
+
+    columns = [
+        ("service", "Service"),
+        ("activity_type", "Indicator"),
+        ("confidence_html", "Confidence"),
+        ("host", "Host / Signal"),
+        ("protocol", "Protocol"),
+        ("bytes", "Volume"),
+        ("packets", "Packets"),
+        ("duration", "Duration"),
+        ("first_seen", "First Seen"),
+    ]
+    parts = []
+    for item in items[:80]:
+        cells = []
+        for key, _label in columns:
+            if key == "confidence_html":
+                confidence = str(item.get("confidence") or "low").lower()
+                cells.append(f"<td><span class=\"tag {html.escape(confidence)}\">{html.escape(confidence)}</span></td>")
+            else:
+                cells.append(f"<td>{html.escape(str(item.get(key, '')))}</td>")
+        parts.append(f"<tr>{''.join(cells)}</tr>")
+    return "\n".join(parts)
+
+
+def _communication_evidence_cards(items: list[dict[str, Any]]) -> str:
+    if not items:
+        return "<div class=\"evidence-card\">No communication evidence details.</div>"
+
+    cards = []
+    for item in items:
+        title = f"{item.get('service') or '-'} - {item.get('activity_type') or '-'}"
+        meta = (
+            f"{item.get('confidence') or '-'} confidence | "
+            f"{item.get('protocol') or '-'} | {item.get('bytes') or '-'} | "
+            f"{item.get('packets') or 0} packets | {item.get('duration') or '-'}"
+        )
+        host = item.get("host") or "-"
+        first_seen = item.get("first_seen") or "-"
+        evidence = item.get("evidence") or "-"
+        cards.append(
+            "<div class=\"evidence-card\">"
+            f"<div class=\"evidence-title\">{html.escape(str(title))}</div>"
+            f"<div class=\"evidence-meta\">Host/signal: {html.escape(str(host))}<br>First seen: {html.escape(str(first_seen))}<br>{html.escape(str(meta))}</div>"
+            f"<div class=\"evidence-text\">{html.escape(str(evidence))}</div>"
+            "</div>"
+        )
+    return "\n".join(cards)
+
+
 def _safe_float(value: Any) -> float:
     try:
         return float(value)
     except Exception:
         return 0.0
+
+
+def _duration_compact(value: Any) -> str:
+    try:
+        seconds = int(float(value or 0) / 1000)
+    except Exception:
+        seconds = 0
+    minutes, secs = divmod(seconds, 60)
+    hours, minutes = divmod(minutes, 60)
+    if hours:
+        return f"{hours}h {minutes}m {secs}s"
+    if minutes:
+        return f"{minutes}m {secs}s"
+    return f"{secs}s"

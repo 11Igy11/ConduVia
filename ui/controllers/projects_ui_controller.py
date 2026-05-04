@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QFileDialog, QListWidgetItem
+from PySide6.QtWidgets import QListWidgetItem
 
 from core.db import (
     create_project,
@@ -11,6 +11,7 @@ from core.db import (
     list_recent_datasets,
     update_project,
 )
+from core.project_identity import project_identifiers_text, subject_display_label
 from core.workspace import (
     ensure_workspace_structure,
     build_workspace_path,
@@ -18,6 +19,7 @@ from core.workspace import (
     delete_workspace_folder,
     looks_like_vianyquist_workspace,   
 )
+from ui.dialogs import project_details_dialog
 
 class ProjectsUIController:
     def __init__(self, app):
@@ -38,28 +40,25 @@ class ProjectsUIController:
         self.app.refresh_activity_ui_for_project(None)
 
     def create_project_dialog(self):
-        name, ok = self.app._text_input_dialog("New project", "Project name:", width=420)
+        values, ok = project_details_dialog(
+            self.app,
+            title="New project",
+        )
         if not ok:
             return
-        name = (name or "").strip()
+
+        values = values or {}
+        name = (values.get("name") or "").strip()
         if not name:
+            self.app._message_dialog(
+                "New project",
+                "Project name is required.",
+                width=400,
+            )
             return
 
-        desc, ok2 = self.app._multiline_input_dialog(
-            "New project",
-            "Description (optional):",
-            width=460,
-            height=260,
-        )
-        if not ok2:
-            desc = ""
-
-        parent_folder = QFileDialog.getExistingDirectory(
-            self.app,
-            "Select parent folder for project workspace (optional)"
-        )
-        
-        parent_folder = parent_folder or ""
+        desc = values.get("description", "")
+        parent_folder = values.get("parent_folder", "")
 
         workspace_folder = ""
         if parent_folder:
@@ -76,7 +75,19 @@ class ProjectsUIController:
                 return                                                  
 
         try:
-            pid = create_project(name=name, description=desc, base_folder=workspace_folder)
+            pid = create_project(
+                name=name,
+                description=desc,
+                base_folder=workspace_folder,
+                subject_first_name=values.get("first_name", ""),
+                subject_last_name=values.get("last_name", ""),
+                subject_oib=values.get("oib", ""),
+                subject_msisdn=values.get("msisdn", ""),
+                subject_imsi=values.get("imsi", ""),
+                subject_imei=values.get("imei", ""),
+                subject_ip=values.get("ip", ""),
+                subject_extra_identifiers=values.get("extra_identifiers", ""),
+            )
         except Exception as e:
             self.app._message_dialog("Error", "Project creation failed.", str(e), width=440)
             return
@@ -115,7 +126,11 @@ class ProjectsUIController:
         info = []
         info.append(f"Name: {p.name}")
         info.append(f"ID: {p.id}")
-        info.append(f"Target: {p.target_identifier or '-'}")
+        info.append(f"Case subject: {subject_display_label(p)}")
+        info.append(f"Known identifiers: {project_identifiers_text(p)}")
+        if p.subject_oib:
+            info.append(f"OIB: {p.subject_oib}")
+        info.append(f"Target fallback: {p.target_identifier or '-'}")
         info.append(f"Target type: {p.target_type or '-'}")
         info.append(f"Workspace folder: {p.base_folder or '-'}")
         info.append(f"Created: {p.created_at}")
@@ -213,17 +228,20 @@ class ProjectsUIController:
             )
             return
 
-        # --- Name ---
-        name, ok = self.app._text_input_dialog(
-            "Edit project",
-            "Project name:",
-            text=project.name or "",
-            width=420,
+        current_workspace = (project.base_folder or "").strip()
+        current_parent_folder = str(Path(current_workspace).parent) if current_workspace else ""
+
+        values, ok = project_details_dialog(
+            self.app,
+            title="Edit project",
+            project=project,
+            parent_folder=current_parent_folder,
         )
         if not ok:
             return
 
-        name = (name or "").strip()
+        values = values or {}
+        name = (values.get("name") or "").strip()
         if not name:
             self.app._message_dialog(
                 "Edit project",
@@ -232,42 +250,8 @@ class ProjectsUIController:
             )
             return
 
-        # --- Description ---
-        desc, ok2 = self.app._multiline_input_dialog(
-            "Edit project",
-            "Description (optional):",
-            text=project.description or "",
-            width=460,
-            height=260,
-        )
-        if not ok2:
-            return
-
-        # --- Current workspace / parent ---
-        current_workspace = (project.base_folder or "").strip()
-        current_parent_folder = str(Path(current_workspace).parent) if current_workspace else ""
-
-        # --- Parent folder change ---
-        change_folder = self.app._confirm_dialog(
-            title="Edit project",
-            message="Do you want to change the parent folder for this project workspace?",
-            details=f"Current workspace: {project.base_folder or '-'}",
-            ok_text="Change",
-            cancel_text="Keep current",
-            width=460,
-        )
-
-        if change_folder:
-            selected_parent = QFileDialog.getExistingDirectory(
-                self.app,
-                "Select parent folder for project workspace"
-            )
-            if selected_parent:
-                parent_folder = selected_parent
-            else:
-                parent_folder = current_parent_folder
-        else:
-            parent_folder = current_parent_folder
+        desc = values.get("description", "")
+        parent_folder = values.get("parent_folder", "") or current_parent_folder
 
         # --- Build target workspace path ---
         new_workspace_folder = ""
@@ -308,6 +292,14 @@ class ProjectsUIController:
                 name=name,
                 description=desc,
                 base_folder=new_workspace_folder,
+                subject_first_name=values.get("first_name", ""),
+                subject_last_name=values.get("last_name", ""),
+                subject_oib=values.get("oib", ""),
+                subject_msisdn=values.get("msisdn", ""),
+                subject_imsi=values.get("imsi", ""),
+                subject_imei=values.get("imei", ""),
+                subject_ip=values.get("ip", ""),
+                subject_extra_identifiers=values.get("extra_identifiers", ""),
             )
 
         except Exception as e:

@@ -3,12 +3,16 @@ from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QVBoxLayout,
+    QFormLayout,
     QHBoxLayout,
     QPushButton,
     QLabel,
     QLineEdit,
     QComboBox,
     QPlainTextEdit,
+    QFileDialog,
+    QScrollArea,
+    QWidget,
 )
 
 
@@ -238,6 +242,139 @@ def item_choice_dialog(
 
     ok = dlg.exec() == QDialog.Accepted
     return combo.currentText(), ok
+
+
+def project_details_dialog(
+    parent,
+    *,
+    title: str,
+    project=None,
+    parent_folder: str = "",
+    width: int = 680,
+    height: int = 640,
+):
+    dlg = QDialog(parent)
+    dlg.setWindowTitle(title)
+    dlg.setModal(True)
+    available = parent.screen().availableGeometry() if parent and parent.screen() else None
+    if available:
+        height = min(height, max(460, available.height() - 120))
+        width = min(width, max(560, available.width() - 120))
+    dlg.resize(width, height)
+    dlg.setMinimumWidth(width)
+
+    layout = QVBoxLayout(dlg)
+    layout.setContentsMargins(18, 16, 18, 16)
+    layout.setSpacing(14)
+
+    intro = QLabel("Project details and known subject/device identifiers.")
+    intro.setWordWrap(True)
+    intro.setTextFormat(Qt.PlainText)
+    layout.addWidget(intro)
+
+    scroll = QScrollArea()
+    scroll.setWidgetResizable(True)
+    scroll.setFrameShape(QScrollArea.NoFrame)
+
+    form_host = QWidget()
+    form = QFormLayout(form_host)
+    form.setLabelAlignment(Qt.AlignRight)
+    form.setFormAlignment(Qt.AlignTop)
+    form.setHorizontalSpacing(12)
+    form.setVerticalSpacing(10)
+
+    edit_name = QLineEdit()
+    edit_name.setText(getattr(project, "name", "") or "")
+    edit_name.setMinimumHeight(36)
+    form.addRow("Project name:", edit_name)
+
+    edit_desc = QPlainTextEdit()
+    edit_desc.setPlainText(getattr(project, "description", "") or "")
+    edit_desc.setMinimumHeight(76)
+    form.addRow("Description:", edit_desc)
+
+    workspace_row = QHBoxLayout()
+    edit_parent = QLineEdit()
+    edit_parent.setText(parent_folder or "")
+    edit_parent.setPlaceholderText("Optional parent folder for ViaNyquist workspace")
+    edit_parent.setMinimumHeight(36)
+    btn_browse = QPushButton("Browse...")
+    btn_browse.setMinimumWidth(110)
+    btn_browse.setFixedHeight(36)
+    workspace_row.addWidget(edit_parent, 1)
+    workspace_row.addWidget(btn_browse)
+    form.addRow("Workspace parent:", workspace_row)
+
+    section = QLabel("Case subject / identifiers")
+    section.setStyleSheet("font-size: 15px; font-weight: 700; color: #f3f4f6;")
+    form.addRow("", section)
+
+    fields: dict[str, QLineEdit | QPlainTextEdit] = {}
+
+    def add_line(key: str, label: str, attr: str = "", placeholder: str = "") -> None:
+        edit = QLineEdit()
+        edit.setText(getattr(project, attr or key, "") or "")
+        edit.setPlaceholderText(placeholder)
+        edit.setMinimumHeight(36)
+        fields[key] = edit
+        form.addRow(label, edit)
+
+    add_line("first_name", "First name:", "subject_first_name")
+    add_line("last_name", "Last name:", "subject_last_name")
+    add_line("oib", "OIB:", "subject_oib")
+    add_line("msisdn", "Mobile / MSISDN:", "subject_msisdn")
+    add_line("imsi", "IMSI:", "subject_imsi")
+    add_line("imei", "IMEI:", "subject_imei")
+    add_line("ip", "Known IP:", "subject_ip")
+
+    extra = QPlainTextEdit()
+    extra.setPlainText(getattr(project, "subject_extra_identifiers", "") or "")
+    extra.setPlaceholderText("Other identifiers or notes, one per line.")
+    extra.setMinimumHeight(82)
+    fields["extra_identifiers"] = extra
+    form.addRow("Other:", extra)
+
+    scroll.setWidget(form_host)
+    layout.addWidget(scroll, 1)
+
+    def browse_parent() -> None:
+        selected = QFileDialog.getExistingDirectory(
+            dlg,
+            "Select parent folder for project workspace",
+            edit_parent.text().strip(),
+        )
+        if selected:
+            edit_parent.setText(selected)
+
+    btn_browse.clicked.connect(browse_parent)
+
+    buttons = QDialogButtonBox()
+    btn_ok = buttons.addButton("OK", QDialogButtonBox.AcceptRole)
+    btn_cancel = buttons.addButton("Cancel", QDialogButtonBox.RejectRole)
+    btn_ok.setFixedHeight(36)
+    btn_cancel.setFixedHeight(36)
+    btn_ok.setMinimumWidth(110)
+    btn_cancel.setMinimumWidth(110)
+    buttons.accepted.connect(dlg.accept)
+    buttons.rejected.connect(dlg.reject)
+    layout.addWidget(buttons)
+
+    if dlg.exec() != QDialog.Accepted:
+        return None, False
+
+    subject = {}
+    for key, widget in fields.items():
+        if isinstance(widget, QPlainTextEdit):
+            subject[key] = widget.toPlainText().strip()
+        else:
+            subject[key] = widget.text().strip()
+
+    return {
+        "name": edit_name.text().strip(),
+        "description": edit_desc.toPlainText().strip(),
+        "parent_folder": edit_parent.text().strip(),
+        **subject,
+    }, True
 
 
 def confirm_dialog(

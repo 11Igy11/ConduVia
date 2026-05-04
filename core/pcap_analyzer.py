@@ -65,6 +65,7 @@ class PcapSummary:
     http_hosts: list[dict[str, Any]] = field(default_factory=list)
     readable_samples: list[dict[str, Any]] = field(default_factory=list)
     artifacts: list[dict[str, Any]] = field(default_factory=list)
+    communication_rows: list[dict[str, Any]] = field(default_factory=list)
     hourly_activity: list[dict[str, Any]] = field(default_factory=list)
     flows: list[dict[str, Any]] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
@@ -350,6 +351,8 @@ class _PcapAccumulator:
             "Readable payload samples are limited previews of bytes visible in the capture.",
         ]
 
+        communication_rows = build_communication_rows(flows)
+
         return PcapSummary(
             file_path=str(path),
             file_name=path.name,
@@ -392,6 +395,7 @@ class _PcapAccumulator:
                 self.artifacts.values(),
                 key=lambda item: (str(item.get("category", "")), str(item.get("type", "")), -int(item.get("count", 0))),
             ),
+            communication_rows=communication_rows,
             hourly_activity=[
                 {"hour": k, "packets": v}
                 for k, v in sorted(self.hourly_activity.items())
@@ -422,6 +426,41 @@ def analyze_pcap(path: str | Path, *, max_flows: int = 5000, max_evidence: int =
     return acc.build_summary(p, file_format)
 
 
+def build_communication_rows(flows: list[dict[str, Any]], *, limit: int = 80) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for flow in flows:
+        service = _communication_service(flow)
+        if not service:
+            continue
+        activity_type, confidence, evidence = _communication_activity(flow, service)
+        rows.append({
+            "service": service,
+            "activity_type": activity_type,
+            "confidence": confidence,
+            "evidence": evidence,
+            "host": flow.get("requested_server_name") or "",
+            "protocol": PROTO_NAMES.get(int(flow.get("protocol") or 0), str(flow.get("protocol") or "")),
+            "source": _endpoint(str(flow.get("src_ip") or ""), flow.get("src_port") or None),
+            "destination": _endpoint(str(flow.get("dst_ip") or ""), flow.get("dst_port") or None),
+            "bytes": int(flow.get("bidirectional_bytes") or 0),
+            "packets": int(flow.get("bidirectional_packets") or 0),
+            "duration_ms": int(flow.get("bidirectional_duration_ms") or 0),
+            "first_seen": flow.get("bidirectional_first_seen_ms") or "",
+            "last_seen": flow.get("bidirectional_last_seen_ms") or "",
+        })
+
+    confidence_rank = {"high": 0, "medium": 1, "low": 2}
+    rows.sort(
+        key=lambda row: (
+            confidence_rank.get(str(row.get("confidence")), 9),
+            -int(row.get("duration_ms") or 0),
+            -int(row.get("bytes") or 0),
+            str(row.get("service") or ""),
+        )
+    )
+    return rows[:limit]
+
+
 def build_investigator_view(summary: PcapSummary) -> dict[str, Any]:
     service_rows = _build_service_rows(summary)
     protocol_rows = _with_share(summary.protocols, "packets")
@@ -435,12 +474,106 @@ def build_investigator_view(summary: PcapSummary) -> dict[str, Any]:
         "protocol_rows": protocol_rows,
         "activity_rows": activity_rows,
         "visibility_rows": visibility_rows,
+        "communication_rows": summary.communication_rows,
         "limitations": [
             "Encrypted HTTPS, QUIC and app traffic content cannot be read from the capture alone.",
             "DNS names, TLS SNI names, endpoints, ports and timing are metadata. They show communication patterns, not message contents.",
             "Plaintext credentials are reported only when visible in unencrypted payload.",
         ],
     }
+
+
+def _communication_service(flow: dict[str, Any]) -> str:
+    text = " ".join(
+        str(flow.get(key) or "")
+        for key in ("requested_server_name", "application_name", "pcap_payload_preview")
+    ).lower()
+    checks = [
+        ("WhatsApp", ("whatsapp", "wa.me")),
+        ("Viber", ("viber",)),
+        ("Telegram", ("telegram", "t.me")),
+        ("Facebook / Messenger", ("facebook", "messenger", "edge-mqtt", "fbcdn", "instagram")),
+        ("TikTok", ("tiktok", "byteoversea")),
+        ("Google / YouTube", ("youtube", "googlevideo", "googleapis")),
+        ("Spotify", ("spotify",)),
+    ]
+    for service, needles in checks:
+        if any(needle in text for needle in needles):
+            return service
+    return ""
+
+
+def _communication_activity(flow: dict[str, Any], service: str) -> tuple[str, str, str]:
+    proto = int(flow.get("protocol") or 0)
+    src_port = _safe_int(flow.get("src_port"))
+    dst_port = _safe_int(flow.get("dst_port"))
+    bytes_count = int(flow.get("bidirectional_bytes") or 0)
+    packets = int(flow.get("bidirectional_packets") or 0)
+    duration_ms = int(flow.get("bidirectional_duration_ms") or 0)
+    host = str(flow.get("requested_server_name") or "")
+    host_l = host.lower()
+    app = str(flow.get("application_name") or "")
+    ports = {src_port, dst_port}
+
+    reasons = [
+        f"service indicator: {host or app or service}",
+        f"{PROTO_NAMES.get(proto, proto)} {src_port}->{dst_port}",
+        f"{packets} packets",
+        f"{_duration_label(duration_ms)}",
+    ]
+
+    if proto == 17 and (3478 in ports or 5349 in ports) and packets >= 20:
+        reasons.append("STUN/TURN/WebRTC-style relay port")
+        confidence = "high" if duration_ms >= 20_000 and packets >= 80 else "medium"
+        return "Possible call/media signaling", confidence, "; ".join(reasons)
+
+    if proto == 17 and duration_ms >= 30_000 and packets >= 120 and bytes_count >= 250_000:
+        reasons.append("sustained UDP media-like stream")
+        confidence = "high" if bytes_count >= 2_000_000 and duration_ms >= 60_000 else "medium"
+        return "Possible voice/video media session", confidence, "; ".join(reasons)
+
+    if proto == 17 and 443 in ports and duration_ms >= 20_000 and bytes_count >= 500_000:
+        reasons.append("sustained QUIC/UDP 443 traffic")
+        return "Possible app media or heavy encrypted session", "medium", "; ".join(reasons)
+
+    if _is_push_host(host_l) or 5222 in ports:
+        reasons.append("known push/messaging transport signal")
+        return "Push/background messaging transport", "medium", "; ".join(reasons)
+
+    if _is_messaging_endpoint(host_l, service):
+        reasons.append("messaging endpoint name visible in metadata")
+        confidence = "medium" if service in {"WhatsApp", "Viber", "Telegram", "Facebook / Messenger"} else "low"
+        return "Possible messaging endpoint", confidence, "; ".join(reasons)
+
+    if duration_ms >= 120_000 and bytes_count <= 120_000:
+        reasons.append("long-lived low-volume encrypted connection")
+        return "Background keepalive / sync connection", "low", "; ".join(reasons)
+
+    if duration_ms < 10_000 and packets <= 40:
+        reasons.append("short metadata burst")
+        return "App contact / metadata burst", "low", "; ".join(reasons)
+
+    if bytes_count >= 1_000_000:
+        reasons.append("large encrypted transfer")
+        return "Large encrypted app transfer", "low", "; ".join(reasons)
+
+    if service in {"Google / YouTube", "TikTok", "Spotify"}:
+        reasons.append("service API/content endpoint without call-specific signal")
+        return "App/API or content service connection", "low", "; ".join(reasons)
+
+    return "App service contact observed", "low", "; ".join(reasons)
+
+
+def _is_push_host(host: str) -> bool:
+    return any(token in host for token in ("edge-mqtt", "mqtt", "push", "notification", "notify", "fcm"))
+
+
+def _is_messaging_endpoint(host: str, service: str) -> bool:
+    if any(token in host for token in ("chat", "message", "msg", "e2ee", "messenger")):
+        return True
+    if service in {"WhatsApp", "Viber", "Telegram"} and any(token in host for token in ("mmg", "media", "web", "api")):
+        return True
+    return False
 
 
 def _plain_summary(
@@ -573,6 +706,24 @@ def _duration_words(seconds: float) -> str:
     if minutes:
         return f"approximately {minutes}m {secs}s"
     return f"{secs}s"
+
+
+def _duration_label(milliseconds: int) -> str:
+    seconds = max(0, int(milliseconds or 0) // 1000)
+    minutes, secs = divmod(seconds, 60)
+    hours, minutes = divmod(minutes, 60)
+    if hours:
+        return f"{hours}h {minutes}m {secs}s"
+    if minutes:
+        return f"{minutes}m {secs}s"
+    return f"{secs}s"
+
+
+def _safe_int(value: Any) -> int:
+    try:
+        return int(value or 0)
+    except Exception:
+        return 0
 
 
 def _read_pcap(f, acc: _PcapAccumulator) -> None:

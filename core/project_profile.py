@@ -13,6 +13,7 @@ from core.db import (
     list_recent_datasets,
 )
 from core.formatters import human_bytes
+from core.project_identity import project_identifiers_text, subject_display_label, target_display_label
 
 
 def build_project_activity_profile(
@@ -56,7 +57,9 @@ def build_project_activity_profile(
 
     summary_lines = [
         "Project Activity Profile",
-        f"- Target: {_target_label(project.target_identifier, project.target_type)}",
+        f"- Case subject: {subject_display_label(project)}",
+        f"- Known identifiers: {project_identifiers_text(project)}",
+        f"- Target fallback: {target_display_label(project)}",
         f"- Dataset loads: {len(datasets)}",
         f"- PCAP sources: {len(pcaps)}",
         f"- Findings: {len(findings)}",
@@ -142,18 +145,6 @@ def format_project_activity_profile(profile: dict[str, Any]) -> str:
         lines.extend(timeline[:12])
 
     return "\n".join(lines)
-
-
-def _target_label(identifier: str, target_type: str) -> str:
-    identifier = (identifier or "").strip()
-    target_type = (target_type or "").strip()
-    if identifier and target_type:
-        return f"{target_type} / {identifier}"
-    if identifier:
-        return identifier
-    if target_type:
-        return target_type
-    return "-"
 
 
 def _counter_label(values: Counter[str]) -> str:
