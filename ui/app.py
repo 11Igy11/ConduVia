@@ -571,6 +571,50 @@ class App(QWidget):
 
         projects_layout.addWidget(self.lbl_active_project)
         projects_layout.addLayout(btn_row)
+
+        self.case_dashboard = QFrame()
+        self.case_dashboard.setObjectName("CaseDashboardCompact")
+        self.case_dashboard.setMaximumHeight(128)
+        dashboard_layout = QVBoxLayout(self.case_dashboard)
+        dashboard_layout.setContentsMargins(12, 10, 12, 10)
+        dashboard_layout.setSpacing(8)
+
+        self.lbl_case_dashboard_title = QLabel("Case Dashboard")
+        self.lbl_case_dashboard_title.setObjectName("CaseDashboardTitle")
+        self.lbl_case_dashboard_subject = QLabel("Select a project to see case context.")
+        self.lbl_case_dashboard_subject.setWordWrap(True)
+        self.lbl_case_dashboard_subject.setObjectName("Muted")
+
+        dashboard_header = QHBoxLayout()
+        dashboard_header.setSpacing(14)
+        dashboard_header.addWidget(self.lbl_case_dashboard_title)
+        dashboard_header.addWidget(self.lbl_case_dashboard_subject, 1)
+        dashboard_layout.addLayout(dashboard_header)
+
+        self.case_metric_cards = []
+        case_metrics = QHBoxLayout()
+        case_metrics.setSpacing(8)
+        for title in ("Datasets", "PCAP", "Findings", "Device IPs"):
+            card = QLabel(f"{title}: 0")
+            card.setObjectName("CaseMetricCompact")
+            card.setAlignment(Qt.AlignCenter)
+            card.setMinimumHeight(34)
+            card.setWordWrap(True)
+            self.case_metric_cards.append(card)
+            case_metrics.addWidget(card, 1)
+
+        self.lbl_case_dashboard_warnings = QLabel("")
+        self.lbl_case_dashboard_warnings.setWordWrap(True)
+        self.lbl_case_dashboard_warnings.setObjectName("Muted")
+
+        dashboard_metrics_row = QHBoxLayout()
+        dashboard_metrics_row.setSpacing(12)
+        dashboard_metrics_row.addLayout(case_metrics, 3)
+        dashboard_metrics_row.addWidget(self.lbl_case_dashboard_warnings, 2)
+        dashboard_layout.addLayout(dashboard_metrics_row)
+
+        projects_layout.addWidget(self.case_dashboard)
+
         middle_row = QHBoxLayout()
 
         left_col = QVBoxLayout()
@@ -578,7 +622,7 @@ class App(QWidget):
         left_col.addWidget(self.projects_list, 1)
 
         right_col = QVBoxLayout()
-        right_col.addWidget(QLabel("Details:"))
+        right_col.addWidget(QLabel("Selected project summary:"))
         right_col.addWidget(self.projects_info, 1)
 
         middle_row.addLayout(left_col, 2)
@@ -596,7 +640,7 @@ class App(QWidget):
 
         # --- Right: Activity log ---
         activity_col = QVBoxLayout()
-        activity_col.addWidget(QLabel("Activity log"))
+        activity_col.addWidget(QLabel("Recent activity"))
 
         self.lst_activity = QListWidget()
         activity_col.addWidget(self.lst_activity, 1)
@@ -607,8 +651,8 @@ class App(QWidget):
         activity_col.addWidget(activity_footer) 
        
 
-        bottom_row.addLayout(recent_col, 2)
-        bottom_row.addLayout(activity_col, 3)
+        bottom_row.addLayout(recent_col, 3)
+        bottom_row.addLayout(activity_col, 2)
 
         projects_layout.addLayout(bottom_row, 1)
 
@@ -1654,7 +1698,13 @@ class App(QWidget):
             ts = r["created_at"]
             et = r["event_type"]
             msg = r["message"] or ""
-            self.lst_activity.addItem(QListWidgetItem(f"{ts} | {et} | {msg}"))
+            if hasattr(self, "projects_ui_controller"):
+                label = self.projects_ui_controller.activity_label(str(et), str(msg))
+            else:
+                label = str(et).replace("_", " ").title()
+            item = QListWidgetItem(f"{ts}\n{label}")
+            item.setToolTip(str(msg or ""))
+            self.lst_activity.addItem(item)
 
     def refresh_activity_ui(self):
         self.refresh_activity_ui_for_project(self.current_project_id)

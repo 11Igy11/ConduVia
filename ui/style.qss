@@ -66,6 +66,28 @@ QLabel#ProfileMetric {
     font-weight: 700;
 }
 
+QFrame#CaseDashboardCompact {
+    background: #22324a;
+    border: 1px solid #3c4f6b;
+    border-radius: 12px;
+}
+
+QLabel#CaseDashboardTitle {
+    font-size: 16px;
+    font-weight: 600;
+    color: #f4f7fb;
+}
+
+QLabel#CaseMetricCompact {
+    background: #273549;
+    border: 1px solid #475569;
+    border-radius: 8px;
+    padding: 6px 8px;
+    color: #f8fafc;
+    font-size: 13px;
+    font-weight: 700;
+}
+
 QProgressBar {
     background: #1f2937;
     border: 1px solid #334155;
