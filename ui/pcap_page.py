@@ -211,19 +211,9 @@ class PcapPage(QWidget):
 
     def _build_highlights_tab(self) -> QWidget:
         page = QWidget()
-        page_layout = QVBoxLayout(page)
-        page_layout.setContentsMargins(0, 0, 0, 0)
-        page_layout.setSpacing(0)
-
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.NoFrame)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-
-        content = QWidget()
-        layout = QVBoxLayout(content)
+        layout = QVBoxLayout(page)
         layout.setContentsMargins(12, 12, 12, 12)
-        layout.setSpacing(14)
+        layout.setSpacing(10)
 
         self.lbl_highlights_brief = QLabel("Open a PCAP file to see communication highlights.")
         self.lbl_highlights_brief.setObjectName("PcapPlainSummary")
@@ -241,29 +231,30 @@ class PcapPage(QWidget):
             ("duration_ms", "Duration"),
             ("first_seen", "First Seen"),
         ], fixed_widths={0: 170, 2: 92, 4: 78, 5: 92, 6: 82, 7: 96, 8: 178}, stretch_columns=[1, 3])
-        self.tbl_communications.setMinimumHeight(330)
+        self.tbl_communications.setMinimumHeight(420)
         self.tbl_communications.setWordWrap(True)
-        self.tbl_communications.verticalHeader().setDefaultSectionSize(44)
+        self.tbl_communications.verticalHeader().setDefaultSectionSize(40)
         self.tbl_communications.sortByColumn(5, Qt.DescendingOrder)
         self.tbl_communications.selectionModel().currentRowChanged.connect(self._on_communication_selected)
 
         self.txt_communication_detail = QTextEdit()
         self.txt_communication_detail.setReadOnly(True)
-        self.txt_communication_detail.setMinimumHeight(150)
+        self.txt_communication_detail.setMinimumWidth(360)
         self.txt_communication_detail.setPlaceholderText("Select a communication indicator to see the evidence used for classification.")
 
-        splitter = QSplitter(Qt.Vertical)
-        splitter.addWidget(self._group("Communication indicators", self.tbl_communications))
-        splitter.addWidget(self._group("Selected indicator evidence", self.txt_communication_detail))
-        splitter.setStretchFactor(0, 3)
-        splitter.setStretchFactor(1, 1)
+        detail_splitter = QSplitter(Qt.Horizontal)
+        detail_splitter.addWidget(self._group("Communication indicators", self.tbl_communications))
+        detail_splitter.addWidget(self._group("Selected indicator evidence", self.txt_communication_detail))
+        detail_splitter.setStretchFactor(0, 4)
+        detail_splitter.setStretchFactor(1, 2)
+        detail_splitter.setCollapsible(0, False)
+        detail_splitter.setCollapsible(1, False)
 
-        layout.addWidget(self._group("Investigation brief", self.lbl_highlights_brief))
-        layout.addWidget(splitter, 1)
-        layout.addStretch()
+        brief_group = self._group("Investigation brief", self.lbl_highlights_brief)
+        brief_group.setMaximumHeight(145)
+        layout.addWidget(brief_group)
+        layout.addWidget(detail_splitter, 1)
 
-        scroll.setWidget(content)
-        page_layout.addWidget(scroll, 1)
         return page
 
     def _build_investigator_tab(self) -> QWidget:
@@ -284,7 +275,8 @@ class PcapPage(QWidget):
 
         self.investigator_card = QFrame()
         self.investigator_card.setObjectName("PcapInvestigatorCard")
-        self.investigator_card.setMinimumHeight(220)
+        self.investigator_card.setMinimumHeight(165)
+        self.investigator_card.setMaximumHeight(240)
         card_layout = QVBoxLayout(self.investigator_card)
         card_layout.setContentsMargins(14, 12, 14, 12)
         card_layout.setSpacing(8)
@@ -331,9 +323,9 @@ class PcapPage(QWidget):
         self.grp_visibility = self._group("Visible vs encrypted indicators", self.tbl_visibility)
         self.grp_activity = self._group("Activity timeline by hour", self.tbl_activity)
 
-        self.grp_services.setMinimumHeight(260)
-        self.grp_visibility.setMinimumHeight(260)
-        self.grp_activity.setMinimumHeight(280)
+        self.grp_services.setMinimumHeight(220)
+        self.grp_visibility.setMinimumHeight(220)
+        self.grp_activity.setMinimumHeight(240)
 
         top.addWidget(self.grp_services, 3)
         top.addWidget(self.grp_visibility, 2)
