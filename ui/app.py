@@ -105,7 +105,6 @@ QFrame#CaseDashboardCompact,
 QFrame#PanelCard,
 QFrame#FlowDetailsCard,
 QFrame#PcapInvestigatorCard,
-QGroupBox#PcapPanel,
 QGroupBox {
     background: #ffffff;
     border-color: #cbd5e1;
@@ -119,7 +118,6 @@ QFrame#ListingHeaderCard QLabel,
 QFrame#CaseDashboardCompact QLabel,
 QFrame#PanelCard QLabel,
 QFrame#PcapInvestigatorCard QLabel,
-QGroupBox#PcapPanel QLabel,
 QGroupBox QLabel {
     background: transparent;
     color: #111827;

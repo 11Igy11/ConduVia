@@ -362,22 +362,6 @@ QFrame#PcapInvestigatorCard {
     border-radius: 12px;
 }
 
-QGroupBox#PcapPanel {
-    background: #273549;
-    border: none;
-    border-radius: 12px;
-    margin-top: 12px;
-    padding-top: 10px;
-    font-weight: 600;
-}
-
-QGroupBox#PcapPanel::title {
-    subcontrol-origin: margin;
-    left: 12px;
-    padding: 0 6px;
-    color: #f8fafc;
-}
-
 QLabel#PcapPlainSummary {
     color: #f8fafc;
     font-size: 13px;
