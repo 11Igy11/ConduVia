@@ -377,11 +377,16 @@ class App(QWidget):
         return page    
 
     def go_to_explore_flows(self):
-        self.go_page(self.IDX_EXPLORE, self._nav_explore)
+        self.go_to_json_tab(0)
         self.tabs.setCurrentIndex(1)
 
     def go_to_notes(self):
         self.go_page(self.IDX_NOTES, self._nav_notes)
+
+    def go_to_json_tab(self, tab_index: int = 0):
+        self.go_page(self.IDX_JSON, self._nav_json)
+        if hasattr(self, "json_tabs"):
+            self.json_tabs.setCurrentIndex(max(0, tab_index))
 
     def _build_sidebar(self) -> QVBoxLayout:
         sidebar = QVBoxLayout()
@@ -389,9 +394,7 @@ class App(QWidget):
         self.btn_nav_projects = QPushButton("Projects")
         self.btn_nav_profile = QPushButton("Profile")
         self.btn_nav_notes = QPushButton("Notes")
-        self.btn_nav_explore = QPushButton("Explore")
-        self.btn_nav_registry = QPushButton("Registry")
-        self.btn_nav_listing = QPushButton("Listing")
+        self.btn_nav_json = QPushButton("JSON")
         self.btn_nav_pcap = QPushButton("PCAP")
         self.btn_nav_settings = QPushButton("Settings")
         self.btn_nav_help = QPushButton("Help")
@@ -400,9 +403,7 @@ class App(QWidget):
             self.btn_nav_projects,
             self.btn_nav_profile,
             self.btn_nav_notes,
-            self.btn_nav_explore,
-            self.btn_nav_registry,
-            self.btn_nav_listing,
+            self.btn_nav_json,
             self.btn_nav_pcap,
             self.btn_nav_settings,
             self.btn_nav_help,
@@ -414,18 +415,17 @@ class App(QWidget):
         self._nav_projects = self.btn_nav_projects
         self._nav_profile = self.btn_nav_profile
         self._nav_notes = self.btn_nav_notes
-        self._nav_explore = self.btn_nav_explore
-        self._nav_registry = self.btn_nav_registry
-        self._nav_listing = self.btn_nav_listing
+        self._nav_json = self.btn_nav_json
+        self._nav_explore = self.btn_nav_json
+        self._nav_registry = self.btn_nav_json
+        self._nav_listing = self.btn_nav_json
         self._nav_pcap = self.btn_nav_pcap
         self._nav_settings = self.btn_nav_settings
 
         sidebar.addWidget(self.btn_nav_projects)
         sidebar.addWidget(self.btn_nav_profile)
         sidebar.addWidget(self.btn_nav_notes)
-        sidebar.addWidget(self.btn_nav_explore)
-        sidebar.addWidget(self.btn_nav_registry)
-        sidebar.addWidget(self.btn_nav_listing)
+        sidebar.addWidget(self.btn_nav_json)
         sidebar.addStretch()
         sidebar.addWidget(self.btn_nav_pcap)
         sidebar.addWidget(self.btn_nav_settings)
@@ -437,9 +437,7 @@ class App(QWidget):
         self.btn_nav_projects.clicked.connect(lambda: self.go_page(self.IDX_PROJECTS, self._nav_projects))
         self.btn_nav_profile.clicked.connect(lambda: self.go_page(self.IDX_PROFILE, self._nav_profile))
         self.btn_nav_notes.clicked.connect(self.go_to_notes)
-        self.btn_nav_explore.clicked.connect(lambda: self.go_page(self.IDX_EXPLORE, self._nav_explore))
-        self.btn_nav_registry.clicked.connect(lambda: self.go_page(self.IDX_REGISTRY, self._nav_registry))
-        self.btn_nav_listing.clicked.connect(lambda: self.go_page(self.IDX_LISTING, self._nav_listing))
+        self.btn_nav_json.clicked.connect(lambda: self.go_to_json_tab(0))
         self.btn_nav_pcap.clicked.connect(lambda: self.go_page(self.IDX_PCAP, self._nav_pcap))
         self.btn_nav_settings.clicked.connect(lambda: self.go_page(self.IDX_SETTINGS, self._nav_settings))
         self.btn_nav_help.clicked.connect(self.open_user_manual)
@@ -724,11 +722,12 @@ class App(QWidget):
         self.IDX_PROJECTS = 0
         self.IDX_PROFILE = 1
         self.IDX_NOTES = 2
-        self.IDX_EXPLORE = 3
-        self.IDX_REGISTRY = 4
-        self.IDX_LISTING = 5
-        self.IDX_PCAP = 6
-        self.IDX_SETTINGS = 7
+        self.IDX_JSON = 3
+        self.IDX_EXPLORE = self.IDX_JSON
+        self.IDX_REGISTRY = self.IDX_JSON
+        self.IDX_LISTING = self.IDX_JSON
+        self.IDX_PCAP = 4
+        self.IDX_SETTINGS = 5
 
         # -------- Projects page --------
         projects_page = QWidget()
@@ -1355,13 +1354,22 @@ class App(QWidget):
 
         self.pages.addWidget(notes_tab)
 
-        self.pages.addWidget(explore_container)
+        json_page = QWidget()
+        json_layout = QVBoxLayout(json_page)
+        json_layout.setContentsMargins(0, 0, 0, 0)
+        json_layout.setSpacing(0)
+        self.json_tabs = QTabWidget()
+        self.json_tabs.setDocumentMode(True)
+        self.json_tabs.addTab(explore_container, "Explore")
 
         self.registry_page = RegistryPage(self)
-        self.pages.addWidget(self.registry_page)
+        self.json_tabs.addTab(self.registry_page, "Registry")
 
         self.listing_page = ListingPage(self)
-        self.pages.addWidget(self.listing_page)
+        self.json_tabs.addTab(self.listing_page, "Listing")
+
+        json_layout.addWidget(self.json_tabs, 1)
+        self.pages.addWidget(json_page)
 
         self.pcap_page = PcapPage(self)
         self.pages.addWidget(self.pcap_page)
@@ -1389,9 +1397,7 @@ class App(QWidget):
             self._nav_projects,
             self._nav_profile,
             self._nav_notes,
-            self._nav_explore,
-            self._nav_registry,
-            self._nav_listing,
+            self._nav_json,
             self._nav_pcap,
             self._nav_settings,
         ):

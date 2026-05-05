@@ -112,7 +112,7 @@ class ProjectsUIController:
         if should_open:
             opened = self.app.dataset_controller.load_dataset_dialog()
             if opened == "json":
-                self.app.go_page(self.app.IDX_EXPLORE, self.app._nav_explore)
+                self.app.go_to_json_tab(0)
 
     def on_project_selected_preview(self):
         item = self.app.projects_list.currentItem()
@@ -480,7 +480,7 @@ class ProjectsUIController:
             self.app._message_dialog("Dataset", "Path not found.", str(p), width=460)
             return
 
-        self.app.go_page(self.app.IDX_EXPLORE, self.app._nav_explore)
+        self.app.go_to_json_tab(0)
 
     def open_new_dataset(self):
         if self.app.current_project_id is None:
@@ -493,9 +493,6 @@ class ProjectsUIController:
 
         opened = self.app.dataset_controller.load_dataset_dialog()
         if opened == "json":
-            self.app.go_page(
-                self.app.IDX_EXPLORE,
-                self.app._nav_explore
-            )
+            self.app.go_to_json_tab(0)
 
     
