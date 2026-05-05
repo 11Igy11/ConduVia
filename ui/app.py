@@ -191,11 +191,16 @@ class App(QWidget):
         self.go_page(self.IDX_EXPLORE, self._nav_explore)
         self.tabs.setCurrentIndex(1)
 
+    def go_to_notes(self):
+        self.go_page(self.IDX_EXPLORE, self._nav_notes)
+        self.tabs.setCurrentIndex(3)
+
     def _build_sidebar(self) -> QVBoxLayout:
         sidebar = QVBoxLayout()
 
         self.btn_nav_projects = QPushButton("Projects")
         self.btn_nav_profile = QPushButton("Profile")
+        self.btn_nav_notes = QPushButton("Notes")
         self.btn_nav_explore = QPushButton("Explore")
         self.btn_nav_registry = QPushButton("Registry")
         self.btn_nav_listing = QPushButton("Listing")
@@ -206,6 +211,7 @@ class App(QWidget):
         for b in (
             self.btn_nav_projects,
             self.btn_nav_profile,
+            self.btn_nav_notes,
             self.btn_nav_explore,
             self.btn_nav_registry,
             self.btn_nav_listing,
@@ -219,6 +225,7 @@ class App(QWidget):
         # activ button reference (for highlight)
         self._nav_projects = self.btn_nav_projects
         self._nav_profile = self.btn_nav_profile
+        self._nav_notes = self.btn_nav_notes
         self._nav_explore = self.btn_nav_explore
         self._nav_registry = self.btn_nav_registry
         self._nav_listing = self.btn_nav_listing
@@ -227,6 +234,7 @@ class App(QWidget):
 
         sidebar.addWidget(self.btn_nav_projects)
         sidebar.addWidget(self.btn_nav_profile)
+        sidebar.addWidget(self.btn_nav_notes)
         sidebar.addWidget(self.btn_nav_explore)
         sidebar.addWidget(self.btn_nav_registry)
         sidebar.addWidget(self.btn_nav_listing)
@@ -240,6 +248,7 @@ class App(QWidget):
     def _wire_navigation(self) -> None:
         self.btn_nav_projects.clicked.connect(lambda: self.go_page(self.IDX_PROJECTS, self._nav_projects))
         self.btn_nav_profile.clicked.connect(lambda: self.go_page(self.IDX_PROFILE, self._nav_profile))
+        self.btn_nav_notes.clicked.connect(self.go_to_notes)
         self.btn_nav_explore.clicked.connect(lambda: self.go_page(self.IDX_EXPLORE, self._nav_explore))
         self.btn_nav_registry.clicked.connect(lambda: self.go_page(self.IDX_REGISTRY, self._nav_registry))
         self.btn_nav_listing.clicked.connect(lambda: self.go_page(self.IDX_LISTING, self._nav_listing))
@@ -1187,6 +1196,7 @@ class App(QWidget):
         for b in (
             self._nav_projects,
             self._nav_profile,
+            self._nav_notes,
             self._nav_explore,
             self._nav_registry,
             self._nav_listing,
@@ -1318,8 +1328,13 @@ class App(QWidget):
         if not ok2:
             note = ""
 
+        tags, ok3 = self._text_input_dialog("New finding", "Tags (comma-separated, optional):", width=440)
+        if not ok3:
+            tags = ""
+        tags = normalize_tags(tags)
+
         try:
-            add_finding(self.current_project_id, self._current_flow, title=title, note=note)
+            add_finding(self.current_project_id, self._current_flow, title=title, note=note, tags=tags)
         except Exception as e:
             self._message_dialog("Findings", "Failed to create finding.", str(e), width=460)
             return
@@ -1635,7 +1650,7 @@ class App(QWidget):
         self._notes_dirty = True
         self._flush_notes()
 
-        self.tabs.setCurrentIndex(3)  # Notes tab
+        self.go_to_notes()
 
     def configure_ai_settings(self):
         current = self.ai_service.settings
