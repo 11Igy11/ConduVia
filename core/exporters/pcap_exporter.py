@@ -76,7 +76,11 @@ body {{ margin:0; padding:28px; font-family:"Segoe UI", Arial, sans-serif; color
 .hero {{ background:#111827; color:white; border-radius:14px; padding:24px 26px; margin-bottom:18px; }}
 h1 {{ margin:0 0 8px; font-size:30px; }}
 h2 {{ margin:24px 0 10px; font-size:18px; }}
+h3 {{ margin:18px 0 8px; font-size:15px; color:#1f2937; }}
 .muted {{ color:#9ca3af; }}
+.nav {{ display:flex; gap:8px; flex-wrap:wrap; margin:16px 0 0; }}
+.nav a {{ color:white; text-decoration:none; border:1px solid rgba(255,255,255,.28); border-radius:999px; padding:7px 11px; font-size:12px; font-weight:700; }}
+.nav a:hover {{ background:rgba(255,255,255,.12); }}
 .grid {{ display:grid; grid-template-columns:repeat(4, minmax(0, 1fr)); gap:10px; margin-top:18px; }}
 .card {{ background:white; border:1px solid #e5e7eb; border-radius:10px; padding:14px; }}
 .hero .card {{ background:rgba(255,255,255,.08); border-color:rgba(255,255,255,.16); color:white; }}
@@ -107,13 +111,29 @@ th {{ text-align:left; background:#1f2937; color:white; font-size:12px; padding:
 td {{ border-top:1px solid #e5e7eb; padding:8px 9px; font-size:12px; vertical-align:top; }}
 tr:nth-child(even) td {{ background:#f9fafb; }}
 .section {{ margin-bottom:18px; }}
+.section-shell {{ background:#ffffff; border:1px solid #e5e7eb; border-radius:14px; padding:18px 20px; margin-bottom:18px; }}
+.section-shell h2:first-child {{ margin-top:0; }}
+.subsection {{ margin-top:16px; }}
+.two-col {{ display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:14px; }}
+.report-note {{ background:#f8fafc; border:1px solid #e5e7eb; border-radius:10px; padding:12px 14px; color:#374151; line-height:1.5; }}
+@media (max-width: 980px) {{
+  .grid, .briefgrid, .points, .two-col, .evidence-grid {{ grid-template-columns:1fr; }}
+}}
 </style>
 </head>
 <body>
 <div class="report">
   <div class="hero">
-    <h1>ViaNyquist PCAP Summary</h1>
+    <h1>ViaNyquist PCAP Report</h1>
     <div class="muted">{html.escape(summary.file_name)} | Exported: {html.escape(generated_at)}</div>
+    <div class="nav">
+      <a href="#summary">Summary</a>
+      <a href="#investigator">Investigator View</a>
+      <a href="#communications">Communication Highlights</a>
+      <a href="#evidence">Evidence</a>
+      <a href="#artifacts">Artifacts</a>
+      <a href="#connections">Connections</a>
+    </div>
     <div class="grid">
       {context_cards_html(case_context, card_class="card", include_dataset_target=False)}
       <div class="card"><div class="label">Format</div><div class="value">{html.escape(summary.format)}</div></div>
@@ -127,7 +147,28 @@ tr:nth-child(even) td {{ background:#f9fafb; }}
     </div>
   </div>
 
-  <div class="section">
+  <div class="section-shell" id="summary">
+    <h2>Summary</h2>
+    <div class="report-note">
+      This report follows the same structure as the PCAP screen in ViaNyquist: Summary explains what the capture indicates, while Evidence lists the observable records behind those conclusions.
+    </div>
+    <div class="two-col">
+      <div>
+        <h3>Visible Service Groups</h3>
+        <table><thead><tr>{headers([('service', 'Service Group'), ('count', 'Signals'), ('share', 'Share'), ('bar_html', 'Chart'), ('example', 'Example')])}</tr></thead><tbody>{_chart_rows(investigator.get("service_rows", []), [('service', 'Service Group'), ('count', 'Signals'), ('share', 'Share'), ('bar_html', 'Chart'), ('example', 'Example')])}</tbody></table>
+      </div>
+      <div>
+        <h3>Visible vs Encrypted Indicators</h3>
+        <table><thead><tr>{headers([('label', 'Visibility'), ('count', 'Signals'), ('share', 'Share'), ('bar_html', 'Chart')])}</tr></thead><tbody>{_chart_rows(investigator.get("visibility_rows", []), [('label', 'Visibility'), ('count', 'Signals'), ('share', 'Share'), ('bar_html', 'Chart')])}</tbody></table>
+      </div>
+    </div>
+    <div class="subsection">
+      <h3>Activity Timeline By Hour</h3>
+      <table><thead><tr>{headers([('hour', 'Hour'), ('packets', 'Packets'), ('share', 'Share'), ('bar_html', 'Chart')])}</tr></thead><tbody>{_chart_rows(investigator.get("activity_rows", []), [('hour', 'Hour'), ('packets', 'Packets'), ('share', 'Share'), ('bar_html', 'Chart')])}</tbody></table>
+    </div>
+  </div>
+
+  <div class="section-shell" id="investigator">
     <h2>Investigator View</h2>
     <div class="plain">
       {html.escape(str(investigator.get("plain_summary") or ""))}
@@ -137,7 +178,7 @@ tr:nth-child(even) td {{ background:#f9fafb; }}
     </div>
   </div>
 
-  <div class="section">
+  <div class="section-shell" id="communications">
     <h2>Communication Highlights</h2>
     <div class="note">These rows are investigative indicators based on metadata such as host names, ports, protocol, duration and traffic volume. They do not prove message content or confirm a call by themselves.</div>
     <div class="briefgrid">
@@ -153,47 +194,39 @@ tr:nth-child(even) td {{ background:#f9fafb; }}
     </div>
   </div>
 
-  <div class="section">
-    <h2>Visible Service Groups</h2>
-    <table><thead><tr>{headers([('service', 'Service Group'), ('count', 'Signals'), ('share', 'Share'), ('bar_html', 'Chart'), ('example', 'Example')])}</tr></thead><tbody>{_chart_rows(investigator.get("service_rows", []), [('service', 'Service Group'), ('count', 'Signals'), ('share', 'Share'), ('bar_html', 'Chart'), ('example', 'Example')])}</tbody></table>
-  </div>
-
-  <div class="section">
-    <h2>Visible vs Encrypted Indicators</h2>
-    <table><thead><tr>{headers([('label', 'Visibility'), ('count', 'Signals'), ('share', 'Share'), ('bar_html', 'Chart')])}</tr></thead><tbody>{_chart_rows(investigator.get("visibility_rows", []), [('label', 'Visibility'), ('count', 'Signals'), ('share', 'Share'), ('bar_html', 'Chart')])}</tbody></table>
-  </div>
-
-  <div class="section">
-    <h2>Activity Timeline By Hour</h2>
-    <table><thead><tr>{headers([('hour', 'Hour'), ('packets', 'Packets'), ('share', 'Share'), ('bar_html', 'Chart')])}</tr></thead><tbody>{_chart_rows(investigator.get("activity_rows", []), [('hour', 'Hour'), ('packets', 'Packets'), ('share', 'Share'), ('bar_html', 'Chart')])}</tbody></table>
-  </div>
-
-  <div class="section">
+  <div class="section-shell">
     <h2>Interpretation Notes</h2>
     {''.join(f'<div class="note">{html.escape(note)}</div>' for note in investigator.get("limitations", summary.notes))}
   </div>
 
-  <div class="section">
+  <div class="section-shell" id="evidence">
+    <h2>Evidence</h2>
+    <div class="report-note">
+      These records are the visible metadata and cleartext values extracted from the capture. Encrypted payload contents are not decoded.
+    </div>
+    <div class="two-col">
+      <div>
     <h2>Top DNS Queries</h2>
     <table><thead><tr>{headers([('query', 'DNS Query'), ('count', 'Count')])}</tr></thead><tbody>{rows(summary.dns_queries[:50], [('query', 'DNS Query'), ('count', 'Count')])}</tbody></table>
-  </div>
-
-  <div class="section">
+      </div>
+      <div>
     <h2>Top TLS SNI Hosts</h2>
     <table><thead><tr>{headers([('host', 'Host'), ('count', 'Count')])}</tr></thead><tbody>{rows(summary.tls_sni[:50], [('host', 'Host'), ('count', 'Count')])}</tbody></table>
-  </div>
+      </div>
+    </div>
 
-  <div class="section">
+  <div class="subsection">
     <h2>Readable Evidence</h2>
     <table><thead><tr>{headers([('time', 'Time'), ('type', 'Type'), ('source', 'Source'), ('destination', 'Destination'), ('value', 'Visible Value')])}</tr></thead><tbody>{rows(readable, [('time', 'Time'), ('type', 'Type'), ('source', 'Source'), ('destination', 'Destination'), ('value', 'Visible Value')])}</tbody></table>
   </div>
+  </div>
 
-  <div class="section">
+  <div class="section-shell" id="artifacts">
     <h2>Extracted Artifacts</h2>
     <table><thead><tr>{headers([('category', 'Category'), ('type', 'Type'), ('value', 'Value'), ('visibility', 'Visibility'), ('source', 'Source'), ('destination', 'Destination'), ('count', 'Count'), ('explanation', 'Explanation')])}</tr></thead><tbody>{rows(artifacts, [('category', 'Category'), ('type', 'Type'), ('value', 'Value'), ('visibility', 'Visibility'), ('source', 'Source'), ('destination', 'Destination'), ('count', 'Count'), ('explanation', 'Explanation')])}</tbody></table>
   </div>
 
-  <div class="section">
+  <div class="section-shell" id="connections">
     <h2>Top Connections</h2>
     <table><thead><tr>{headers([('source', 'Source'), ('destination', 'Destination'), ('protocol', 'Protocol'), ('application', 'Application'), ('host', 'Host/Query'), ('bytes', 'Bytes'), ('packets', 'Packets'), ('first', 'First Seen'), ('last', 'Last Seen'), ('visible', 'Visible Preview')])}</tr></thead><tbody>{rows(connections, [('source', 'Source'), ('destination', 'Destination'), ('protocol', 'Protocol'), ('application', 'Application'), ('host', 'Host/Query'), ('bytes', 'Bytes'), ('packets', 'Packets'), ('first', 'First Seen'), ('last', 'Last Seen'), ('visible', 'Visible Preview')])}</tbody></table>
   </div>

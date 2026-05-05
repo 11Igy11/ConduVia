@@ -647,6 +647,10 @@ class PcapAnalyzerTests(unittest.TestCase):
         self.assertIn("Ana Horvat", content)
         self.assertIn("MSISDN: 385911234567", content)
         self.assertIn("Likely Device IP", content)
+        self.assertIn("ViaNyquist PCAP Report", content)
+        self.assertIn('href="#summary"', content)
+        self.assertIn('id="evidence"', content)
+        self.assertIn("Communication Highlights", content)
 
     def test_project_activity_profile_summarizes_saved_evidence(self):
         with temporary_directory() as tmp:
