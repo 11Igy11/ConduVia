@@ -15,6 +15,7 @@ from core.formatters import (
     human_bytes,
     safe_int,
 )
+from core.output_language import normalize_output_language
 from core.protocols import format_ip_proto
 
 
@@ -202,7 +203,7 @@ def _format_registry_value(col: str, value: Any) -> str:
 
     return str(value)
 
-def _full_dataset_table(flows: list[dict[str, Any]], columns: list[str]) -> str:
+def _full_dataset_table(flows: list[dict[str, Any]], columns: list[str], *, title: str = "Full Dataset") -> str:
     if not flows or not columns:
         return ""
 
@@ -220,7 +221,7 @@ def _full_dataset_table(flows: list[dict[str, Any]], columns: list[str]) -> str:
     return f"""
     <section class="table-shell full-dataset">
         <div class="table-head">
-            <h2>Full Dataset</h2>
+            <h2>{_esc(title)}</h2>
         </div>
 
         <div class="table-wrap">
@@ -252,7 +253,10 @@ def export_registry_html(
     include_full: bool = False,
     project: Project | None = None,
     project_name: str = "",
+    report_language: str = "en",
 ) -> None:
+    lang = normalize_output_language(report_language, default="en")
+    text = _report_text(lang)
     meta = meta or {}
     summary = summary or {}
     analyst = analyst or {}
@@ -357,23 +361,23 @@ def export_registry_html(
     if cmp:
         compare_html = f"""
         <section class="panel">
-            <h2>Dataset Compare</h2>
+            <h2>{_esc(text["dataset_compare"])}</h2>
             <div class="compare-grid">
-                <div><span>Current unique</span><strong>{_esc(cmp.get("total_current", 0))}</strong></div>
-                <div><span>Previous unique</span><strong>{_esc(cmp.get("total_previous", 0))}</strong></div>
-                <div><span>New</span><strong>{len(cmp.get("new", []) or [])}</strong></div>
-                <div><span>Known</span><strong>{len(cmp.get("known", []) or [])}</strong></div>
+                <div><span>{_esc(text["current_unique"])}</span><strong>{_esc(cmp.get("total_current", 0))}</strong></div>
+                <div><span>{_esc(text["previous_unique"])}</span><strong>{_esc(cmp.get("total_previous", 0))}</strong></div>
+                <div><span>{_esc(text["new"])}</span><strong>{len(cmp.get("new", []) or [])}</strong></div>
+                <div><span>{_esc(text["known"])}</span><strong>{len(cmp.get("known", []) or [])}</strong></div>
             </div>
         </section>
         """
 
-    full_table_html = _full_dataset_table(flows, columns) if include_full else ""
+    full_table_html = _full_dataset_table(flows, columns, title=text["full_dataset"]) if include_full else ""
 
     template = _load_template()
 
     rendered = (
         template
-        .replace("{{TITLE}}", "ViaNyquist Registry Report")
+        .replace("{{TITLE}}", text["title"])
         .replace("{{LOGO}}", _esc(_logo_data_uri()))
         .replace("{{FOLDER}}", _esc(Path(folder).name if folder else "—"))
         .replace("{{EXPORTED_AT}}", datetime.now().strftime("%d.%m.%Y %H:%M:%S"))
@@ -417,4 +421,126 @@ def export_registry_html(
         .replace("{{FULL_DATASET}}", full_table_html)
     )
 
+    rendered = _apply_registry_labels(rendered, text, lang)
+
     Path(file_path).write_text(rendered, encoding="utf-8")
+
+
+def _apply_registry_labels(rendered: str, text: dict[str, str], lang: str) -> str:
+    labels = {
+        "LANG": lang,
+        "TITLE": text["title"],
+        "REPORT_TITLE": text["title"],
+        "EXPORTED_LABEL": text["exported"],
+        "ROWS_LABEL": text["rows"],
+        "APPS_LABEL": text["apps"],
+        "FILES_LABEL": text["files"],
+        "TARGET_LABEL": text["target"],
+        "ORDER_VALIDITY_LABEL": text["order_validity"],
+        "TOTAL_FLOWS_LABEL": text["total_flows"],
+        "UNIQ_SRC_LABEL": text["unique_src_ip"],
+        "UNIQ_DST_LABEL": text["unique_dst_ip"],
+        "UNIQ_APPS_LABEL": text["unique_apps"],
+        "TOTAL_BYTES_LABEL": text["total_bytes"],
+        "ANALYST_SUMMARY_LABEL": text["analyst_summary"],
+        "BEHAVIOR_DEVIATION_LABEL": text["behavior_deviation"],
+        "DEVIATION_SIGNALS_LABEL": text["deviation_signals"],
+        "OBSERVED_ACTIVITY_LABEL": text["observed_activity"],
+        "OUTBOUND_SHARE_LABEL": text["outbound_share"],
+        "DOMINANT_APPLICATION_LABEL": text["dominant_application"],
+        "BY_COUNT_LABEL": text["by_count"],
+        "TOP_OUTBOUND_RELATIONS_LABEL": text["top_outbound_relations"],
+        "INTERNAL_LABEL": text["internal"],
+        "DESTINATION_LABEL": text["destination"],
+        "ACTIVITY_BY_BYTES_LABEL": text["activity_by_bytes"],
+        "ACTIVITY_BY_FLOWS_LABEL": text["activity_by_flows"],
+        "PEAK_LABEL": text["peak"],
+        "QUIET_LABEL": text["quiet"],
+        "NIGHT_LABEL": text["night"],
+        "BUSINESS_LABEL": text["business"],
+        "INSIGHTS_LABEL": text["insights"],
+        "GENERATED_BY_LABEL": text["generated_by"],
+    }
+    for key, value in labels.items():
+        rendered = rendered.replace(f"{{{{{key}}}}}", _esc(value))
+    return rendered
+
+
+def _report_text(language: str) -> dict[str, str]:
+    if normalize_output_language(language, default="en") == "hr":
+        return {
+            "title": "ViaNyquist registry izvjestaj",
+            "exported": "Izvezeno",
+            "rows": "Redovi",
+            "apps": "Aplikacije",
+            "files": "Datoteke",
+            "target": "Target",
+            "order_validity": "Valjanost naloga",
+            "total_flows": "Ukupno flowova",
+            "unique_src_ip": "Jedinstveni izvorni IP",
+            "unique_dst_ip": "Jedinstveni odredisni IP",
+            "unique_apps": "Jedinstvene aplikacije",
+            "total_bytes": "Ukupno bajtova",
+            "analyst_summary": "Analiticki sazetak",
+            "behavior_deviation": "Odstupanje ponasanja",
+            "deviation_signals": "Signali odstupanja",
+            "observed_activity": "Uocena aktivnost",
+            "outbound_share": "Udio odlaznog prometa",
+            "dominant_application": "Dominantna aplikacija",
+            "by_count": "Po broju",
+            "top_outbound_relations": "Najvaznije odlazne relacije",
+            "internal": "Interno",
+            "destination": "Odrediste",
+            "activity_by_bytes": "Aktivnost po bajtovima",
+            "activity_by_flows": "Aktivnost po flowovima",
+            "peak": "Vrsni sat",
+            "quiet": "Tihi sat",
+            "night": "Noc",
+            "business": "Radno vrijeme",
+            "insights": "Uvidi",
+            "generated_by": "Generirano pomocu",
+            "dataset_compare": "Usporedba datasetova",
+            "current_unique": "Trenutno jedinstveno",
+            "previous_unique": "Prethodno jedinstveno",
+            "new": "Novo",
+            "known": "Poznato",
+            "full_dataset": "Puni dataset",
+        }
+    return {
+        "title": "ViaNyquist Registry Report",
+        "exported": "Exported",
+        "rows": "Rows",
+        "apps": "Apps",
+        "files": "Files",
+        "target": "Target",
+        "order_validity": "Order validity",
+        "total_flows": "Total flows",
+        "unique_src_ip": "Unique src IP",
+        "unique_dst_ip": "Unique dst IP",
+        "unique_apps": "Unique apps",
+        "total_bytes": "Total bytes",
+        "analyst_summary": "Analyst Summary",
+        "behavior_deviation": "Behavior deviation",
+        "deviation_signals": "Deviation signals",
+        "observed_activity": "Observed activity",
+        "outbound_share": "Outbound share",
+        "dominant_application": "Dominant application",
+        "by_count": "By count",
+        "top_outbound_relations": "Top outbound relations",
+        "internal": "Internal",
+        "destination": "Destination",
+        "activity_by_bytes": "Activity by bytes",
+        "activity_by_flows": "Activity by flows",
+        "peak": "Peak",
+        "quiet": "Quiet",
+        "night": "Night",
+        "business": "Business",
+        "insights": "Insights",
+        "generated_by": "Generated by",
+        "dataset_compare": "Dataset Compare",
+        "current_unique": "Current unique",
+        "previous_unique": "Previous unique",
+        "new": "New",
+        "known": "Known",
+        "full_dataset": "Full Dataset",
+    }

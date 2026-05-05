@@ -6,7 +6,7 @@ from typing import Any
 from core.formatters import human_bytes, safe_int, format_short_date
 from core.timeutils import parse_flow_timestamp
 from core.exporters.registry_exporter import export_registry_html
-from core.db import get_project
+from core.db import get_app_settings, get_project
 
 from PySide6.QtCore import Qt, Signal, QAbstractTableModel, QModelIndex, QSortFilterProxyModel, QSize, QRectF
 from PySide6.QtGui import QPainter, QColor, QPen, QFontMetrics
@@ -1522,6 +1522,7 @@ class RegistryPage(QWidget):
                 include_full=bool(self.chk_full.isChecked()),
                 project=self._current_project(),
                 project_name=getattr(self.app, "current_project_name", "") or "",
+                report_language=get_app_settings().get("output_language", "hr"),
             )
 
             QMessageBox.information(self, "Export", f"Report saved:\n{out_path}")

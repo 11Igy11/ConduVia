@@ -367,10 +367,29 @@ class ExportContextTests(unittest.TestCase):
             )
             content = output.read_text(encoding="utf-8")
 
+            hr_output = root / "registry-hr.html"
+            export_registry_html(
+                file_path=str(hr_output),
+                folder=root,
+                files=[root / "dataset.json"],
+                flows=[{"src_ip": "10.0.0.5", "dst_ip": "8.8.8.8", "application_name": "DNS", "bidirectional_bytes": 100}],
+                meta={"target": "38598111222", "targettype": "MSISDN"},
+                summary={"total_flows": 1, "total_bytes": 100},
+                analyst={},
+                columns=["src_ip", "dst_ip", "application_name"],
+                tab_defs=[],
+                project=project,
+                report_language="hr",
+            )
+            hr_content = hr_output.read_text(encoding="utf-8")
+
         self.assertIn("Case B", content)
         self.assertIn("Pero Peric", content)
         self.assertIn("MSISDN: 38598111222", content)
         self.assertIn("Known IP", content)
+        self.assertIn("ViaNyquist registry izvjestaj", hr_content)
+        self.assertIn("Valjanost naloga", hr_content)
+        self.assertIn("Analiticki sazetak", hr_content)
 
 
 class CompareTests(unittest.TestCase):
