@@ -81,6 +81,42 @@ class DictTableModel(QAbstractTableModel):
             return str(section + 1)
         return None
 
+    def sort(self, column: int, order: Qt.SortOrder = Qt.AscendingOrder):
+        if column < 0 or column >= len(self.columns):
+            return
+        key = self.columns[column][0]
+        reverse = order == Qt.DescendingOrder
+        self.layoutAboutToBeChanged.emit()
+        self.rows.sort(key=lambda row: self._sort_value(key, row.get(key, "")), reverse=reverse)
+        self.layoutChanged.emit()
+
+    def _sort_value(self, key: str, value: Any):
+        if value is None:
+            return (1, "")
+        if key in {
+            "bytes",
+            "bidirectional_bytes",
+            "packets",
+            "bidirectional_packets",
+            "duration_ms",
+            "bidirectional_duration_ms",
+            "count",
+            "share",
+            "port",
+            "src_port",
+            "dst_port",
+            "protocol",
+            "protocol_number",
+        }:
+            try:
+                return (0, float(value))
+            except Exception:
+                return (0, 0.0)
+        if key == "confidence":
+            order = {"low": 1, "medium": 2, "high": 3}
+            return (0, order.get(str(value).strip().lower(), 0))
+        return (0, str(value).casefold())
+
     def data(self, index, role=Qt.DisplayRole):
         if not index.isValid() or role not in (Qt.DisplayRole, Qt.ToolTipRole):
             return None
@@ -208,6 +244,7 @@ class PcapPage(QWidget):
         self.tbl_communications.setMinimumHeight(330)
         self.tbl_communications.setWordWrap(True)
         self.tbl_communications.verticalHeader().setDefaultSectionSize(44)
+        self.tbl_communications.sortByColumn(5, Qt.DescendingOrder)
         self.tbl_communications.selectionModel().currentRowChanged.connect(self._on_communication_selected)
 
         self.txt_communication_detail = QTextEdit()
@@ -485,6 +522,7 @@ class PcapPage(QWidget):
     ) -> QTableView:
         table = QTableView()
         table.setModel(DictTableModel(columns))
+        table.setSortingEnabled(True)
         table.setAlternatingRowColors(True)
         table.setSelectionBehavior(QTableView.SelectRows)
         table.setSelectionMode(QAbstractItemView.SingleSelection)
@@ -653,6 +691,10 @@ class PcapPage(QWidget):
         model = table.model()
         if isinstance(model, DictTableModel):
             model.set_rows(rows)
+            section = table.horizontalHeader().sortIndicatorSection()
+            order = table.horizontalHeader().sortIndicatorOrder()
+            if table.isSortingEnabled() and section >= 0:
+                model.sort(section, order)
 
     def _set_artifact_tables(self, artifacts: list[dict[str, Any]]) -> None:
         self._all_artifacts = artifacts or []
