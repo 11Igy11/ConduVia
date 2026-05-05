@@ -91,22 +91,70 @@ QWidget {
     color: #111827;
 }
 
-QFrame,
-QGroupBox,
-#ProfileHero,
-#ProfilePanel,
-#ExploreHeaderCard,
-#ListingHeaderCard,
-#CaseDashboardCompact,
-#PanelCard {
+QLabel {
+    background: transparent;
+    color: #111827;
+}
+
+QFrame#Card,
+QFrame#ProfileHero,
+QFrame#ProfilePanel,
+QFrame#ExploreHeaderCard,
+QFrame#ListingHeaderCard,
+QFrame#CaseDashboardCompact,
+QFrame#PanelCard,
+QFrame#FlowDetailsCard,
+QFrame#PcapInvestigatorCard,
+QGroupBox {
     background: #ffffff;
     border-color: #cbd5e1;
 }
 
+QFrame#Card QLabel,
+QFrame#ProfileHero QLabel,
+QFrame#ProfilePanel QLabel,
+QFrame#ExploreHeaderCard QLabel,
+QFrame#ListingHeaderCard QLabel,
+QFrame#CaseDashboardCompact QLabel,
+QFrame#PanelCard QLabel,
+QFrame#PcapInvestigatorCard QLabel,
+QGroupBox QLabel {
+    background: transparent;
+    color: #111827;
+}
+
+QLabel#H1,
+QLabel#SectionTitle,
+QLabel#ProfileTitle,
+QLabel#ProfilePanelTitle,
+QLabel#CaseDashboardTitle,
+QLabel#HeaderProjectLabel {
+    background: transparent;
+    color: #0f172a;
+}
+
 QLabel#Muted,
 QLabel#ProfileSubtitle,
-#ProfileSubtitle {
+QLabel#HeaderPathLabel,
+QLabel#HeaderStatLabel,
+QLabel#PcapKeyPoints,
+QLabel#PcapLimitations,
+QLabel#FlowFieldLabel,
+QLabel#MutedLabel {
+    background: transparent;
     color: #475569;
+}
+
+QLabel#PcapPlainSummary {
+    background: transparent;
+    color: #111827;
+}
+
+QLabel#ProfileMetric,
+QLabel#CaseMetricCompact {
+    background: #f8fafc;
+    border: 1px solid #cbd5e1;
+    color: #0f172a;
 }
 
 QLineEdit,
@@ -120,10 +168,52 @@ QTableView {
     border-color: #cbd5e1;
 }
 
+QLineEdit:focus,
+QTextEdit:focus,
+QPlainTextEdit:focus,
+QComboBox:focus {
+    border-color: #2563eb;
+}
+
+QComboBox QAbstractItemView {
+    background: #ffffff;
+    color: #111827;
+    selection-background-color: #3b82f6;
+    selection-color: #ffffff;
+}
+
+QTabWidget::pane {
+    background: #ffffff;
+    border-color: #cbd5e1;
+}
+
+QTabBar::tab {
+    background: #e2e8f0;
+    border-color: #cbd5e1;
+    color: #334155;
+}
+
+QTabBar::tab:hover {
+    background: #dbeafe;
+    color: #0f172a;
+}
+
+QTabBar::tab:selected {
+    background: #ffffff;
+    color: #0f172a;
+}
+
 QHeaderView::section {
     background: #e2e8f0;
     color: #111827;
     border-color: #cbd5e1;
+}
+
+QTableView {
+    alternate-background-color: #f1f5f9;
+    gridline-color: #cbd5e1;
+    selection-background-color: #3b82f6;
+    selection-color: #ffffff;
 }
 
 QPushButton {
@@ -142,9 +232,29 @@ QPushButton#NavButton {
     border: none;
 }
 
+QPushButton#NavButton:hover {
+    background: #e2e8f0;
+    border: 1px solid #cbd5e1;
+}
+
 QPushButton#NavButton[active="true"] {
     background: #3b82f6;
     color: #ffffff;
+}
+
+QPushButton#Primary {
+    background: #3b82f6;
+    border-color: #3b82f6;
+    color: #ffffff;
+}
+
+QProgressBar {
+    background: #e2e8f0;
+    border-color: #cbd5e1;
+}
+
+QProgressBar::chunk {
+    background: #3b82f6;
 }
 """
 
