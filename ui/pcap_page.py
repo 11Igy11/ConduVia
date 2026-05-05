@@ -35,6 +35,7 @@ from core.db import (
     add_activity,
     add_pcap_source,
     file_sha256,
+    get_app_settings,
     get_project,
     list_project_pcap_device_ips,
     set_project_subject,
@@ -883,6 +884,7 @@ class PcapPage(QWidget):
                 self.summary,
                 project=project,
                 project_name=getattr(self.app, "current_project_name", "") or "",
+                report_language=get_app_settings().get("output_language", "hr"),
             )
             webbrowser.open(Path(file_path).resolve().as_uri())
         except Exception as exc:

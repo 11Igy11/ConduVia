@@ -642,6 +642,9 @@ class PcapAnalyzerTests(unittest.TestCase):
 
             export_pcap_summary_html(str(output), summary, project=project)
             content = output.read_text(encoding="utf-8")
+            hr_output = root / "pcap-hr.html"
+            export_pcap_summary_html(str(hr_output), summary, project=project, report_language="hr")
+            hr_content = hr_output.read_text(encoding="utf-8")
 
         self.assertIn("Case A", content)
         self.assertIn("Ana Horvat", content)
@@ -651,6 +654,9 @@ class PcapAnalyzerTests(unittest.TestCase):
         self.assertIn('href="#summary"', content)
         self.assertIn('id="evidence"', content)
         self.assertIn("Communication Highlights", content)
+        self.assertIn("ViaNyquist PCAP izvjestaj", hr_content)
+        self.assertIn("Komunikacijski indikatori", hr_content)
+        self.assertIn("Dokazi", hr_content)
 
     def test_project_activity_profile_summarizes_saved_evidence(self):
         with temporary_directory() as tmp:
