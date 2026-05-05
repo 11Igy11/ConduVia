@@ -7,6 +7,7 @@ from typing import Any
 
 from core.db import Project
 from core.exporters.case_context import build_case_context, context_cards_html
+from core.output_language import normalize_output_language
 
 
 def export_activity_profile_html(
@@ -15,17 +16,20 @@ def export_activity_profile_html(
     profile: dict[str, Any],
     project_name: str = "",
     project: Project | None = None,
+    report_language: str = "en",
 ) -> None:
     path = Path(file_path)
+    lang = normalize_output_language(report_language, default="en")
+    text = _report_text(lang)
     generated_at = datetime.now().strftime("%d.%m.%Y %H:%M:%S")
     behavior = dict(profile.get("behavior_profile") or {})
     case_context = build_case_context(project, project_name=project_name)
 
     html_doc = f"""<!DOCTYPE html>
-<html lang="en">
+<html lang="{html.escape(lang)}">
 <head>
 <meta charset="UTF-8">
-<title>ViaNyquist Activity Profile</title>
+<title>{html.escape(text['title'])}</title>
 <style>
 body {{ margin:0; padding:28px; font-family:"Segoe UI", Arial, sans-serif; color:#111827; background:#f3f4f6; }}
 .report {{ max-width:1500px; margin:0 auto; }}
@@ -54,47 +58,47 @@ tr:nth-child(even) td {{ background:#f9fafb; }}
 <body>
 <div class="report">
   <div class="hero">
-    <h1>ViaNyquist Activity Profile</h1>
-    <div class="muted">Project: {html.escape(project_name or 'Project')} | Exported: {html.escape(generated_at)}</div>
+    <h1>{html.escape(text['title'])}</h1>
+    <div class="muted">{html.escape(text['project'])}: {html.escape(project_name or text['project_fallback'])} | {html.escape(text['exported'])}: {html.escape(generated_at)}</div>
     <div class="grid">
       {context_cards_html(case_context, card_class="card", include_dataset_target=False)}
-      {_metric_cards(profile)}
+      {_metric_cards(profile, text)}
     </div>
   </div>
 
   <div class="section">
-    <h2>Case Snapshot</h2>
+    <h2>{html.escape(text['case_snapshot'])}</h2>
     <div class="plain">{html.escape(_lines(profile.get("summary_lines")))}</div>
   </div>
 
   <div class="section">
-    <h2>Evidence Overview</h2>
+    <h2>{html.escape(text['evidence_overview'])}</h2>
     <div class="two">
-      <div>{_bar_table("Evidence Sources", profile.get("evidence_counts") or [], "count")}</div>
-      <div>{_bar_table("PCAP Device IP Distribution", profile.get("pcap_device_ip_rows") or [], "count")}</div>
+      <div>{_bar_table(text['evidence_sources'], profile.get("evidence_counts") or [], "count", text=text)}</div>
+      <div>{_bar_table(text['pcap_device_ip_distribution'], profile.get("pcap_device_ip_rows") or [], "count", text=text)}</div>
     </div>
   </div>
 
   <div class="section">
-    <h2>Behavior Insights From Saved JSON Datasets</h2>
-    <div class="note">These indicators describe observed device activity patterns. They are investigative indicators, not proof of the person's exact awake/asleep state or message content.</div>
+    <h2>{html.escape(text['behavior_insights'])}</h2>
+    <div class="note">{html.escape(text['behavior_note'])}</div>
     <div class="two">
-      <div>{_bar_table("Service Groups By Volume", behavior.get("service_rows") or [], "bytes", "bytes_label")}</div>
-      <div>{_bar_table("Observed Domains By Volume", behavior.get("domain_rows") or [], "bytes", "bytes_label")}</div>
+      <div>{_bar_table(text['service_groups_by_volume'], behavior.get("service_rows") or [], "bytes", "bytes_label", text=text)}</div>
+      <div>{_bar_table(text['observed_domains_by_volume'], behavior.get("domain_rows") or [], "bytes", "bytes_label", text=text)}</div>
     </div>
-    <h2>Activity By Hour</h2>
-    {_bar_table("Hourly Activity", behavior.get("hour_rows") or [], "count")}
-    <h2>Activity Rhythm</h2>
+    <h2>{html.escape(text['activity_by_hour'])}</h2>
+    {_bar_table(text['hourly_activity'], behavior.get("hour_rows") or [], "count", text=text)}
+    <h2>{html.escape(text['activity_rhythm'])}</h2>
     <div class="plain">{html.escape(_lines(behavior.get("routine_lines")))}</div>
   </div>
 
   <div class="section">
-    <h2>Next Review</h2>
+    <h2>{html.escape(text['next_review'])}</h2>
     <div class="plain">{html.escape(_lines(profile.get("recommendation_lines")))}</div>
   </div>
 
   <div class="section">
-    <h2>Recent Project Timeline</h2>
+    <h2>{html.escape(text['recent_project_timeline'])}</h2>
     <div class="plain">{html.escape(_lines(profile.get("timeline_lines")))}</div>
   </div>
 </div>
@@ -104,22 +108,23 @@ tr:nth-child(even) td {{ background:#f9fafb; }}
     path.write_text(html_doc, encoding="utf-8")
 
 
-def _metric_cards(profile: dict[str, Any]) -> str:
+def _metric_cards(profile: dict[str, Any], text: dict[str, str]) -> str:
     metrics = list(profile.get("metrics") or [])
     metrics.extend([
-        {"label": "PCAP Volume", "value": profile.get("total_pcap_bytes_label") or "-"},
-        {"label": "Capture Range", "value": (profile.get("capture_range") or {}).get("label") or "-"},
+        {"label": text["pcap_volume"], "value": profile.get("total_pcap_bytes_label") or "-"},
+        {"label": text["capture_range"], "value": (profile.get("capture_range") or {}).get("label") or "-"},
     ])
     return "\n".join(
-        f'<div class="card"><div class="label">{html.escape(str(metric.get("label") or ""))}</div>'
+        f'<div class="card"><div class="label">{html.escape(_metric_label(str(metric.get("label") or ""), text))}</div>'
         f'<div class="value">{html.escape(str(metric.get("value") or "-"))}</div></div>'
         for metric in metrics[:6]
     )
 
 
-def _bar_table(title: str, rows: list[dict[str, Any]], value_key: str, value_label_key: str = "") -> str:
+def _bar_table(title: str, rows: list[dict[str, Any]], value_key: str, value_label_key: str = "", *, text: dict[str, str] | None = None) -> str:
+    labels = text or _report_text("en")
     if not rows:
-        return f"<h2>{html.escape(title)}</h2><div class=\"plain\">No records.</div>"
+        return f"<h2>{html.escape(title)}</h2><div class=\"plain\">{html.escape(labels['no_records'])}</div>"
 
     max_value = max(_safe_float(row.get(value_key)) for row in rows) or 1.0
     body = []
@@ -137,7 +142,7 @@ def _bar_table(title: str, rows: list[dict[str, Any]], value_key: str, value_lab
         )
     return (
         f"<h2>{html.escape(title)}</h2>"
-        "<table><thead><tr><th>Item</th><th>Chart</th><th>Value</th></tr></thead>"
+        f"<table><thead><tr><th>{html.escape(labels['item'])}</th><th>{html.escape(labels['chart'])}</th><th>{html.escape(labels['value'])}</th></tr></thead>"
         f"<tbody>{''.join(body)}</tbody></table>"
     )
 
@@ -153,3 +158,76 @@ def _safe_float(value: Any) -> float:
         return float(value or 0)
     except Exception:
         return 0.0
+
+
+def _metric_label(label: str, text: dict[str, str]) -> str:
+    return {
+        "Datasets": text["datasets"],
+        "PCAP Sources": text["pcap_sources"],
+        "Findings": text["findings"],
+        "Device IPs": text["device_ips"],
+        "PCAP Volume": text["pcap_volume"],
+        "Capture Range": text["capture_range"],
+    }.get(label, label)
+
+
+def _report_text(language: str) -> dict[str, str]:
+    if normalize_output_language(language, default="en") == "hr":
+        return {
+            "title": "ViaNyquist profil aktivnosti",
+            "project": "Projekt",
+            "project_fallback": "Projekt",
+            "exported": "Izvezeno",
+            "case_snapshot": "Snimka predmeta",
+            "evidence_overview": "Pregled dokaza",
+            "evidence_sources": "Izvori dokaza",
+            "pcap_device_ip_distribution": "Distribucija IP adresa uredaja iz PCAP-a",
+            "behavior_insights": "Uvidi u ponasanje iz spremljenih JSON datasetova",
+            "behavior_note": "Ovi indikatori opisuju uocene obrasce aktivnosti uredaja. To su istrazni indikatori, a ne dokaz tocne budnosti/spavanja osobe ili sadrzaja poruka.",
+            "service_groups_by_volume": "Grupe usluga po volumenu",
+            "observed_domains_by_volume": "Uocene domene po volumenu",
+            "activity_by_hour": "Aktivnost po satu",
+            "hourly_activity": "Satna aktivnost",
+            "activity_rhythm": "Ritam aktivnosti",
+            "next_review": "Sljedeca provjera",
+            "recent_project_timeline": "Nedavna vremenska crta projekta",
+            "datasets": "Datasetovi",
+            "pcap_sources": "PCAP izvori",
+            "findings": "Nalazi",
+            "device_ips": "IP adrese uredaja",
+            "pcap_volume": "PCAP volumen",
+            "capture_range": "Raspon snimke",
+            "item": "Stavka",
+            "chart": "Graf",
+            "value": "Vrijednost",
+            "no_records": "Nema zapisa.",
+        }
+    return {
+        "title": "ViaNyquist Activity Profile",
+        "project": "Project",
+        "project_fallback": "Project",
+        "exported": "Exported",
+        "case_snapshot": "Case Snapshot",
+        "evidence_overview": "Evidence Overview",
+        "evidence_sources": "Evidence Sources",
+        "pcap_device_ip_distribution": "PCAP Device IP Distribution",
+        "behavior_insights": "Behavior Insights From Saved JSON Datasets",
+        "behavior_note": "These indicators describe observed device activity patterns. They are investigative indicators, not proof of the person's exact awake/asleep state or message content.",
+        "service_groups_by_volume": "Service Groups By Volume",
+        "observed_domains_by_volume": "Observed Domains By Volume",
+        "activity_by_hour": "Activity By Hour",
+        "hourly_activity": "Hourly Activity",
+        "activity_rhythm": "Activity Rhythm",
+        "next_review": "Next Review",
+        "recent_project_timeline": "Recent Project Timeline",
+        "datasets": "Datasets",
+        "pcap_sources": "PCAP Sources",
+        "findings": "Findings",
+        "device_ips": "Device IPs",
+        "pcap_volume": "PCAP Volume",
+        "capture_range": "Capture Range",
+        "item": "Item",
+        "chart": "Chart",
+        "value": "Value",
+        "no_records": "No records.",
+    }

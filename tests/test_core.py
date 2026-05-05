@@ -269,12 +269,18 @@ class BehaviorProfileTests(unittest.TestCase):
 
             export_activity_profile_html(str(output), profile=profile, project_name="Case A")
             content = output.read_text(encoding="utf-8")
+            hr_output = Path(tmp) / "profile-hr.html"
+            export_activity_profile_html(str(hr_output), profile=profile, project_name="Case A", report_language="hr")
+            hr_content = hr_output.read_text(encoding="utf-8")
 
         self.assertIn("ViaNyquist Activity Profile", content)
         self.assertIn("Case A", content)
         self.assertIn("Behavior Insights", content)
         self.assertIn("WhatsApp", content)
         self.assertIn("Most active hour", content)
+        self.assertIn("ViaNyquist profil aktivnosti", hr_content)
+        self.assertIn("Pregled dokaza", hr_content)
+        self.assertIn("Uvidi u ponasanje", hr_content)
 
 
 class ExportContextTests(unittest.TestCase):

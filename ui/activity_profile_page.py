@@ -23,7 +23,7 @@ from PySide6.QtWidgets import (
 )
 
 from core.behavior_profile import build_flow_behavior_profile
-from core.db import get_project
+from core.db import get_app_settings, get_project
 from core.exporters.profile_exporter import export_activity_profile_html
 from core.project_datasets import load_project_dataset_flows
 from core.project_profile import build_project_activity_profile
@@ -347,6 +347,7 @@ class ActivityProfilePage(QWidget):
                 profile=self.profile,
                 project_name=self.project_name,
                 project=self._current_project(),
+                report_language=get_app_settings().get("output_language", "hr"),
             )
             webbrowser.open(Path(file_path).resolve().as_uri())
         except Exception as exc:
