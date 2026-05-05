@@ -322,22 +322,22 @@ def export_registry_html(
     def hfmt(h: Any) -> str:
         return "—" if h is None else f"{int(h):02d}:00"
 
-    coverage_parts = [f"{total_flows} flows"]
+    activity_parts = [f"{total_flows} flows"]
 
     if cov.get("duration_days") is not None:
-        coverage_parts.append(f"{float(cov.get('duration_days')):.1f} days")
+        activity_parts.append(f"{float(cov.get('duration_days')):.1f} days")
 
     if cov.get("active_days"):
-        coverage_parts.append(f"{int(cov.get('active_days'))} active days")
+        activity_parts.append(f"{int(cov.get('active_days'))} active days")
 
     if cov.get("active_days_pct"):
-        coverage_parts.append(f"{float(cov.get('active_days_pct')):.1f}% active")
+        activity_parts.append(f"{float(cov.get('active_days_pct')):.1f}% active")
 
     if cov.get("avg_flows_per_active_day"):
-        coverage_parts.append(f"{float(cov.get('avg_flows_per_active_day')):.1f} flows/day")
+        activity_parts.append(f"{float(cov.get('avg_flows_per_active_day')):.1f} flows/day")
 
     if cov.get("pattern"):
-        coverage_parts.append(f"pattern: {cov.get('pattern')}")
+        activity_parts.append(f"pattern: {cov.get('pattern')}")
 
     reasons_html = "".join(f"<li>{_esc(r)}</li>" for r in reasons[:5]) or "<li>—</li>"
 
@@ -391,7 +391,7 @@ def export_registry_html(
         .replace("{{DEVIATION_SCORE}}", _esc(score))
         .replace("{{DEVIATION_LEVEL}}", _esc(level))
         .replace("{{DEVIATION_REASONS}}", reasons_html)
-        .replace("{{COVERAGE}}", _esc(" | ".join(coverage_parts)))
+        .replace("{{COVERAGE}}", _esc(" | ".join(activity_parts)))
         .replace("{{OUTBOUND_SHARE}}", f"{out_share:.1f}%")
         .replace("{{DOMINANT_APP}}", _esc(dom_b.get("name", "—")))
         .replace("{{DOMINANT_APP_BYTES_SHARE}}", f"{float(dom_b.get('share_pct', 0.0)):.1f}%")

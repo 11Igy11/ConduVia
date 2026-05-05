@@ -1135,7 +1135,7 @@ class RegistryPage(QWidget):
             chip("LIID", liid),
         ]
         if bt or et:
-            chips.append(chip("Period", f"{_fmt_dt_short(bt)} → {_fmt_dt_short(et)}"))
+            chips.append(chip("Order validity", f"{_fmt_dt_short(bt)} → {_fmt_dt_short(et)}"))
 
         self.lbl_meta_chips.setText("".join(chips))
 
@@ -1263,7 +1263,7 @@ class RegistryPage(QWidget):
             reasons_html = "<b>Top deviation signals:</b> —"
 
         coverage_html = (
-            f"<b>Coverage:</b> " + " | ".join(coverage_parts) + " | "
+            f"<b>Observed activity:</b> " + " | ".join(coverage_parts) + " | "
             f"<b>Outbound share:</b> {out_share:.1f}%"
         )
 
