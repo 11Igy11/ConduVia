@@ -381,8 +381,7 @@ class App(QWidget):
         self.tabs.setCurrentIndex(1)
 
     def go_to_notes(self):
-        self.go_page(self.IDX_EXPLORE, self._nav_notes)
-        self.tabs.setCurrentIndex(3)
+        self.go_page(self.IDX_NOTES, self._nav_notes)
 
     def _build_sidebar(self) -> QVBoxLayout:
         sidebar = QVBoxLayout()
@@ -724,11 +723,12 @@ class App(QWidget):
         self.pages = QStackedWidget()
         self.IDX_PROJECTS = 0
         self.IDX_PROFILE = 1
-        self.IDX_EXPLORE = 2
-        self.IDX_REGISTRY = 3
-        self.IDX_LISTING = 4
-        self.IDX_PCAP = 5
-        self.IDX_SETTINGS = 6
+        self.IDX_NOTES = 2
+        self.IDX_EXPLORE = 3
+        self.IDX_REGISTRY = 4
+        self.IDX_LISTING = 5
+        self.IDX_PCAP = 6
+        self.IDX_SETTINGS = 7
 
         # -------- Projects page --------
         projects_page = QWidget()
@@ -1338,6 +1338,7 @@ class App(QWidget):
         notes_root.addWidget(self.txt_notes, 1)
 
         self.tabs.addTab(notes_tab, "Notes")
+        self.tabs.removeTab(3)
 
         # Explore layout
         explore_layout.addWidget(header_card)
@@ -1351,6 +1352,8 @@ class App(QWidget):
 
         self.activity_profile_page = ActivityProfilePage(self)
         self.pages.addWidget(self.activity_profile_page)
+
+        self.pages.addWidget(notes_tab)
 
         self.pages.addWidget(explore_container)
 
