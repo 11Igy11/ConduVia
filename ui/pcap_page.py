@@ -194,13 +194,8 @@ class PcapPage(QWidget):
         root.addWidget(header)
 
         self.tabs = QTabWidget()
-        self.tabs.addTab(self._build_highlights_tab(), "Highlights")
-        self.tabs.addTab(self._build_investigator_tab(), "Investigator View")
-        self.tabs.addTab(self._build_ai_tab(), "AI Summary")
-        self.tabs.addTab(self._build_overview_tab(), "Overview")
-        self.tabs.addTab(self._build_evidence_tab(), "Evidence")
-        self.tabs.addTab(self._build_artifacts_tab(), "Artifacts")
-        self.tabs.addTab(self._build_connections_tab(), "Connections")
+        self.tabs.addTab(self._build_summary_section(), "Summary")
+        self.tabs.addTab(self._build_evidence_section(), "Evidence")
         root.addWidget(self.tabs, 1)
 
         self.btn_open.clicked.connect(self.open_pcap_dialog)
@@ -208,6 +203,34 @@ class PcapPage(QWidget):
         self.btn_ai_summary.clicked.connect(self.generate_ai_summary)
         self.btn_add_notes.clicked.connect(self.add_summary_to_notes)
         self.btn_export.clicked.connect(self.export_summary)
+
+    def _build_summary_section(self) -> QWidget:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
+        self.summary_tabs = QTabWidget()
+        self.summary_tabs.addTab(self._build_highlights_tab(), "Highlights")
+        self.summary_tabs.addTab(self._build_investigator_tab(), "Investigator View")
+        self.summary_tabs.addTab(self._build_overview_tab(), "Overview")
+        self.ai_summary_tab = self._build_ai_tab()
+        self.summary_tabs.addTab(self.ai_summary_tab, "AI Summary")
+        layout.addWidget(self.summary_tabs)
+        return page
+
+    def _build_evidence_section(self) -> QWidget:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
+        self.evidence_tabs = QTabWidget()
+        self.evidence_tabs.addTab(self._build_evidence_tab(), "Evidence")
+        self.evidence_tabs.addTab(self._build_artifacts_tab(), "Artifacts")
+        self.evidence_tabs.addTab(self._build_connections_tab(), "Connections")
+        layout.addWidget(self.evidence_tabs)
+        return page
 
     def _build_highlights_tab(self) -> QWidget:
         page = QWidget()
@@ -796,7 +819,9 @@ class PcapPage(QWidget):
         self.btn_ai_summary.setEnabled(False)
         self.btn_ai_summary.setText("Generating...")
         self.txt_pcap_ai_summary.setPlainText("Generating PCAP AI summary...")
-        self.tabs.setCurrentWidget(self.txt_pcap_ai_summary.parentWidget())
+        self.tabs.setCurrentIndex(0)
+        if hasattr(self, "summary_tabs") and hasattr(self, "ai_summary_tab"):
+            self.summary_tabs.setCurrentWidget(self.ai_summary_tab)
 
         project_name = getattr(self.app, "current_project_name", "") or ""
         self._ai_thread = QThread()
@@ -941,8 +966,8 @@ class PcapPage(QWidget):
             self._error("Notes", "Failed to add PCAP summary to notes.", str(exc))
             return
 
-        if hasattr(self.app, "tabs"):
-            self.app.tabs.setCurrentIndex(3)
+        if hasattr(self.app, "go_to_notes"):
+            self.app.go_to_notes()
         self._info("Notes", "PCAP summary added to project notes.")
 
     def _make_notes_block(self) -> str:
