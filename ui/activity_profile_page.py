@@ -98,7 +98,7 @@ class ActivityProfilePage(QWidget):
         title_row = QHBoxLayout()
         self.lbl_title = QLabel("Activity Profile")
         self.lbl_title.setObjectName("HeaderProjectLabel")
-        self.btn_ai_summary = QPushButton("AI Case Summary")
+        self.btn_ai_summary = QPushButton("AI Profile Summary")
         self.btn_ai_summary.setEnabled(False)
         self.btn_ai_summary.clicked.connect(self.generate_ai_summary)
         self.btn_export = QPushButton("Export Profile")
@@ -187,8 +187,8 @@ class ActivityProfilePage(QWidget):
         self.txt_ai_summary = QTextEdit()
         self.txt_ai_summary.setReadOnly(True)
         self.txt_ai_summary.setMinimumHeight(220)
-        self.txt_ai_summary.setPlaceholderText("Generate an AI case summary grounded in the current activity profile.")
-        scroll_layout.addWidget(self._section("AI Case Summary", self.txt_ai_summary))
+        self.txt_ai_summary.setPlaceholderText("Generate an AI profile summary grounded in the current activity profile.")
+        scroll_layout.addWidget(self._section("AI Profile Summary", self.txt_ai_summary))
 
         self.txt_summary = QTextEdit()
         self.txt_summary.setReadOnly(True)
@@ -232,7 +232,7 @@ class ActivityProfilePage(QWidget):
         self.project_name = project_name or ""
         self.btn_ai_summary.setEnabled(True)
         self.btn_export.setEnabled(True)
-        self.btn_ai_summary.setText("AI Case Summary")
+        self.btn_ai_summary.setText("AI Profile Summary")
         self.lbl_title.setText(f"Activity Profile: {project_name or 'Project'}")
         self.lbl_subtitle.setText("Profile built from saved datasets, PCAP sources, findings and project activity.")
         self._set_metrics(profile.get("metrics") or [])
@@ -267,7 +267,7 @@ class ActivityProfilePage(QWidget):
         self._project_dataset_info = {}
         self.btn_ai_summary.setEnabled(False)
         self.btn_export.setEnabled(False)
-        self.btn_ai_summary.setText("AI Case Summary")
+        self.btn_ai_summary.setText("AI Profile Summary")
         self._set_metrics([])
         self.evidence_chart.set_rows([])
         self.device_ip_chart.set_rows([], empty_text="No saved PCAP device IPs yet.")
@@ -347,7 +347,7 @@ class ActivityProfilePage(QWidget):
     def _on_ai_finished(self, result: str):
         self.txt_ai_summary.setPlainText(result)
         self.btn_ai_summary.setEnabled(True)
-        self.btn_ai_summary.setText("AI Case Summary")
+        self.btn_ai_summary.setText("AI Profile Summary")
 
     def _current_project(self):
         project_id = getattr(self.app, "current_project_id", None) if self.app else None
@@ -358,7 +358,7 @@ class ActivityProfilePage(QWidget):
     def _on_ai_error(self, message: str):
         self.txt_ai_summary.setPlainText(f"AI error: {message}")
         self.btn_ai_summary.setEnabled(True)
-        self.btn_ai_summary.setText("AI Case Summary")
+        self.btn_ai_summary.setText("AI Profile Summary")
 
     def _cleanup_ai_thread(self):
         if self._ai_worker is not None:
