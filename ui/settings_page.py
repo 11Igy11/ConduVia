@@ -12,7 +12,7 @@ from PySide6.QtWidgets import (
 )
 
 from core.ai.assistant_service import AISettings
-from core.db import set_app_setting
+from core.db import get_app_settings, set_app_setting
 from core.output_language import normalize_output_language
 
 
@@ -59,6 +59,18 @@ class SettingsPage(QWidget):
         self.cmb_output_language = QComboBox()
         self.cmb_output_language.addItem("Croatian", "hr")
         self.cmb_output_language.addItem("English", "en")
+        self.cmb_theme = QComboBox()
+        self.cmb_theme.addItem("Dark", "dark")
+        self.cmb_theme.addItem("Light", "light")
+
+        for control in (
+            self.edit_ai_url,
+            self.edit_ai_model,
+            self.edit_ai_timeout,
+            self.cmb_output_language,
+            self.cmb_theme,
+        ):
+            control.setMaximumWidth(520)
 
         for label, edit in (
             ("Base URL", self.edit_ai_url),
@@ -69,15 +81,25 @@ class SettingsPage(QWidget):
             lbl = QLabel(label)
             lbl.setMinimumWidth(150)
             row.addWidget(lbl)
-            row.addWidget(edit, 1)
+            row.addWidget(edit)
+            row.addStretch(1)
             ai_layout.addLayout(row)
 
         language_row = QHBoxLayout()
         language_label = QLabel("Report / AI language")
         language_label.setMinimumWidth(150)
         language_row.addWidget(language_label)
-        language_row.addWidget(self.cmb_output_language, 1)
+        language_row.addWidget(self.cmb_output_language)
+        language_row.addStretch(1)
         ai_layout.addLayout(language_row)
+
+        theme_row = QHBoxLayout()
+        theme_label = QLabel("Theme")
+        theme_label.setMinimumWidth(150)
+        theme_row.addWidget(theme_label)
+        theme_row.addWidget(self.cmb_theme)
+        theme_row.addStretch(1)
+        ai_layout.addLayout(theme_row)
 
         button_row = QHBoxLayout()
         self.btn_save_ai = QPushButton("Save AI settings")
@@ -106,6 +128,9 @@ class SettingsPage(QWidget):
         language = normalize_output_language(getattr(settings, "output_language", "hr"))
         idx = self.cmb_output_language.findData(language)
         self.cmb_output_language.setCurrentIndex(idx if idx >= 0 else 0)
+        theme = (get_app_settings().get("ui.theme", "dark") or "dark").strip().lower()
+        theme_idx = self.cmb_theme.findData(theme if theme in {"dark", "light"} else "dark")
+        self.cmb_theme.setCurrentIndex(theme_idx if theme_idx >= 0 else 0)
         self.lbl_status.setText("Current AI settings loaded.")
 
     def save_ai_settings(self) -> None:
@@ -124,8 +149,13 @@ class SettingsPage(QWidget):
         self.app.ai_service.update_settings(AISettings(**values))
         for key, value in self.app.ai_service.settings.to_mapping().items():
             set_app_setting(key, value)
+        theme = str(self.cmb_theme.currentData() or "dark")
+        set_app_setting("ui.theme", theme)
+        if hasattr(self.app, "apply_theme"):
+            self.app.apply_theme(theme)
 
         self.lbl_status.setText(
             f"Saved. Base URL: {values['base_url']} | Model: {values['model']} | "
-            f"Timeout: {values['timeout_seconds']} seconds | Language: {self.cmb_output_language.currentText()}"
+            f"Timeout: {values['timeout_seconds']} seconds | Language: {self.cmb_output_language.currentText()} | "
+            f"Theme: {self.cmb_theme.currentText()}"
         )

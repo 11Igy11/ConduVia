@@ -80,7 +80,86 @@ def normalize_tags(tags: str) -> str:
         seen.add(t.lower())
         parts.append(t)
     return ", ".join(parts)
-    
+
+def normalize_ui_theme(value: str | None) -> str:
+    theme = (value or "dark").strip().lower()
+    return theme if theme in {"dark", "light"} else "dark"
+
+LIGHT_THEME_OVERRIDES = """
+QWidget {
+    background: #f4f7fb;
+    color: #111827;
+}
+
+QFrame,
+QGroupBox,
+#ProfileHero,
+#ProfilePanel,
+#ExploreHeaderCard,
+#ListingHeaderCard,
+#CaseDashboardCompact,
+#PanelCard {
+    background: #ffffff;
+    border-color: #cbd5e1;
+}
+
+QLabel#Muted,
+QLabel#ProfileSubtitle,
+#ProfileSubtitle {
+    color: #475569;
+}
+
+QLineEdit,
+QTextEdit,
+QPlainTextEdit,
+QComboBox,
+QListWidget,
+QTableView {
+    background: #ffffff;
+    color: #111827;
+    border-color: #cbd5e1;
+}
+
+QHeaderView::section {
+    background: #e2e8f0;
+    color: #111827;
+    border-color: #cbd5e1;
+}
+
+QPushButton {
+    background: #ffffff;
+    color: #111827;
+    border-color: #cbd5e1;
+}
+
+QPushButton:hover {
+    background: #e2e8f0;
+}
+
+QPushButton#NavButton {
+    background: transparent;
+    color: #111827;
+    border: none;
+}
+
+QPushButton#NavButton[active="true"] {
+    background: #3b82f6;
+    color: #ffffff;
+}
+"""
+
+def app_stylesheet(theme: str | None = "dark") -> str:
+    qss_path = Path(__file__).resolve().parent / "style.qss"
+    if not qss_path.exists():
+        return ""
+    qss = qss_path.read_text(encoding="utf-8")
+    if normalize_ui_theme(theme) == "light":
+        qss += "\n\n/* light theme overrides */\n" + LIGHT_THEME_OVERRIDES
+    return qss
+
+def apply_app_stylesheet(qapp: QApplication, theme: str | None = "dark") -> None:
+    qapp.setStyleSheet(app_stylesheet(theme))
+
 # ---------- Main App ----------
 class App(QWidget):
     def build_home_page(self) -> QWidget:
@@ -1220,6 +1299,11 @@ class App(QWidget):
         if hasattr(self, "activity_profile_page"):
             self.activity_profile_page.refresh(self.current_project_id, self.current_project_name)
 
+    def apply_theme(self, theme: str | None) -> None:
+        qapp = QApplication.instance()
+        if qapp is not None:
+            apply_app_stylesheet(qapp, normalize_ui_theme(theme))
+
     def _open_from_registry(self, src: str, dst: str):
         self.go_to_explore_flows()
         self.search.setText("")
@@ -1841,10 +1925,8 @@ class App(QWidget):
 def main():
     app = QApplication(sys.argv)
 
-    # load global stylesheet
-    qss_path = Path(__file__).resolve().parent / "style.qss"
-    if qss_path.exists():
-        app.setStyleSheet(qss_path.read_text(encoding="utf-8"))
+    init_db()
+    apply_app_stylesheet(app, get_app_settings().get("ui.theme", "dark"))
 
     base_dir = Path(__file__).resolve().parent          
     project_dir = base_dir.parent                       
