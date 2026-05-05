@@ -841,6 +841,8 @@ class PcapPage(QWidget):
 
     def _on_ai_summary_finished(self, result: str):
         self.txt_pcap_ai_summary.setPlainText(result)
+        if hasattr(self.app, "publish_ai_output"):
+            self.app.publish_ai_output("PCAP", "PCAP AI Summary", result)
         self.btn_ai_summary.setEnabled(True)
         self.btn_ai_summary.setText("AI Summary")
 

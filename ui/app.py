@@ -393,6 +393,9 @@ class App(QWidget):
     def go_to_notes(self):
         self.go_page(self.IDX_NOTES, self._nav_notes)
 
+    def go_to_ai(self):
+        self.go_page(self.IDX_AI, self._nav_ai)
+
     def go_to_json_tab(self, tab_index: int = 0):
         self.go_page(self.IDX_JSON, self._nav_json)
         if hasattr(self, "json_tabs"):
@@ -404,6 +407,7 @@ class App(QWidget):
         self.btn_nav_projects = QPushButton("Projects")
         self.btn_nav_profile = QPushButton("Profile")
         self.btn_nav_notes = QPushButton("Notes")
+        self.btn_nav_ai = QPushButton("AI")
         self.btn_nav_json = QPushButton("JSON")
         self.btn_nav_pcap = QPushButton("PCAP")
         self.btn_nav_settings = QPushButton("Settings")
@@ -413,6 +417,7 @@ class App(QWidget):
             self.btn_nav_projects,
             self.btn_nav_profile,
             self.btn_nav_notes,
+            self.btn_nav_ai,
             self.btn_nav_json,
             self.btn_nav_pcap,
             self.btn_nav_settings,
@@ -425,6 +430,7 @@ class App(QWidget):
         self._nav_projects = self.btn_nav_projects
         self._nav_profile = self.btn_nav_profile
         self._nav_notes = self.btn_nav_notes
+        self._nav_ai = self.btn_nav_ai
         self._nav_json = self.btn_nav_json
         self._nav_explore = self.btn_nav_json
         self._nav_registry = self.btn_nav_json
@@ -435,6 +441,7 @@ class App(QWidget):
         sidebar.addWidget(self.btn_nav_projects)
         sidebar.addWidget(self.btn_nav_profile)
         sidebar.addWidget(self.btn_nav_notes)
+        sidebar.addWidget(self.btn_nav_ai)
         sidebar.addWidget(self.btn_nav_json)
         sidebar.addStretch()
         sidebar.addWidget(self.btn_nav_pcap)
@@ -447,6 +454,7 @@ class App(QWidget):
         self.btn_nav_projects.clicked.connect(lambda: self.go_page(self.IDX_PROJECTS, self._nav_projects))
         self.btn_nav_profile.clicked.connect(lambda: self.go_page(self.IDX_PROFILE, self._nav_profile))
         self.btn_nav_notes.clicked.connect(self.go_to_notes)
+        self.btn_nav_ai.clicked.connect(self.go_to_ai)
         self.btn_nav_json.clicked.connect(lambda: self.go_to_json_tab(0))
         self.btn_nav_pcap.clicked.connect(lambda: self.go_page(self.IDX_PCAP, self._nav_pcap))
         self.btn_nav_settings.clicked.connect(lambda: self.go_page(self.IDX_SETTINGS, self._nav_settings))
@@ -716,6 +724,9 @@ class App(QWidget):
         self._ai_thread: QThread | None = None
         self._ai_worker: AITextWorker | None = None
         self._ai_mode: str | None = None
+        self._last_ai_title = "No AI output yet"
+        self._last_ai_source = ""
+        self._last_ai_text = ""
 
     def _build_ui(self) -> None:
         outer = QVBoxLayout(self)
@@ -732,12 +743,13 @@ class App(QWidget):
         self.IDX_PROJECTS = 0
         self.IDX_PROFILE = 1
         self.IDX_NOTES = 2
-        self.IDX_JSON = 3
+        self.IDX_AI = 3
+        self.IDX_JSON = 4
         self.IDX_EXPLORE = self.IDX_JSON
         self.IDX_REGISTRY = self.IDX_JSON
         self.IDX_LISTING = self.IDX_JSON
-        self.IDX_PCAP = 4
-        self.IDX_SETTINGS = 5
+        self.IDX_PCAP = 5
+        self.IDX_SETTINGS = 6
 
         # -------- Projects page --------
         projects_page = QWidget()
@@ -1349,6 +1361,44 @@ class App(QWidget):
         self.tabs.addTab(notes_tab, "Notes")
         self.tabs.removeTab(3)
 
+        ai_page = QWidget()
+        ai_root = QVBoxLayout(ai_page)
+        ai_root.setContentsMargins(10, 10, 10, 10)
+        ai_root.setSpacing(10)
+
+        ai_header = QFrame()
+        ai_header.setObjectName("ExploreHeaderCard")
+        ai_header_layout = QVBoxLayout(ai_header)
+        ai_header_layout.setContentsMargins(14, 14, 14, 14)
+        ai_header_layout.setSpacing(8)
+
+        ai_title_row = QHBoxLayout()
+        self.lbl_ai_hub_title = QLabel("AI Summary")
+        self.lbl_ai_hub_title.setObjectName("HeaderProjectLabel")
+        self.btn_ai_hub_add_notes = QPushButton("Add to Notes")
+        self.btn_ai_hub_add_notes.setEnabled(False)
+        self.btn_ai_hub_settings = QPushButton("AI Settings")
+        ai_title_row.addWidget(self.lbl_ai_hub_title)
+        ai_title_row.addStretch()
+        ai_title_row.addWidget(self.btn_ai_hub_add_notes)
+        ai_title_row.addWidget(self.btn_ai_hub_settings)
+
+        self.lbl_ai_hub_context = QLabel("Generate an AI result from JSON, PCAP or Profile to see it here.")
+        self.lbl_ai_hub_context.setObjectName("Muted")
+        self.lbl_ai_hub_context.setWordWrap(True)
+
+        ai_header_layout.addLayout(ai_title_row)
+        ai_header_layout.addWidget(self.lbl_ai_hub_context)
+        ai_root.addWidget(ai_header)
+
+        self.txt_ai_hub = QTextEdit()
+        self.txt_ai_hub.setReadOnly(True)
+        self.txt_ai_hub.setPlaceholderText("The latest AI-generated explanation or summary will appear here.")
+        ai_root.addWidget(self.txt_ai_hub, 1)
+
+        self.btn_ai_hub_add_notes.clicked.connect(self.add_ai_hub_to_notes)
+        self.btn_ai_hub_settings.clicked.connect(lambda: self.go_page(self.IDX_SETTINGS, self._nav_settings))
+
         # Explore layout
         explore_layout.addWidget(header_card)
         explore_layout.addWidget(self.lbl_mode)
@@ -1363,6 +1413,7 @@ class App(QWidget):
         self.pages.addWidget(self.activity_profile_page)
 
         self.pages.addWidget(notes_tab)
+        self.pages.addWidget(ai_page)
 
         json_page = QWidget()
         json_layout = QVBoxLayout(json_page)
@@ -1407,6 +1458,7 @@ class App(QWidget):
             self._nav_projects,
             self._nav_profile,
             self._nav_notes,
+            self._nav_ai,
             self._nav_json,
             self._nav_pcap,
             self._nav_settings,
@@ -1479,6 +1531,12 @@ class App(QWidget):
           
     def on_ai_task_finished(self, result: str):
         self.txt_ai_summary.setPlainText(result)
+        title = {
+            "summary": "JSON Dataset Summary",
+            "flow": "Flow Explanation",
+            "finding": "Finding Explanation",
+        }.get(self._ai_mode or "", "AI Summary")
+        self.publish_ai_output("JSON", title, result)
 
         if self._ai_mode == "summary":
             self.btn_ai_summary.setEnabled(True)
@@ -1836,19 +1894,37 @@ class App(QWidget):
             f"{'-' * 60}\n"
         )
 
-    def add_ai_summary_to_notes(self):
-        if self.current_project_id is None:
-            self._message_dialog("Notes", "Open an active project first.", width=420)
-            return
+    def publish_ai_output(self, source: str, title: str, text: str) -> None:
+        self._last_ai_source = (source or "AI").strip()
+        self._last_ai_title = (title or "AI Summary").strip()
+        self._last_ai_text = text or ""
+        if hasattr(self, "lbl_ai_hub_title"):
+            self.lbl_ai_hub_title.setText(self._last_ai_title)
+        if hasattr(self, "lbl_ai_hub_context"):
+            context = f"Source: {self._last_ai_source}"
+            if self.current_project_name:
+                context += f" | Project: {self.current_project_name}"
+            self.lbl_ai_hub_context.setText(context)
+        if hasattr(self, "txt_ai_hub"):
+            self.txt_ai_hub.setPlainText(self._last_ai_text)
+        if hasattr(self, "btn_ai_hub_add_notes"):
+            self.btn_ai_hub_add_notes.setEnabled(bool(self._last_ai_text.strip()))
 
-        text = (self.txt_ai_summary.toPlainText() or "").strip()
+    def add_ai_hub_to_notes(self):
+        text = (self._last_ai_text or "").strip()
         if not text:
             self._message_dialog("Notes", "There is no AI-generated text to add.", width=440)
             return
+        self.add_ai_text_to_notes(text)
+
+    def add_ai_text_to_notes(self, text: str) -> bool:
+        if self.current_project_id is None:
+            self._message_dialog("Notes", "Open an active project first.", width=420)
+            return False
 
         block = self._make_ai_note_block(text)
         if not block:
-            return
+            return False
 
         existing = self.txt_notes.toPlainText() or ""
 
@@ -1862,8 +1938,16 @@ class App(QWidget):
         self.txt_notes.setPlainText(new_text)
         self._notes_dirty = True
         self._flush_notes()
-
         self.go_to_notes()
+        return True
+
+    def add_ai_summary_to_notes(self):
+        text = (self.txt_ai_summary.toPlainText() or "").strip()
+        if not text:
+            self._message_dialog("Notes", "There is no AI-generated text to add.", width=440)
+            return
+
+        self.add_ai_text_to_notes(text)
 
     def configure_ai_settings(self):
         current = self.ai_service.settings

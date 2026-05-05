@@ -188,7 +188,20 @@ class ActivityProfilePage(QWidget):
         self.txt_ai_summary.setReadOnly(True)
         self.txt_ai_summary.setMinimumHeight(220)
         self.txt_ai_summary.setPlaceholderText("Generate an AI profile summary grounded in the current activity profile.")
-        scroll_layout.addWidget(self._section("AI Profile Summary", self.txt_ai_summary))
+        ai_section = QWidget()
+        ai_layout = QVBoxLayout(ai_section)
+        ai_layout.setContentsMargins(0, 0, 0, 0)
+        ai_layout.setSpacing(8)
+
+        ai_actions = QHBoxLayout()
+        self.btn_add_ai_to_notes = QPushButton("Add to Notes")
+        self.btn_add_ai_to_notes.setEnabled(False)
+        self.btn_add_ai_to_notes.clicked.connect(self.add_ai_summary_to_notes)
+        ai_actions.addStretch()
+        ai_actions.addWidget(self.btn_add_ai_to_notes)
+        ai_layout.addWidget(self.txt_ai_summary, 1)
+        ai_layout.addLayout(ai_actions)
+        scroll_layout.addWidget(self._section("AI Profile Summary", ai_section))
 
         self.txt_summary = QTextEdit()
         self.txt_summary.setReadOnly(True)
@@ -266,6 +279,7 @@ class ActivityProfilePage(QWidget):
         self._behavior_cache_flows = []
         self._project_dataset_info = {}
         self.btn_ai_summary.setEnabled(False)
+        self.btn_add_ai_to_notes.setEnabled(False)
         self.btn_export.setEnabled(False)
         self.btn_ai_summary.setText("AI Profile Summary")
         self._set_metrics([])
@@ -346,6 +360,9 @@ class ActivityProfilePage(QWidget):
 
     def _on_ai_finished(self, result: str):
         self.txt_ai_summary.setPlainText(result)
+        self.btn_add_ai_to_notes.setEnabled(bool((result or "").strip()))
+        if self.app and hasattr(self.app, "publish_ai_output"):
+            self.app.publish_ai_output("Profile", "AI Profile Summary", result)
         self.btn_ai_summary.setEnabled(True)
         self.btn_ai_summary.setText("AI Profile Summary")
 
@@ -357,8 +374,16 @@ class ActivityProfilePage(QWidget):
 
     def _on_ai_error(self, message: str):
         self.txt_ai_summary.setPlainText(f"AI error: {message}")
+        self.btn_add_ai_to_notes.setEnabled(False)
         self.btn_ai_summary.setEnabled(True)
         self.btn_ai_summary.setText("AI Profile Summary")
+
+    def add_ai_summary_to_notes(self):
+        text = (self.txt_ai_summary.toPlainText() or "").strip()
+        if not text:
+            return
+        if self.app and hasattr(self.app, "add_ai_text_to_notes"):
+            self.app.add_ai_text_to_notes(text)
 
     def _cleanup_ai_thread(self):
         if self._ai_worker is not None:
