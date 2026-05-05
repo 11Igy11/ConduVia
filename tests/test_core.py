@@ -313,11 +313,27 @@ class ExportContextTests(unittest.TestCase):
                 project=project,
             )
             content = output.read_text(encoding="utf-8")
+            hr_output = root / "listing-hr.html"
+            export_listing_html(
+                file_path=str(hr_output),
+                headers=["Time", "Application"],
+                rows=[["09:00", "WhatsApp"]],
+                dataset=str(root / "dataset.json"),
+                view_mode="All",
+                files_count=1,
+                meta={"target": "385911234567", "targettype": "MSISDN"},
+                project=project,
+                report_language="hr",
+            )
+            hr_content = hr_output.read_text(encoding="utf-8")
 
         self.assertIn("Case Subject", content)
         self.assertIn("Ana Horvat", content)
         self.assertIn("MSISDN: 385911234567", content)
         self.assertIn("Dataset Target", content)
+        self.assertIn("ViaNyquist listing izvjestaj", hr_content)
+        self.assertIn("Valjanost naloga", hr_content)
+        self.assertIn("Listing podaci", hr_content)
 
     def test_registry_html_export_includes_project_case_context(self):
         with temporary_directory() as tmp:

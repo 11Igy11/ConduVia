@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="{{LANG}}">
 <head>
 <meta charset="UTF-8">
 <title>{{TITLE}}</title>
@@ -313,18 +313,18 @@ tbody tr:hover{
 
         <div class="hero-left">
 
-            <h1>ViaNyquist Listing Report</h1>
+            <h1>{{REPORT_TITLE}}</h1>
 
             <div class="dataset">
-                <strong>Dataset:</strong> {{DATASET}}
+                <strong>{{DATASET_LABEL}}:</strong> {{DATASET}}
             </div>
 
             <div class="meta-lines">
-                <div><strong>Exported:</strong> {{EXPORTED_AT}}</div>
-                <div><strong>View:</strong> {{VIEW_MODE}}</div>
-                <div><strong>Rows:</strong> {{ROWS_COUNT}}</div>
-                <div><strong>Columns:</strong> {{COLUMNS_COUNT}}</div>
-                <div><strong>JSON files:</strong> {{FILES_COUNT}}</div>
+                <div><strong>{{EXPORTED_LABEL}}:</strong> {{EXPORTED_AT}}</div>
+                <div><strong>{{VIEW_LABEL}}:</strong> {{VIEW_MODE}}</div>
+                <div><strong>{{ROWS_LABEL}}:</strong> {{ROWS_COUNT}}</div>
+                <div><strong>{{COLUMNS_LABEL}}:</strong> {{COLUMNS_COUNT}}</div>
+                <div><strong>{{JSON_FILES_LABEL}}:</strong> {{FILES_COUNT}}</div>
             </div>
 
             <div class="info-strip">
@@ -341,12 +341,12 @@ tbody tr:hover{
                 </div>
 
                 <div class="info">
-                    <div class="label">Target</div>
+                    <div class="label">{{TARGET_LABEL}}</div>
                     <div class="value">{{TARGET}}</div>
                 </div>
 
                 <div class="info">
-                    <div class="label">Order validity</div>
+                    <div class="label">{{ORDER_VALIDITY_LABEL}}</div>
                     <div class="value">{{PERIOD}}</div>
                 </div>
 
@@ -359,7 +359,7 @@ tbody tr:hover{
     <section class="table-shell">
 
         <div class="table-head">
-            <h2>Listing Data</h2>
+            <h2>{{TABLE_TITLE}}</h2>
         </div>
 
         <div class="table-wrap">

@@ -9,6 +9,7 @@ from pathlib import Path
 from core.db import Project
 from core.exporters.case_context import build_case_context, context_cards_html
 from core.formatters import format_short_date
+from core.output_language import normalize_output_language
 
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill
@@ -79,8 +80,11 @@ def export_listing_html(
     meta: dict | None = None,
     project: Project | None = None,
     project_name: str = "",
+    report_language: str = "en",
 ) -> None:
     path = Path(file_path)
+    lang = normalize_output_language(report_language, default="en")
+    text = _report_text(lang)
 
     meta = meta or {}
 
@@ -127,21 +131,60 @@ def export_listing_html(
 
     rendered = (
         template
-        .replace("{{TITLE}}", "ViaNyquist Listing Export")
+        .replace("{{LANG}}", html.escape(lang))
+        .replace("{{TITLE}}", html.escape(text["title"]))
+        .replace("{{REPORT_TITLE}}", html.escape(text["title"]))
         .replace("{{LOGO}}", html.escape(logo_data_uri))
         .replace("{{DATASET}}", html.escape(dataset_name))
+        .replace("{{DATASET_LABEL}}", html.escape(text["dataset"]))
         .replace("{{EXPORTED_AT}}", datetime.now().strftime("%d.%m.%Y %H:%M:%S"))
+        .replace("{{EXPORTED_LABEL}}", html.escape(text["exported"]))
         .replace("{{VIEW_MODE}}", html.escape(view_mode or "Unknown"))
+        .replace("{{VIEW_LABEL}}", html.escape(text["view"]))
         .replace("{{CASE_CONTEXT_CARDS}}", context_cards_html(case_context, card_class="info"))
         .replace("{{KLASA}}", html.escape(klasa))
         .replace("{{URBROJ}}", html.escape(urbroj))
+        .replace("{{TARGET_LABEL}}", html.escape(text["target"]))
         .replace("{{TARGET}}", html.escape(target_display))
+        .replace("{{ORDER_VALIDITY_LABEL}}", html.escape(text["order_validity"]))
         .replace("{{PERIOD}}", html.escape(period))
         .replace("{{ROWS_COUNT}}", str(len(rows)))
+        .replace("{{ROWS_LABEL}}", html.escape(text["rows"]))
         .replace("{{COLUMNS_COUNT}}", str(len(headers)))
+        .replace("{{COLUMNS_LABEL}}", html.escape(text["columns"]))
         .replace("{{FILES_COUNT}}", str(files_count))
+        .replace("{{JSON_FILES_LABEL}}", html.escape(text["json_files"]))
+        .replace("{{TABLE_TITLE}}", html.escape(text["table_title"]))
         .replace("{{TABLE_HEADERS}}", table_headers)
         .replace("{{TABLE_ROWS}}", table_rows)
     )
 
     path.write_text(rendered, encoding="utf-8")
+
+
+def _report_text(language: str) -> dict[str, str]:
+    if normalize_output_language(language, default="en") == "hr":
+        return {
+            "title": "ViaNyquist listing izvjestaj",
+            "dataset": "Dataset",
+            "exported": "Izvezeno",
+            "view": "Prikaz",
+            "rows": "Redovi",
+            "columns": "Stupci",
+            "json_files": "JSON datoteke",
+            "target": "Target",
+            "order_validity": "Valjanost naloga",
+            "table_title": "Listing podaci",
+        }
+    return {
+        "title": "ViaNyquist Listing Report",
+        "dataset": "Dataset",
+        "exported": "Exported",
+        "view": "View",
+        "rows": "Rows",
+        "columns": "Columns",
+        "json_files": "JSON files",
+        "target": "Target",
+        "order_validity": "Order validity",
+        "table_title": "Listing Data",
+    }

@@ -10,7 +10,7 @@ from core.formatters import (
 )
 from core.protocols import format_ip_proto
 from core.exporters.listing_exporter import export_listing_csv, export_listing_excel, export_listing_html
-from core.db import get_project
+from core.db import get_app_settings, get_project
 from core.parser import extract_dataset_meta
 from core.timeutils import parse_timestamp
 
@@ -738,6 +738,7 @@ class ListingPage(QWidget):
                 meta=meta,
                 project=self._current_project(),
                 project_name=getattr(self.app, "current_project_name", "") or "",
+                report_language=get_app_settings().get("output_language", "hr"),
             )
 
             QMessageBox.information(
