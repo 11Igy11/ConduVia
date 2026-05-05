@@ -211,19 +211,9 @@ class PcapPage(QWidget):
 
     def _build_highlights_tab(self) -> QWidget:
         page = QWidget()
-        page_layout = QVBoxLayout(page)
-        page_layout.setContentsMargins(0, 0, 0, 0)
-        page_layout.setSpacing(0)
-
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.NoFrame)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-
-        content = QWidget()
-        layout = QVBoxLayout(content)
+        layout = QVBoxLayout(page)
         layout.setContentsMargins(12, 12, 12, 12)
-        layout.setSpacing(14)
+        layout.setSpacing(10)
 
         self.lbl_highlights_brief = QLabel("Open a PCAP file to see communication highlights.")
         self.lbl_highlights_brief.setObjectName("PcapPlainSummary")
@@ -253,38 +243,29 @@ class PcapPage(QWidget):
         self.txt_communication_detail.setPlaceholderText("Select a communication indicator to see the evidence used for classification.")
 
         splitter = QSplitter(Qt.Vertical)
-        splitter.addWidget(self._group("Communication indicators", self.tbl_communications))
-        splitter.addWidget(self._group("Selected indicator evidence", self.txt_communication_detail))
+        self.grp_communications = self._group("Communication indicators", self.tbl_communications)
+        self.grp_communication_detail = self._group("Selected indicator evidence", self.txt_communication_detail)
+        splitter.addWidget(self.grp_communications)
+        splitter.addWidget(self.grp_communication_detail)
         splitter.setStretchFactor(0, 3)
         splitter.setStretchFactor(1, 1)
 
-        layout.addWidget(self._group("Investigation brief", self.lbl_highlights_brief))
+        brief_group = self._group("Investigation brief", self.lbl_highlights_brief)
+        brief_group.setMaximumHeight(145)
+        layout.addWidget(brief_group)
         layout.addWidget(splitter, 1)
-        layout.addStretch()
-
-        scroll.setWidget(content)
-        page_layout.addWidget(scroll, 1)
         return page
 
     def _build_investigator_tab(self) -> QWidget:
         page = QWidget()
-        page_layout = QVBoxLayout(page)
-        page_layout.setContentsMargins(0, 0, 0, 0)
-        page_layout.setSpacing(0)
-
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.NoFrame)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-
-        content = QWidget()
-        layout = QVBoxLayout(content)
+        layout = QVBoxLayout(page)
         layout.setContentsMargins(12, 12, 12, 12)
-        layout.setSpacing(14)
+        layout.setSpacing(10)
 
         self.investigator_card = QFrame()
         self.investigator_card.setObjectName("PcapInvestigatorCard")
-        self.investigator_card.setMinimumHeight(220)
+        self.investigator_card.setMinimumHeight(150)
+        self.investigator_card.setMaximumHeight(230)
         card_layout = QVBoxLayout(self.investigator_card)
         card_layout.setContentsMargins(14, 12, 14, 12)
         card_layout.setSpacing(8)
@@ -325,26 +306,29 @@ class PcapPage(QWidget):
             ("share", "Share"),
         ], fixed_widths={0: 170, 1: 110, 2: 78}, stretch_columns=[])
 
-        top = QHBoxLayout()
-        top.setSpacing(10)
         self.grp_services = self._group("Visible service groups", self.tbl_services)
         self.grp_visibility = self._group("Visible vs encrypted indicators", self.tbl_visibility)
         self.grp_activity = self._group("Activity timeline by hour", self.tbl_activity)
 
-        self.grp_services.setMinimumHeight(260)
-        self.grp_visibility.setMinimumHeight(260)
-        self.grp_activity.setMinimumHeight(280)
+        self.grp_services.setMinimumHeight(220)
+        self.grp_visibility.setMinimumHeight(220)
+        self.grp_activity.setMinimumHeight(240)
 
-        top.addWidget(self.grp_services, 3)
-        top.addWidget(self.grp_visibility, 2)
+        top_splitter = QSplitter(Qt.Horizontal)
+        top_splitter.addWidget(self.grp_services)
+        top_splitter.addWidget(self.grp_visibility)
+        top_splitter.setStretchFactor(0, 3)
+        top_splitter.setStretchFactor(1, 2)
 
-        layout.addWidget(self.investigator_card, 0)
-        layout.addLayout(top, 2)
-        layout.addWidget(self.grp_activity, 2)
-        layout.addStretch()
+        main_splitter = QSplitter(Qt.Vertical)
+        main_splitter.addWidget(self.investigator_card)
+        main_splitter.addWidget(top_splitter)
+        main_splitter.addWidget(self.grp_activity)
+        main_splitter.setStretchFactor(0, 1)
+        main_splitter.setStretchFactor(1, 2)
+        main_splitter.setStretchFactor(2, 2)
 
-        scroll.setWidget(content)
-        page_layout.addWidget(scroll, 1)
+        layout.addWidget(main_splitter, 1)
         return page
 
     def _build_ai_tab(self) -> QWidget:
@@ -361,23 +345,14 @@ class PcapPage(QWidget):
 
     def _build_overview_tab(self) -> QWidget:
         page = QWidget()
-        page_layout = QVBoxLayout(page)
-        page_layout.setContentsMargins(0, 0, 0, 0)
-        page_layout.setSpacing(0)
-
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.NoFrame)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-
-        content = QWidget()
-        layout = QVBoxLayout(content)
+        layout = QVBoxLayout(page)
         layout.setContentsMargins(12, 12, 12, 12)
-        layout.setSpacing(14)
+        layout.setSpacing(10)
 
         self.overview_card = QFrame()
         self.overview_card.setObjectName("PcapInvestigatorCard")
-        self.overview_card.setMinimumHeight(190)
+        self.overview_card.setMinimumHeight(120)
+        self.overview_card.setMaximumHeight(190)
         overview_card_layout = QVBoxLayout(self.overview_card)
         overview_card_layout.setContentsMargins(14, 12, 14, 12)
 
@@ -387,28 +362,30 @@ class PcapPage(QWidget):
         self.lbl_overview_text.setTextInteractionFlags(Qt.TextSelectableByMouse)
         overview_card_layout.addWidget(self.lbl_overview_text)
 
-        grid = QGridLayout()
-        grid.setSpacing(10)
         self.tbl_protocols = self._table([("protocol", "Protocol"), ("number", "Number"), ("packets", "Packets")], stretch_columns=[0])
         self.tbl_endpoints = self._table([("ip", "Endpoint IP"), ("packets", "Packets")], stretch_columns=[0])
         self.tbl_ports = self._table([("protocol", "Protocol"), ("port", "Port"), ("packets", "Packets")], stretch_columns=[0])
         grp_protocols = self._group("Protocols", self.tbl_protocols)
         grp_endpoints = self._group("Top endpoints", self.tbl_endpoints)
         grp_ports = self._group("Top ports", self.tbl_ports)
-        grp_protocols.setMinimumHeight(250)
-        grp_endpoints.setMinimumHeight(250)
-        grp_ports.setMinimumHeight(300)
+        grp_protocols.setMinimumHeight(220)
+        grp_endpoints.setMinimumHeight(220)
+        grp_ports.setMinimumHeight(260)
 
-        grid.addWidget(grp_protocols, 0, 0)
-        grid.addWidget(grp_endpoints, 0, 1)
-        grid.addWidget(grp_ports, 1, 0, 1, 2)
+        top_splitter = QSplitter(Qt.Horizontal)
+        top_splitter.addWidget(grp_protocols)
+        top_splitter.addWidget(grp_endpoints)
+        top_splitter.setStretchFactor(0, 1)
+        top_splitter.setStretchFactor(1, 1)
+
+        main_splitter = QSplitter(Qt.Vertical)
+        main_splitter.addWidget(top_splitter)
+        main_splitter.addWidget(grp_ports)
+        main_splitter.setStretchFactor(0, 2)
+        main_splitter.setStretchFactor(1, 2)
 
         layout.addWidget(self.overview_card)
-        layout.addLayout(grid)
-        layout.addStretch()
-
-        scroll.setWidget(content)
-        page_layout.addWidget(scroll, 1)
+        layout.addWidget(main_splitter, 1)
         return page
 
     def _build_evidence_tab(self) -> QWidget:
@@ -533,6 +510,7 @@ class PcapPage(QWidget):
         table.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
         table.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         table.setMinimumHeight(210)
+        table.verticalHeader().setDefaultSectionSize(36)
         header = table.horizontalHeader()
         header.setSectionResizeMode(QHeaderView.Interactive)
         header.setStretchLastSection(stretch_last)
@@ -547,7 +525,10 @@ class PcapPage(QWidget):
 
     def _group(self, title: str, widget: QWidget) -> QGroupBox:
         group = QGroupBox(title)
+        group.setObjectName("PcapPanel")
         layout = QVBoxLayout(group)
+        layout.setContentsMargins(12, 14, 12, 12)
+        layout.setSpacing(8)
         layout.addWidget(widget)
         return group
 
