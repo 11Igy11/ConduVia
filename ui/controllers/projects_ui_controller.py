@@ -350,6 +350,8 @@ class ProjectsUIController:
 
         if project_changed:
             self.app.clear_dataset_context()
+            if hasattr(self.app, "activity_profile_page"):
+                self.app.activity_profile_page.invalidate_project_cache()
 
         self.app.current_project_id = p.id
         self.app.current_project_name = p.name

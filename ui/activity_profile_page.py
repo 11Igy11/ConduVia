@@ -79,6 +79,11 @@ class ActivityProfilePage(QWidget):
         self._build_ui()
         self.clear()
 
+    def invalidate_project_cache(self) -> None:
+        self._behavior_cache_key = ""
+        self._behavior_cache_flows = []
+        self._project_dataset_info = {}
+
     def _build_ui(self):
         root = QVBoxLayout(self)
         root.setContentsMargins(10, 10, 10, 10)
@@ -219,6 +224,9 @@ class ActivityProfilePage(QWidget):
             self.clear()
             return
 
+        if project_id != getattr(self, "_profile_project_id", None):
+            self.invalidate_project_cache()
+        self._profile_project_id = project_id
         profile = build_project_activity_profile(project_id)
         self.profile = profile
         self.project_name = project_name or ""
@@ -253,6 +261,7 @@ class ActivityProfilePage(QWidget):
         self.lbl_subtitle.setText("Open a project to build a device/user activity profile from datasets, PCAP sources, findings and notes.")
         self.profile = None
         self.project_name = ""
+        self._profile_project_id = None
         self._behavior_cache_key = ""
         self._behavior_cache_flows = []
         self._project_dataset_info = {}
@@ -263,9 +272,9 @@ class ActivityProfilePage(QWidget):
         self.evidence_chart.set_rows([])
         self.device_ip_chart.set_rows([], empty_text="No saved PCAP device IPs yet.")
         self.activity_chart.set_rows([], empty_text="No activity events yet.")
-        self.service_chart.set_rows([], empty_text="Load a dataset to show service groups.")
-        self.domain_chart.set_rows([], empty_text="Load a dataset to show observed domains.")
-        self.hour_chart.set_rows([], empty_text="Load a dataset to show hourly activity.")
+        self.service_chart.set_rows([], empty_text="No saved project dataset is available for service groups.")
+        self.domain_chart.set_rows([], empty_text="No saved project dataset is available for observed domains.")
+        self.hour_chart.set_rows([], empty_text="No saved project dataset is available for hourly activity.")
         self.txt_routine.clear()
         self.txt_summary.clear()
         self.txt_next.clear()
@@ -397,9 +406,9 @@ class ActivityProfilePage(QWidget):
         if self.profile is not None:
             self.profile["behavior_profile"] = behavior
         if not behavior.get("flow_count"):
-            self.service_chart.set_rows([], empty_text="Load a dataset to show service groups.")
-            self.domain_chart.set_rows([], empty_text="Load a dataset to show observed domains.")
-            self.hour_chart.set_rows([], empty_text="Load a dataset to show hourly activity.")
+            self.service_chart.set_rows([], empty_text="No saved project dataset is available for service groups.")
+            self.domain_chart.set_rows([], empty_text="No saved project dataset is available for observed domains.")
+            self.hour_chart.set_rows([], empty_text="No saved project dataset is available for hourly activity.")
             self._set_behavior_routine_text(behavior)
             return
 

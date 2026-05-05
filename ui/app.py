@@ -345,7 +345,7 @@ class App(QWidget):
         self._init_state()
 
         self.ai_service = AIAssistantService(
-            AISettings.from_mapping(get_app_settings("ai."))
+            AISettings.from_mapping(get_app_settings())
         )
         self.notes_controller = NotesController()
         self.flow_controller = FlowController()
@@ -1650,6 +1650,7 @@ class App(QWidget):
         if not ok or not values:
             return
 
+        values["output_language"] = getattr(current, "output_language", "hr")
         self.ai_service.update_settings(AISettings(**values))
         for key, value in self.ai_service.settings.to_mapping().items():
             set_app_setting(key, value)

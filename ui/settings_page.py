@@ -4,6 +4,7 @@ from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
+    QComboBox,
     QLineEdit,
     QPushButton,
     QVBoxLayout,
@@ -12,6 +13,7 @@ from PySide6.QtWidgets import (
 
 from core.ai.assistant_service import AISettings
 from core.db import set_app_setting
+from core.output_language import normalize_output_language
 
 
 class SettingsPage(QWidget):
@@ -54,6 +56,9 @@ class SettingsPage(QWidget):
         self.edit_ai_model.setPlaceholderText("llama3")
         self.edit_ai_timeout = QLineEdit()
         self.edit_ai_timeout.setPlaceholderText("600")
+        self.cmb_output_language = QComboBox()
+        self.cmb_output_language.addItem("Croatian", "hr")
+        self.cmb_output_language.addItem("English", "en")
 
         for label, edit in (
             ("Base URL", self.edit_ai_url),
@@ -66,6 +71,13 @@ class SettingsPage(QWidget):
             row.addWidget(lbl)
             row.addWidget(edit, 1)
             ai_layout.addLayout(row)
+
+        language_row = QHBoxLayout()
+        language_label = QLabel("Report / AI language")
+        language_label.setMinimumWidth(150)
+        language_row.addWidget(language_label)
+        language_row.addWidget(self.cmb_output_language, 1)
+        ai_layout.addLayout(language_row)
 
         button_row = QHBoxLayout()
         self.btn_save_ai = QPushButton("Save AI settings")
@@ -91,6 +103,9 @@ class SettingsPage(QWidget):
         self.edit_ai_url.setText(settings.base_url or "")
         self.edit_ai_model.setText(settings.model or "")
         self.edit_ai_timeout.setText(str(settings.timeout_seconds or 600))
+        language = normalize_output_language(getattr(settings, "output_language", "hr"))
+        idx = self.cmb_output_language.findData(language)
+        self.cmb_output_language.setCurrentIndex(idx if idx >= 0 else 0)
         self.lbl_status.setText("Current AI settings loaded.")
 
     def save_ai_settings(self) -> None:
@@ -103,6 +118,7 @@ class SettingsPage(QWidget):
             "base_url": (self.edit_ai_url.text() or "").strip() or "http://localhost:11434",
             "model": (self.edit_ai_model.text() or "").strip() or "llama3",
             "timeout_seconds": max(1, timeout),
+            "output_language": normalize_output_language(str(self.cmb_output_language.currentData() or "hr")),
         }
 
         self.app.ai_service.update_settings(AISettings(**values))
@@ -111,5 +127,5 @@ class SettingsPage(QWidget):
 
         self.lbl_status.setText(
             f"Saved. Base URL: {values['base_url']} | Model: {values['model']} | "
-            f"Timeout: {values['timeout_seconds']} seconds"
+            f"Timeout: {values['timeout_seconds']} seconds | Language: {self.cmb_output_language.currentText()}"
         )

@@ -738,12 +738,15 @@ class AIServiceTests(unittest.TestCase):
             "ai.base_url": "http://saved.local",
             "ai.model": "saved-model",
             "ai.timeout_seconds": "33",
+            "output.language": "en",
         })
 
         self.assertEqual(settings.base_url, "http://saved.local")
         self.assertEqual(settings.model, "saved-model")
         self.assertEqual(settings.timeout_seconds, 33)
+        self.assertEqual(settings.output_language, "en")
         self.assertEqual(settings.to_mapping()["ai.model"], "saved-model")
+        self.assertEqual(settings.to_mapping()["output.language"], "en")
 
     def test_generate_uses_configured_endpoint_model_and_timeout(self):
         class FakeResponse:
@@ -807,7 +810,7 @@ class AIServiceTests(unittest.TestCase):
         self.assertIn("HTTP host", context)
         self.assertIn("no plaintext credentials were observed", prompt)
         self.assertIn("Do not invent malware", prompt)
-        self.assertIn("Prefer Croatian", prompt)
+        self.assertIn("Write the response in Croatian", prompt)
 
     def test_pcap_ai_summary_uses_pcap_prompt(self):
         class FakeResponse:
@@ -821,7 +824,7 @@ class AIServiceTests(unittest.TestCase):
             _write_sample_pcap(path)
             summary = analyze_pcap(path)
 
-        service = AIAssistantService(AISettings(base_url="http://ai.local", model="m", timeout_seconds=7))
+        service = AIAssistantService(AISettings(base_url="http://ai.local", model="m", timeout_seconds=7, output_language="en"))
         with patch.object(service, "_post_generate", return_value=FakeResponse()) as post:
             result = service.generate_pcap_summary(summary, project_name="Case A")
 
@@ -830,6 +833,7 @@ class AIServiceTests(unittest.TestCase):
         self.assertIn("You are analyzing a packet capture summary", prompt)
         self.assertIn("PCAP file: sample.pcap", prompt)
         self.assertIn("Limits Of Interpretation", prompt)
+        self.assertIn("Write the response in English", prompt)
 
     def test_activity_profile_context_and_prompt_are_grounded(self):
         profile = {
@@ -862,7 +866,7 @@ class AIServiceTests(unittest.TestCase):
         self.assertIn("Facebook / Meta", context)
         self.assertIn("Do not identify a real person", prompt)
         self.assertIn("Activity Profile Summary", prompt)
-        self.assertIn("Prefer Croatian", prompt)
+        self.assertIn("Write the response in Croatian", prompt)
 
     def test_activity_profile_ai_summary_uses_profile_prompt(self):
         class FakeResponse:
