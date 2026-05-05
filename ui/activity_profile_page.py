@@ -142,9 +142,9 @@ class ActivityProfilePage(QWidget):
             metric_grid.addWidget(card, idx // 3, idx % 3)
         scroll_layout.addLayout(metric_grid)
 
-        self.evidence_chart = BarChartWidget("Evidence sources", compact_single_counts=True)
-        self.device_ip_chart = BarChartWidget("PCAP device IP distribution", compact_single_counts=True)
-        self.activity_chart = BarChartWidget("Activity event types", compact_single_counts=True)
+        self.evidence_chart = BarChartWidget("Evidence sources", count_list=True)
+        self.device_ip_chart = BarChartWidget("PCAP device IP distribution", count_list=True)
+        self.activity_chart = BarChartWidget("Activity event types", count_list=True, max_rows=10)
 
         chart_grid = QGridLayout()
         chart_grid.setSpacing(12)
@@ -507,6 +507,7 @@ class BarChartWidget(QFrame):
         max_rows: int = 8,
         stacked_labels: bool = False,
         compact_single_counts: bool = False,
+        count_list: bool = False,
     ):
         super().__init__(parent)
         self.setObjectName("Card")
@@ -518,6 +519,7 @@ class BarChartWidget(QFrame):
         self.max_rows = max_rows
         self.stacked_labels = stacked_labels
         self.compact_single_counts = compact_single_counts
+        self.count_list = count_list
         self.layout = QVBoxLayout(self)
         self.layout.setContentsMargins(12, 10, 12, 12)
         self.layout.setSpacing(8)
@@ -549,6 +551,10 @@ class BarChartWidget(QFrame):
             display_value = str(row.get(self.value_label_key) or count) if self.value_label_key else str(count)
             pct = int(round((count / max_count) * 100)) if max_count else 0
 
+            if self.count_list:
+                self._add_count_row(label, display_value)
+                continue
+
             if self.stacked_labels:
                 self._add_stacked_row(label, display_value, pct)
                 continue
@@ -575,6 +581,25 @@ class BarChartWidget(QFrame):
             self.rows.addLayout(line)
 
         self.rows.addStretch()
+
+    def _add_count_row(self, label: str, display_value: str) -> None:
+        row = QFrame()
+        row.setObjectName("ProfileCountRow")
+        row_layout = QHBoxLayout(row)
+        row_layout.setContentsMargins(10, 7, 10, 7)
+        row_layout.setSpacing(8)
+
+        name = QLabel(label)
+        name.setWordWrap(True)
+        name.setToolTip(label)
+        value = QLabel(display_value)
+        value.setObjectName("ProfileCountBadge")
+        value.setAlignment(Qt.AlignCenter)
+        value.setMinimumWidth(44)
+
+        row_layout.addWidget(name, 1)
+        row_layout.addWidget(value)
+        self.rows.addWidget(row)
 
     def _add_stacked_row(self, label: str, display_value: str, pct: int) -> None:
         label_row = QHBoxLayout()

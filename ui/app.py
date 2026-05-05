@@ -157,6 +157,16 @@ QLabel#CaseMetricCompact {
     color: #0f172a;
 }
 
+QFrame#ProfileCountRow {
+    background: #f8fafc;
+    border-color: #cbd5e1;
+}
+
+QLabel#ProfileCountBadge {
+    background: #3b82f6;
+    color: #ffffff;
+}
+
 QLineEdit,
 QTextEdit,
 QPlainTextEdit,

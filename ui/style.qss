@@ -88,6 +88,20 @@ QLabel#CaseMetricCompact {
     font-weight: 700;
 }
 
+QFrame#ProfileCountRow {
+    background: #223045;
+    border: 1px solid #334155;
+    border-radius: 8px;
+}
+
+QLabel#ProfileCountBadge {
+    background: #3b82f6;
+    color: #ffffff;
+    border-radius: 8px;
+    padding: 4px 10px;
+    font-weight: 700;
+}
+
 QProgressBar {
     background: #1f2937;
     border: 1px solid #334155;
