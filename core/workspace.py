@@ -40,6 +40,16 @@ def get_workspace_subfolder(base_folder: str, name: str) -> Path | None:
     return Path(folder) / name
 
 
+def workspace_export_path(base_folder: str, default_name: str) -> Path:
+    name = Path((default_name or "").strip() or "export.html").name
+    exports_dir = get_workspace_subfolder(base_folder, "exports")
+    if exports_dir is None:
+        return Path(name)
+
+    exports_dir.mkdir(parents=True, exist_ok=True)
+    return exports_dir / name
+
+
 def write_project_notes_backup(base_folder: str, text: str) -> None:
     notes_dir = get_workspace_subfolder(base_folder, "notes")
     if notes_dir is None:

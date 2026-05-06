@@ -57,6 +57,7 @@ from core.workspace import (
     ensure_workspace_structure,
     looks_like_vianyquist_workspace,
     make_safe_project_folder_name,
+    workspace_export_path,
 )
 
 
@@ -436,6 +437,18 @@ class WorkspaceTests(unittest.TestCase):
 
             self.assertTrue((root / WORKSPACE_MARKER).exists())
             self.assertTrue(looks_like_vianyquist_workspace(str(root)))
+
+    def test_workspace_export_path_uses_project_exports_folder(self):
+        with temporary_directory() as tmp:
+            root = Path(tmp) / "case"
+            ensure_workspace_structure(str(root))
+
+            export_path = workspace_export_path(str(root), "report.html")
+            exports_exists = export_path.parent.exists()
+
+        self.assertEqual(export_path.name, "report.html")
+        self.assertEqual(export_path.parent.name, "exports")
+        self.assertTrue(exports_exists)
 
     def test_project_folder_name_is_windows_safe(self):
         self.assertEqual(make_safe_project_folder_name(' Case: A/B? '), "Case_A_B")

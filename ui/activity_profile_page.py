@@ -28,6 +28,7 @@ from core.exporters.profile_exporter import export_activity_profile_html
 from core.project_datasets import load_project_dataset_flows
 from core.project_profile import build_project_activity_profile
 from core.timeutils import parse_timestamp
+from core.workspace import workspace_export_path
 from ui.explore_widgets import AITextWorker
 
 
@@ -330,10 +331,16 @@ class ActivityProfilePage(QWidget):
             return
 
         default_name = f"{self.project_name or 'activity-profile'}-activity-profile.html"
+        project = self._current_project()
+        default_path = (
+            str(workspace_export_path(project.base_folder, default_name))
+            if project and project.base_folder
+            else default_name
+        )
         file_path, _ = QFileDialog.getSaveFileName(
             self,
             "Export activity profile",
-            default_name,
+            default_path,
             "HTML files (*.html)",
         )
         if not file_path:
@@ -346,7 +353,7 @@ class ActivityProfilePage(QWidget):
                 file_path,
                 profile=self.profile,
                 project_name=self.project_name,
-                project=self._current_project(),
+                project=project,
                 report_language=get_app_settings().get("output_language", "hr"),
             )
             webbrowser.open(Path(file_path).resolve().as_uri())

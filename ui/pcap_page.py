@@ -31,6 +31,7 @@ from core.exporters.pcap_exporter import export_pcap_summary_html
 from core.formatters import format_duration_compact_ms, human_bytes
 from core.pcap_analyzer import PcapSummary, analyze_pcap, build_investigator_view
 from core.protocols import format_ip_proto
+from core.workspace import workspace_export_path
 from core.db import (
     add_activity,
     add_pcap_source,
@@ -866,10 +867,16 @@ class PcapPage(QWidget):
             return
 
         default_name = Path(self.summary.file_name).with_suffix(".pcap-summary.html").name
+        project = get_project(self._current_project_id()) if self._current_project_id() is not None else None
+        default_path = (
+            str(workspace_export_path(project.base_folder, default_name))
+            if project and project.base_folder
+            else default_name
+        )
         file_path, _ = QFileDialog.getSaveFileName(
             self,
             "Export PCAP summary",
-            default_name,
+            default_path,
             "HTML files (*.html)",
         )
         if not file_path:
@@ -878,7 +885,6 @@ class PcapPage(QWidget):
             file_path += ".html"
 
         try:
-            project = get_project(self._current_project_id()) if self._current_project_id() is not None else None
             export_pcap_summary_html(
                 file_path,
                 self.summary,
