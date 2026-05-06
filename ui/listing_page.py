@@ -14,6 +14,7 @@ from core.db import get_app_settings, get_project
 from core.parser import extract_dataset_meta
 from core.timeutils import parse_timestamp
 from core.workspace import workspace_export_path
+from ui.explore_widgets import CopyableTableView
 
 
 class ListingTableModel(QAbstractTableModel):
@@ -463,7 +464,7 @@ class ListingPage(QWidget):
         layout.addWidget(self.card)
 
         # ---------- TABLE ----------
-        self.table = QTableView()
+        self.table = CopyableTableView(self.app)
 
         self.model = ListingTableModel()
         self.table.setModel(self.model)

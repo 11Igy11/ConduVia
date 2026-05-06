@@ -41,7 +41,7 @@ from core.db import (
     list_project_pcap_device_ips,
     set_project_subject,
 )
-from ui.explore_widgets import AITextWorker
+from ui.explore_widgets import AITextWorker, CopyableTableView
 
 
 class PcapWorker(QObject):
@@ -536,8 +536,8 @@ class PcapPage(QWidget):
         stretch_last: bool = False,
         fixed_widths: dict[int, int] | None = None,
         stretch_columns: list[int] | None = None,
-    ) -> QTableView:
-        table = QTableView()
+    ) -> CopyableTableView:
+        table = CopyableTableView(self.app)
         table.setModel(DictTableModel(columns))
         table.setSortingEnabled(True)
         table.setAlternatingRowColors(True)

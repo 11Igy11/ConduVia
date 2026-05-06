@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
 
 from core.parser import extract_dataset_meta, build_registry_columns, compute_registry_summary
 from core.analyst import compute_analyst_summary
+from ui.explore_widgets import CopyableTableView
 
 # ----------------- helpers -----------------
 def _human_bytes(n: int | float | None) -> str:
@@ -912,7 +913,7 @@ class RegistryPage(QWidget):
 
         # Insights table
         self.pairs_model = PairsModel()
-        self.pairs_view = QTableView()
+        self.pairs_view = CopyableTableView(self.app)
         self.pairs_view.setModel(self.pairs_model)
         self.pairs_view.setAlternatingRowColors(True)
         self.pairs_view.verticalHeader().setVisible(False)
@@ -970,7 +971,7 @@ class RegistryPage(QWidget):
         self.lbl_dataset_disabled.setWordWrap(True)
         dp.addWidget(self.lbl_dataset_disabled)
 
-        self.table = QTableView()
+        self.table = CopyableTableView(self.app)
         self.table.setSortingEnabled(False)
         self.table.setAlternatingRowColors(True)
         self.table.setSelectionBehavior(QTableView.SelectRows)
