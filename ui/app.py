@@ -408,6 +408,7 @@ class App(QWidget):
         self.btn_nav_notes = QPushButton("Notes")
         self.btn_nav_ai = QPushButton("AI")
         self.btn_nav_json = QPushButton("JSON")
+        self.btn_global_refresh = QPushButton("Refresh")
         self.btn_nav_pcap = QPushButton("PCAP")
         self.btn_nav_settings = QPushButton("Settings")
         self.btn_nav_help = QPushButton("Help")
@@ -418,6 +419,7 @@ class App(QWidget):
             self.btn_nav_notes,
             self.btn_nav_ai,
             self.btn_nav_json,
+            self.btn_global_refresh,
             self.btn_nav_pcap,
             self.btn_nav_settings,
             self.btn_nav_help,
@@ -442,6 +444,7 @@ class App(QWidget):
         sidebar.addWidget(self.btn_nav_notes)
         sidebar.addWidget(self.btn_nav_ai)
         sidebar.addWidget(self.btn_nav_json)
+        sidebar.addWidget(self.btn_global_refresh)
         sidebar.addStretch()
         sidebar.addWidget(self.btn_nav_pcap)
         sidebar.addWidget(self.btn_nav_settings)
@@ -455,6 +458,7 @@ class App(QWidget):
         self.btn_nav_notes.clicked.connect(self.go_to_notes)
         self.btn_nav_ai.clicked.connect(self.go_to_ai)
         self.btn_nav_json.clicked.connect(lambda: self.go_to_json_tab(0))
+        self.btn_global_refresh.clicked.connect(self.refresh_all_views)
         self.btn_nav_pcap.clicked.connect(lambda: self.go_page(self.IDX_PCAP, self._nav_pcap))
         self.btn_nav_settings.clicked.connect(lambda: self.go_page(self.IDX_SETTINGS, self._nav_settings))
         self.btn_nav_help.clicked.connect(self.open_user_manual)
@@ -1472,6 +1476,32 @@ class App(QWidget):
     def refresh_activity_profile_ui(self):
         if hasattr(self, "activity_profile_page"):
             self.activity_profile_page.refresh(self.current_project_id, self.current_project_name)
+
+    def refresh_all_views(self):
+        if hasattr(self, "_flush_notes"):
+            self._flush_notes()
+
+        active_project_id = self.current_project_id
+        self.projects_ui_controller.refresh_projects()
+
+        if active_project_id is not None and get_project(active_project_id):
+            self.projects_ui_controller.set_active_project(active_project_id)
+            for i in range(self.projects_list.count()):
+                item = self.projects_list.item(i)
+                if int(item.data(Qt.UserRole)) == active_project_id:
+                    self.projects_list.setCurrentItem(item)
+                    break
+            self.projects_ui_controller.refresh_recent_datasets(active_project_id)
+            self.projects_ui_controller.refresh_case_dashboard(active_project_id)
+
+        self.refresh_findings_ui()
+        self.refresh_notes_ui()
+        self.refresh_activity_profile_ui()
+
+        if hasattr(self, "settings_page"):
+            self.settings_page.refresh()
+
+        self._message_dialog("Refresh", "Application views refreshed.", width=360)
 
     def apply_theme(self, theme: str | None) -> None:
         qapp = QApplication.instance()
