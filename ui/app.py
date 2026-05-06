@@ -925,6 +925,7 @@ class App(QWidget):
 
         header_top.addWidget(self.lbl_project_banner)
         header_top.addStretch()
+        header_top.addWidget(self.btn_load)
         header_top.addWidget(QLabel("Page size:"))
         header_top.addWidget(self.cmb_page_size)
         header_top.addWidget(self.btn_load_more)
@@ -1181,7 +1182,6 @@ class App(QWidget):
             b.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
         
         left_actions.addSpacing(6)
-        left_actions.addWidget(self.btn_load)
         left_actions.addWidget(self.btn_filter_src)
         left_actions.addWidget(self.btn_filter_dst)
         left_actions.addWidget(self.btn_filter_sni)
