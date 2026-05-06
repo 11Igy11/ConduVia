@@ -25,6 +25,7 @@ from core.db import (
     init_db,
     list_pcap_sources,
     list_project_pcap_device_ips,
+    list_recent_datasets,
     set_app_setting,
     set_project_subject,
     set_project_target,
@@ -183,18 +184,21 @@ class BehaviorProfileTests(unittest.TestCase):
             project_id = create_project("Case A", db_path=db_path)
             add_dataset_load(project_id, str(one), db_path=db_path)
             add_dataset_load(project_id, str(two), db_path=db_path)
-            add_dataset_load(project_id, str(one), db_path=db_path)
             add_dataset_load(project_id, str(missing), db_path=db_path)
+            add_dataset_load(project_id, str(one), db_path=db_path)
 
             result = load_project_dataset_flows(project_id, db_path=db_path)
+            recent = list_recent_datasets(project_id, db_path=db_path)
 
-        self.assertEqual(result["saved_path_count"], 4)
+        self.assertEqual(result["saved_path_count"], 3)
         self.assertEqual(result["deduped_path_count"], 3)
         self.assertEqual(result["loaded_source_count"], 2)
         self.assertEqual(result["source_count"], 3)
         self.assertEqual(result["flow_count"], 2)
         self.assertEqual([flow["id"] for flow in result["flows"]], ["one", "two"])
         self.assertEqual(len(result["missing_rows"]), 1)
+        self.assertEqual(recent[0], str(one))
+        self.assertEqual(len(recent), 3)
 
     def test_behavior_profile_groups_services_domains_and_hours(self):
         flows = [
@@ -650,12 +654,29 @@ class PcapAnalyzerTests(unittest.TestCase):
                 summary_text=build_investigator_view(summary)["plain_summary"],
                 db_path=db_path,
             )
+            duplicate_source_id = add_pcap_source(
+                project_id,
+                file_path=str(pcap_path),
+                file_name=pcap_path.name,
+                file_sha256_value=digest,
+                file_size=pcap_path.stat().st_size,
+                format=summary.format,
+                packet_count=summary.packet_count,
+                wire_bytes=summary.wire_bytes,
+                first_seen=summary.first_seen,
+                last_seen=summary.last_seen,
+                duration_seconds=summary.duration_seconds,
+                likely_device_ip=summary.likely_device_ip,
+                summary_text=build_investigator_view(summary)["plain_summary"],
+                db_path=db_path,
+            )
 
             sources = list_pcap_sources(project_id, db_path=db_path)
             device_ips = list_project_pcap_device_ips(project_id, db_path=db_path)
 
         self.assertEqual(len(sources), 1)
         self.assertEqual(sources[0].id, source_id)
+        self.assertEqual(duplicate_source_id, source_id)
         self.assertEqual(sources[0].file_sha256, digest)
         self.assertEqual(sources[0].likely_device_ip, "10.0.0.10")
         self.assertEqual(device_ips, ["10.0.0.10"])
