@@ -450,8 +450,17 @@ class PcapPage(QWidget):
     def _build_evidence_tab(self) -> QWidget:
         page = QWidget()
         layout = QVBoxLayout(page)
-        layout.setContentsMargins(8, 8, 8, 8)
-        layout.setSpacing(10)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(12)
+
+        self.lbl_evidence_hint = QLabel(
+            "This view shows readable metadata and unencrypted payload snippets only. "
+            "Encrypted HTTPS, QUIC and app content remain metadata-level indicators."
+        )
+        self.lbl_evidence_hint.setObjectName("MutedLabel")
+        self.lbl_evidence_hint.setWordWrap(True)
+        self.lbl_evidence_hint.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        layout.addWidget(self.lbl_evidence_hint)
 
         self.tbl_dns = self._table([("query", "DNS Query"), ("count", "Count")], fixed_widths={1: 90}, stretch_columns=[0])
         self.tbl_sni = self._table([("host", "TLS SNI Host"), ("count", "Count")], fixed_widths={1: 90}, stretch_columns=[0])
@@ -462,18 +471,42 @@ class PcapPage(QWidget):
             ("source", "Source"),
             ("destination", "Destination"),
             ("value", "Visible Value"),
-        ], fixed_widths={0: 178, 1: 130, 2: 190, 3: 190}, stretch_columns=[4])
+        ], fixed_widths={0: 178, 1: 130, 2: 180, 3: 180}, stretch_columns=[4])
 
-        top = QSplitter(Qt.Horizontal)
-        top.addWidget(self._group("DNS queries", self.tbl_dns))
-        top.addWidget(self._group("TLS SNI hosts", self.tbl_sni))
-        top.addWidget(self._group("HTTP hosts", self.tbl_http))
+        for table in (self.tbl_dns, self.tbl_sni, self.tbl_http):
+            table.setMinimumHeight(430)
+            table.horizontalHeader().setStretchLastSection(False)
 
-        splitter = QSplitter(Qt.Vertical)
-        splitter.addWidget(top)
-        splitter.addWidget(self._group("Readable evidence samples", self.tbl_samples))
+        self.tbl_samples.setMinimumHeight(430)
+        self.tbl_samples.verticalHeader().setDefaultSectionSize(38)
+
+        metadata_tabs = QTabWidget()
+        metadata_tabs.addTab(self.tbl_dns, "DNS")
+        metadata_tabs.addTab(self.tbl_sni, "TLS SNI")
+        metadata_tabs.addTab(self.tbl_http, "HTTP")
+
+        samples_panel = QWidget()
+        samples_layout = QVBoxLayout(samples_panel)
+        samples_layout.setContentsMargins(0, 0, 0, 0)
+        samples_layout.setSpacing(8)
+
+        samples_hint = QLabel(
+            "Visible values are extracted from DNS names, TLS SNI, HTTP host/header data and plaintext payload previews. "
+            "Treat them as observable network evidence, not as decrypted message content."
+        )
+        samples_hint.setObjectName("MutedLabel")
+        samples_hint.setWordWrap(True)
+        samples_hint.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        samples_layout.addWidget(samples_hint)
+        samples_layout.addWidget(self.tbl_samples, 1)
+
+        splitter = QSplitter(Qt.Horizontal)
+        splitter.addWidget(self._group("Visible metadata", metadata_tabs))
+        splitter.addWidget(self._group("Readable payload / metadata samples", samples_panel))
         splitter.setStretchFactor(0, 2)
         splitter.setStretchFactor(1, 3)
+        splitter.setCollapsible(0, False)
+        splitter.setCollapsible(1, False)
         layout.addWidget(splitter, 1)
         return page
 
