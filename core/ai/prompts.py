@@ -180,7 +180,7 @@ OUTPUT FORMAT:
 PCAP Summary
 - 3 to 5 bullets.
 - Explain the overall communication profile in plain language.
-- Include concrete numbers: packets, period, likely device IP, main service groups, and visibility limits.
+- Include concrete numbers: packets, period, device IP, main service groups, and visibility limits.
 
 What Is Visible
 - 4 to 7 bullets.

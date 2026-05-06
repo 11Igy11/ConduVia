@@ -602,7 +602,7 @@ def _plain_summary(
 
 def _key_points(summary: PcapSummary, service_rows: list[dict[str, Any]]) -> list[str]:
     points = [
-        f"Likely device IP: {summary.likely_device_ip or '-'}",
+        f"Device IP: {summary.likely_device_ip or '-'}",
         f"Capture period: {summary.first_seen or '-'} to {summary.last_seen or '-'}",
         f"Packets: {summary.packet_count:,}; volume: {summary.wire_bytes:,} bytes",
         f"Visible DNS names: {len(summary.dns_queries)}; TLS SNI hosts: {len(summary.tls_sni)}; HTTP hosts: {len(summary.http_hosts)}",

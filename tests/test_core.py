@@ -731,7 +731,7 @@ class PcapAnalyzerTests(unittest.TestCase):
         self.assertIn("Case A", content)
         self.assertIn("Ana Horvat", content)
         self.assertIn("MSISDN: 385911234567", content)
-        self.assertIn("Likely Device IP", content)
+        self.assertIn("Device IP", content)
         self.assertIn("ViaNyquist PCAP Report", content)
         self.assertIn('href="#summary"', content)
         self.assertIn('id="evidence"', content)

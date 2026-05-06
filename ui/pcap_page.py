@@ -784,7 +784,7 @@ class PcapPage(QWidget):
             f"Packets: {summary.packet_count:,}",
             f"Traffic volume: {human_bytes(summary.wire_bytes, precision=2)}",
             f"Capture period: {summary.first_seen or '-'} - {summary.last_seen or '-'}",
-            f"Likely device IP: {summary.likely_device_ip or '-'}",
+            f"Device IP: {summary.likely_device_ip or '-'}",
             "",
             "What is visible:",
             f"- DNS queries: {len(summary.dns_queries)} unique visible names",
@@ -990,7 +990,7 @@ class PcapPage(QWidget):
             f"[PCAP summary added: {ts}]",
             f"File: {self.summary.file_name}",
             f"Source: {self.summary.file_path}",
-            f"Likely device IP: {self.summary.likely_device_ip or '-'}",
+            f"Device IP: {self.summary.likely_device_ip or '-'}",
             f"Capture period: {self.summary.first_seen or '-'} - {self.summary.last_seen or '-'}",
             f"Packets: {self.summary.packet_count:,}",
             f"Volume: {human_bytes(self.summary.wire_bytes, precision=2)}",
@@ -1043,7 +1043,7 @@ class PcapPage(QWidget):
         if not current_ip:
             return self._confirm(
                 "PCAP",
-                "Likely device IP could not be determined.",
+                "Device IP could not be determined.",
                 "The PCAP can still be saved, but ViaNyquist cannot compare it with previous PCAP sources in this project.",
                 ok_text="Save anyway",
                 cancel_text="Cancel",
@@ -1057,7 +1057,7 @@ class PcapPage(QWidget):
                 "This PCAP likely describes a different device IP than the active project.",
                 (
                     f"Project known IP: {project_ip}\n"
-                    f"Current PCAP likely device IP: {current_ip}\n\n"
+                    f"Current PCAP device IP: {current_ip}\n\n"
                     "Save only if this capture belongs to the same target/project or if the known project IP should be reviewed."
                 ),
                 ok_text="Save anyway",
@@ -1074,7 +1074,7 @@ class PcapPage(QWidget):
             "PCAP device mismatch",
             "This PCAP appears to describe a different device IP than previous PCAP sources in this project.",
             (
-                f"Current likely device IP: {current_ip}\n"
+                f"Current device IP: {current_ip}\n"
                 f"Previous project PCAP device IPs: {', '.join(previous_ips[:8])}\n\n"
                 "Save only if this capture belongs to the same target/project."
             ),

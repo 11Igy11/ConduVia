@@ -198,7 +198,7 @@ def build_pcap_context(
     lines.append(f"- Wire bytes: {human_bytes(summary.wire_bytes, precision=2)}")
     lines.append(f"- Capture period: {summary.first_seen or '-'} to {summary.last_seen or '-'}")
     lines.append(f"- Duration seconds: {summary.duration_seconds:.1f}")
-    lines.append(f"- Likely observed device IP: {summary.likely_device_ip or '-'}")
+    lines.append(f"- Device IP: {summary.likely_device_ip or '-'}")
     lines.append("")
 
     lines.append("Plain-language investigator summary generated from deterministic analysis:")
