@@ -281,7 +281,7 @@ class PcapPage(QWidget):
             ("duration_ms", "Duration"),
             ("first_seen", "First Seen"),
         ]
-        self.communication_fixed_widths = {0: 170, 2: 92, 4: 78, 5: 92, 6: 82, 7: 96, 8: 178}
+        self.communication_fixed_widths = {0: 170, 2: 92, 4: 72, 5: 92, 6: 82, 7: 96, 8: 170}
         self.tbl_communications = self._table(
             self.communication_columns,
             fixed_widths=self.communication_fixed_widths,
@@ -298,24 +298,26 @@ class PcapPage(QWidget):
         self.txt_communication_detail.setMinimumWidth(360)
         self.txt_communication_detail.setPlaceholderText("Select a communication indicator to see the evidence used for classification.")
 
-        indicators_group = self._group("Communication indicators", self.tbl_communications)
         self.btn_expand_communications = QPushButton("Expand table")
         self.btn_expand_communications.setFixedHeight(34)
         self.btn_expand_communications.clicked.connect(self._open_communications_dialog)
 
-        indicators_layout = indicators_group.layout()
-        if indicators_layout is not None:
-            indicators_toolbar = QHBoxLayout()
-            indicators_toolbar.addStretch()
-            indicators_toolbar.addWidget(self.btn_expand_communications)
-            indicators_layout.insertLayout(0, indicators_toolbar)
+        indicators_header = QHBoxLayout()
+        indicators_header.setContentsMargins(0, 0, 0, 0)
+        indicators_header.setSpacing(8)
+        indicators_title = QLabel("Communication indicators")
+        indicators_title.setObjectName("SectionTitle")
+        indicators_header.addWidget(indicators_title)
+        indicators_header.addStretch()
+        indicators_header.addWidget(self.btn_expand_communications)
 
         brief_group = self._group("Investigation brief", self.lbl_highlights_brief)
         brief_group.setMaximumHeight(145)
         detail_group = self._group("Selected indicator evidence", self.txt_communication_detail)
-        detail_group.setMaximumHeight(170)
+        detail_group.setMaximumHeight(150)
         layout.addWidget(brief_group)
-        layout.addWidget(indicators_group, 1)
+        layout.addLayout(indicators_header)
+        layout.addWidget(self.tbl_communications, 1)
         layout.addWidget(detail_group)
 
         return page
@@ -493,13 +495,14 @@ class PcapPage(QWidget):
         ], fixed_widths={0: 178, 1: 130, 2: 180, 3: 180}, stretch_columns=[4])
 
         for table in (self.tbl_dns, self.tbl_sni, self.tbl_http):
-            table.setMinimumHeight(430)
+            table.setMinimumHeight(240)
             table.horizontalHeader().setStretchLastSection(False)
 
-        self.tbl_samples.setMinimumHeight(430)
+        self.tbl_samples.setMinimumHeight(320)
         self.tbl_samples.verticalHeader().setDefaultSectionSize(38)
 
         metadata_tabs = QTabWidget()
+        metadata_tabs.setMinimumHeight(270)
         metadata_tabs.addTab(self.tbl_dns, "DNS")
         metadata_tabs.addTab(self.tbl_sni, "TLS SNI")
         metadata_tabs.addTab(self.tbl_http, "HTTP")
@@ -519,14 +522,8 @@ class PcapPage(QWidget):
         samples_layout.addWidget(samples_hint)
         samples_layout.addWidget(self.tbl_samples, 1)
 
-        splitter = QSplitter(Qt.Horizontal)
-        splitter.addWidget(self._group("Visible metadata", metadata_tabs))
-        splitter.addWidget(self._group("Readable payload / metadata samples", samples_panel))
-        splitter.setStretchFactor(0, 2)
-        splitter.setStretchFactor(1, 3)
-        splitter.setCollapsible(0, False)
-        splitter.setCollapsible(1, False)
-        layout.addWidget(splitter, 1)
+        layout.addWidget(self._group("Visible metadata", metadata_tabs), 0)
+        layout.addWidget(self._group("Readable payload / metadata samples", samples_panel), 1)
         return page
 
     def _build_artifacts_tab(self) -> QWidget:
@@ -750,6 +747,9 @@ class PcapPage(QWidget):
             return
 
         row = model.rows[current.row()]
+        self.txt_communication_detail.setPlainText(self._communication_detail_text(row))
+
+    def _communication_detail_text(self, row: dict[str, Any]) -> str:
         lines = [
             f"Service: {row.get('service') or '-'}",
             f"Indicator: {row.get('activity_type') or '-'}",
@@ -770,7 +770,7 @@ class PcapPage(QWidget):
             "Interpretation limit:",
             "This is a metadata-based indicator. It does not prove message content or confirm a call by itself.",
         ]
-        self.txt_communication_detail.setPlainText("\n".join(lines))
+        return "\n".join(lines)
 
     def _open_communications_dialog(self) -> None:
         model = self.tbl_communications.model()
@@ -799,7 +799,33 @@ class PcapPage(QWidget):
         table.setMinimumHeight(560)
         table.verticalHeader().setDefaultSectionSize(42)
         self._set_table(table, list(model.rows))
-        layout.addWidget(table, 1)
+
+        detail = QTextEdit()
+        detail.setReadOnly(True)
+        detail.setMinimumHeight(160)
+        detail.setPlaceholderText("Select a communication indicator to see the evidence used for classification.")
+
+        def update_detail(current: QModelIndex, previous: QModelIndex | None = None) -> None:
+            table_model = table.model()
+            if not isinstance(table_model, DictTableModel) or not current.isValid():
+                detail.clear()
+                return
+            if current.row() < 0 or current.row() >= len(table_model.rows):
+                detail.clear()
+                return
+            detail.setPlainText(self._communication_detail_text(table_model.rows[current.row()]))
+
+        table.selectionModel().currentRowChanged.connect(update_detail)
+
+        splitter = QSplitter(Qt.Vertical)
+        splitter.addWidget(table)
+        splitter.addWidget(self._group("Selected indicator evidence", detail))
+        splitter.setStretchFactor(0, 4)
+        splitter.setStretchFactor(1, 1)
+        splitter.setCollapsible(0, False)
+        splitter.setCollapsible(1, False)
+        layout.addWidget(splitter, 1)
+        table.selectRow(0)
 
         footer = QHBoxLayout()
         footer.addStretch()
