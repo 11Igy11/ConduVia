@@ -58,6 +58,7 @@ from core.workspace import (
     ensure_workspace_structure,
     looks_like_vianyquist_workspace,
     make_safe_project_folder_name,
+    write_project_workspace_manifest,
     workspace_export_path,
 )
 
@@ -454,6 +455,29 @@ class WorkspaceTests(unittest.TestCase):
 
     def test_project_folder_name_is_windows_safe(self):
         self.assertEqual(make_safe_project_folder_name(' Case: A/B? '), "Case_A_B")
+
+    def test_workspace_manifest_tracks_project_references(self):
+        with temporary_directory() as tmp:
+            root = Path(tmp) / "case"
+            write_project_workspace_manifest(
+                str(root),
+                project_name="Case A",
+                project_id=7,
+                subject="Ana Horvat",
+                identifiers="MSISDN: 385911234567",
+                json_datasets=[str(root / "dataset.json")],
+                pcap_sources=["sample.pcap | C:/captures/sample.pcap | sha256=abc"],
+            )
+
+            manifest = (root / "project_manifest.txt").read_text(encoding="utf-8")
+            json_refs = (root / "datasets" / "json_datasets.txt").read_text(encoding="utf-8")
+            pcap_refs = (root / "datasets" / "pcap_sources.txt").read_text(encoding="utf-8")
+
+        self.assertIn("Project: Case A", manifest)
+        self.assertIn("Subject: Ana Horvat", manifest)
+        self.assertIn("JSON datasets: 1", manifest)
+        self.assertIn("dataset.json", json_refs)
+        self.assertIn("sample.pcap", pcap_refs)
 
 
 class AppSettingsTests(unittest.TestCase):

@@ -9,6 +9,7 @@ from core.db import (
     get_project,
     delete_project,
     list_recent_datasets,
+    list_pcap_sources,
     update_project,
 )
 from core.project_identity import project_identifiers_text, subject_display_label
@@ -19,6 +20,7 @@ from core.workspace import (
     move_workspace_folder,
     delete_workspace_folder,
     looks_like_vianyquist_workspace,   
+    write_project_workspace_manifest,
 )
 from ui.dialogs import project_details_dialog
 
@@ -95,6 +97,7 @@ class ProjectsUIController:
             return
 
         self.set_active_project(pid)
+        self.sync_project_workspace(pid)
         self.refresh_projects()
         self.refresh_recent_datasets(pid)
         self.app.refresh_findings_ui()
@@ -324,6 +327,7 @@ class ProjectsUIController:
             return
 
         # refresh whole page
+        self.sync_project_workspace(project.id)
         self.refresh_projects()
 
         # reselect updated item
@@ -364,6 +368,34 @@ class ProjectsUIController:
         self.app.refresh_findings_ui()
         self.app.refresh_notes_ui()
         self.app.refresh_activity_profile_ui()
+
+    def sync_project_workspace(self, project_id: int | None) -> None:
+        if project_id is None:
+            return
+
+        project = get_project(project_id)
+        if not project or not (project.base_folder or "").strip():
+            return
+
+        json_datasets = list_recent_datasets(project_id, limit=500)
+        pcap_sources = []
+        for source in list_pcap_sources(project_id, limit=500):
+            pieces = [source.file_name or Path(source.file_path).name]
+            if source.file_path:
+                pieces.append(source.file_path)
+            if source.file_sha256:
+                pieces.append(f"sha256={source.file_sha256}")
+            pcap_sources.append(" | ".join(piece for piece in pieces if piece))
+
+        write_project_workspace_manifest(
+            project.base_folder,
+            project_name=project.name,
+            project_id=project.id,
+            subject=subject_display_label(project),
+            identifiers=project_identifiers_text(project),
+            json_datasets=json_datasets,
+            pcap_sources=pcap_sources,
+        )
 
     def refresh_recent_datasets(self, project_id: int):
         self.app.recent_list.clear()

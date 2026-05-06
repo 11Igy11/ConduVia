@@ -1045,6 +1045,8 @@ class PcapPage(QWidget):
 
         self._saved_source_id = source_id
         self.btn_save_project.setText("Saved to Project")
+        if hasattr(self.app, "projects_ui_controller"):
+            self.app.projects_ui_controller.sync_project_workspace(project_id)
         details = [f"Source id: {source_id}"]
         if bound_project_ip:
             details.append(f"Project known IP was set to: {bound_project_ip}")

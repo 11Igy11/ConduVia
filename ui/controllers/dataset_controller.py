@@ -310,6 +310,8 @@ class DatasetController(QObject):
 
         if self.app.current_project_id is not None:
             add_dataset_load(self.app.current_project_id, path)
+            if hasattr(self.app, "projects_ui_controller"):
+                self.app.projects_ui_controller.sync_project_workspace(self.app.current_project_id)
             self.app.projects_ui_controller.refresh_recent_datasets(self.app.current_project_id)
             self.app.refresh_activity_ui()
 
