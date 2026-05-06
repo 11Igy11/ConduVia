@@ -149,13 +149,12 @@ class ActivityProfilePage(QWidget):
 
         self.evidence_chart = BarChartWidget("Evidence sources", count_list=True)
         self.device_ip_chart = BarChartWidget("PCAP device IP distribution", count_list=True)
-        self.activity_chart = BarChartWidget("Activity event types", count_list=True, max_rows=10)
+        self.activity_chart = BarChartWidget("Activity event types", count_list=True, max_rows=6)
 
         chart_grid = QGridLayout()
         chart_grid.setSpacing(12)
         chart_grid.addWidget(self.evidence_chart, 0, 0)
         chart_grid.addWidget(self.device_ip_chart, 0, 1)
-        chart_grid.addWidget(self.activity_chart, 1, 0, 1, 2)
         chart_grid.setColumnStretch(0, 1)
         chart_grid.setColumnStretch(1, 1)
         scroll_layout.addLayout(chart_grid)
@@ -218,14 +217,20 @@ class ActivityProfilePage(QWidget):
         top.setStretchFactor(1, 1)
 
         self.lst_timeline = QListWidget()
-        self.lst_timeline.setMinimumHeight(260)
+        self.lst_timeline.setMinimumHeight(220)
 
-        body = QSplitter(Qt.Vertical)
-        body.addWidget(top)
-        body.addWidget(self._section("Timeline", self.lst_timeline))
-        body.setStretchFactor(0, 2)
-        body.setStretchFactor(1, 1)
-        scroll_layout.addWidget(body)
+        scroll_layout.addWidget(top)
+
+        case_activity_title = QLabel("Case Activity")
+        case_activity_title.setObjectName("SectionTitle")
+        scroll_layout.addWidget(case_activity_title)
+
+        case_activity = QSplitter(Qt.Horizontal)
+        case_activity.addWidget(self.activity_chart)
+        case_activity.addWidget(self._section("Recent activity", self.lst_timeline))
+        case_activity.setStretchFactor(0, 1)
+        case_activity.setStretchFactor(1, 2)
+        scroll_layout.addWidget(case_activity)
         scroll_layout.addStretch()
         scroll.setWidget(content)
         root.addWidget(scroll, 1)
