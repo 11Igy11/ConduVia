@@ -110,7 +110,7 @@ class ActivityProfilePage(QWidget):
         title_row.addWidget(self.btn_ai_summary)
         title_row.addWidget(self.btn_export)
 
-        self.lbl_subtitle = QLabel("Open a project to build a device/user activity profile from datasets, PCAP sources, findings and notes.")
+        self.lbl_subtitle = QLabel("Open a project to build a device/user activity profile from JSON datasets, PCAP sources, findings and notes.")
         self.lbl_subtitle.setWordWrap(True)
         self.lbl_subtitle.setObjectName("Muted")
 
@@ -132,7 +132,7 @@ class ActivityProfilePage(QWidget):
         self.metric_cards: list[QLabel] = []
         metric_grid = QGridLayout()
         metric_grid.setSpacing(10)
-        for title in ("Datasets", "PCAP Sources", "Findings", "Device IPs", "PCAP Volume", "Capture Range"):
+        for title in ("JSON Datasets", "PCAP Sources", "Findings", "Device IPs", "PCAP Volume", "Capture Range"):
             card = QLabel(f"{title}\n0")
             card.setObjectName("ProfileMetric")
             card.setAlignment(Qt.AlignCenter)
@@ -248,7 +248,7 @@ class ActivityProfilePage(QWidget):
         self.btn_export.setEnabled(True)
         self.btn_ai_summary.setText("AI Profile Summary")
         self.lbl_title.setText(f"Activity Profile: {project_name or 'Project'}")
-        self.lbl_subtitle.setText("Profile built from saved datasets, PCAP sources, findings and project activity.")
+        self.lbl_subtitle.setText("Profile built from saved JSON datasets, PCAP sources, findings and project activity.")
         self._set_metrics(profile.get("metrics") or [])
         self._set_overview(profile)
         self.evidence_chart.set_rows(profile.get("evidence_counts") or [])
@@ -272,7 +272,7 @@ class ActivityProfilePage(QWidget):
 
     def clear(self):
         self.lbl_title.setText("Activity Profile")
-        self.lbl_subtitle.setText("Open a project to build a device/user activity profile from datasets, PCAP sources, findings and notes.")
+        self.lbl_subtitle.setText("Open a project to build a device/user activity profile from JSON datasets, PCAP sources, findings and notes.")
         self.profile = None
         self.project_name = ""
         self._profile_project_id = None
@@ -403,7 +403,7 @@ class ActivityProfilePage(QWidget):
 
     def _set_metrics(self, metrics: list[dict[str, Any]]):
         defaults = [
-            {"label": "Datasets", "value": 0, "detail": "loaded"},
+            {"label": "JSON Datasets", "value": 0, "detail": "loaded"},
             {"label": "PCAP Sources", "value": 0, "detail": "saved"},
             {"label": "Findings", "value": 0, "detail": "saved"},
             {"label": "Device IPs", "value": 0, "detail": "from PCAP"},

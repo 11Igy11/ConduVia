@@ -60,7 +60,7 @@ def build_project_activity_profile(
         f"- Case subject: {subject_display_label(project)}",
         f"- Known identifiers: {project_identifiers_text(project)}",
         f"- Target fallback: {target_display_label(project)}",
-        f"- Dataset loads: {len(datasets)}",
+        f"- JSON datasets: {len(datasets)}",
         f"- PCAP sources: {len(pcaps)}",
         f"- Findings: {len(findings)}",
     ]
@@ -98,7 +98,7 @@ def build_project_activity_profile(
         "timeline_lines": timeline_lines,
         "recommendation_lines": recommendation_lines,
         "metrics": [
-            {"label": "Datasets", "value": len(datasets), "detail": "loaded"},
+            {"label": "JSON Datasets", "value": len(datasets), "detail": "loaded"},
             {"label": "PCAP Sources", "value": len(pcaps), "detail": "saved"},
             {"label": "Findings", "value": len(findings), "detail": "saved"},
             {"label": "Device IPs", "value": len(pcap_ips), "detail": "from PCAP"},
@@ -108,7 +108,7 @@ def build_project_activity_profile(
         "finding_count": len(findings),
         "pcap_device_ips": dict(pcap_ips),
         "evidence_counts": [
-            {"label": "Datasets", "count": len(datasets)},
+            {"label": "JSON Datasets", "count": len(datasets)},
             {"label": "PCAP Sources", "count": len(pcaps)},
             {"label": "Findings", "count": len(findings)},
         ],
@@ -155,7 +155,7 @@ def _counter_label(values: Counter[str]) -> str:
 
 def _event_label(event_type: str) -> str:
     labels = {
-        "dataset_loaded": "Dataset loaded",
+        "dataset_loaded": "JSON dataset loaded",
         "finding_created": "Finding created",
         "finding_updated": "Finding updated",
         "finding_deleted": "Finding deleted",

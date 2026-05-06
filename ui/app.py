@@ -774,7 +774,7 @@ class App(QWidget):
         self.projects_info.setReadOnly(True)
         self.projects_info.setPlaceholderText("Select a project to see details.")
 
-        self.lbl_recent = QLabel("Recent datasets:")
+        self.lbl_recent = QLabel("Recent JSON datasets:")
         self.recent_list = QListWidget()
 
         recent_btn_row = QHBoxLayout()
@@ -811,7 +811,7 @@ class App(QWidget):
         self.case_metric_cards = []
         case_metrics = QHBoxLayout()
         case_metrics.setSpacing(8)
-        for title in ("Datasets", "PCAP", "Findings", "Device IPs"):
+        for title in ("JSON Datasets", "PCAP", "Findings", "Device IPs"):
             card = QLabel(f"{title}: 0")
             card.setObjectName("CaseMetricCompact")
             card.setAlignment(Qt.AlignCenter)

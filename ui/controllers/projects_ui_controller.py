@@ -370,7 +370,7 @@ class ProjectsUIController:
         paths = list_recent_datasets(project_id, limit=15)
 
         if not paths:
-            self.app.recent_list.addItem(QListWidgetItem("(no datasets yet)"))
+            self.app.recent_list.addItem(QListWidgetItem("(no JSON datasets yet)"))
             return
 
         for fp in paths:
@@ -395,7 +395,7 @@ class ProjectsUIController:
         if project_id is None:
             self.app.lbl_case_dashboard_title.setText("Case Dashboard")
             self.app.lbl_case_dashboard_subject.setText("Select a project to see case context.")
-            for idx, title in enumerate(("Datasets", "PCAP", "Findings", "Device IPs")):
+            for idx, title in enumerate(("JSON Datasets", "PCAP", "Findings", "Device IPs")):
                 self.app.case_metric_cards[idx].setText(f"{title}: 0")
             self.app.lbl_case_dashboard_warnings.setText("")
             return
@@ -414,7 +414,7 @@ class ProjectsUIController:
         )
 
         values = [
-            ("Datasets", profile.get("dataset_count", 0)),
+            ("JSON Datasets", profile.get("dataset_count", 0)),
             ("PCAP", profile.get("pcap_count", 0)),
             ("Findings", profile.get("finding_count", 0)),
             ("Device IPs", len(profile.get("pcap_device_ips") or {})),
@@ -448,7 +448,7 @@ class ProjectsUIController:
 
     def activity_label(self, event_type: str, message: str = "") -> str:
         labels = {
-            "dataset_loaded": "Dataset loaded",
+            "dataset_loaded": "JSON dataset loaded",
             "pcap_saved": "PCAP saved",
             "pcap_notes_added": "PCAP notes added",
             "finding_created": "Finding created",

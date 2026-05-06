@@ -261,8 +261,8 @@ class BehaviorProfileTests(unittest.TestCase):
                 "summary_lines": ["Project Activity Profile", "- Case subject: Ana Horvat"],
                 "recommendation_lines": ["- Compare JSON and PCAP evidence."],
                 "timeline_lines": ["- 2026-01-04 09:00:00: Dataset loaded"],
-                "metrics": [{"label": "Datasets", "value": 1}],
-                "evidence_counts": [{"label": "Datasets", "count": 1}],
+                "metrics": [{"label": "JSON Datasets", "value": 1}],
+                "evidence_counts": [{"label": "JSON Datasets", "count": 1}],
                 "pcap_device_ip_rows": [{"label": "10.0.0.10", "count": 1}],
                 "capture_range": {"label": "04/01/2026 09:00:00.000"},
                 "total_pcap_bytes_label": "86.10 MB",
@@ -800,12 +800,12 @@ class PcapAnalyzerTests(unittest.TestCase):
         self.assertEqual(profile["finding_count"], 1)
         self.assertEqual(profile["pcap_device_ips"], {"10.0.0.10": 1})
         self.assertEqual(profile["evidence_counts"], [
-            {"label": "Datasets", "count": 1},
+            {"label": "JSON Datasets", "count": 1},
             {"label": "PCAP Sources", "count": 1},
             {"label": "Findings", "count": 1},
         ])
         self.assertEqual(profile["pcap_device_ip_rows"], [{"label": "10.0.0.10", "count": 1}])
-        self.assertTrue(any(row["label"] == "Dataset loaded" for row in profile["activity_type_rows"]))
+        self.assertTrue(any(row["label"] == "JSON dataset loaded" for row in profile["activity_type_rows"]))
         self.assertTrue(any(row["label"] == "PCAP saved" for row in profile["activity_type_rows"]))
         self.assertTrue(profile["capture_range"]["first_seen"])
         self.assertTrue(profile["capture_range"]["last_seen"])
@@ -933,7 +933,7 @@ class AIServiceTests(unittest.TestCase):
         profile = {
             "summary_lines": ["Project Activity Profile", "- Target: MSISDN / 123"],
             "evidence_counts": [
-                {"label": "Datasets", "count": 2},
+                {"label": "JSON Datasets", "count": 2},
                 {"label": "PCAP Sources", "count": 1},
             ],
             "pcap_device_ip_rows": [{"label": "10.0.0.10", "count": 1}],
@@ -971,7 +971,7 @@ class AIServiceTests(unittest.TestCase):
 
         profile = {
             "summary_lines": ["Project Activity Profile"],
-            "evidence_counts": [{"label": "Datasets", "count": 1}],
+            "evidence_counts": [{"label": "JSON Datasets", "count": 1}],
             "recommendation_lines": ["- Review saved findings."],
         }
         service = AIAssistantService(AISettings(base_url="http://ai.local", model="m", timeout_seconds=7))

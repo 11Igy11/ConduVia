@@ -162,7 +162,8 @@ def _safe_float(value: Any) -> float:
 
 def _metric_label(label: str, text: dict[str, str]) -> str:
     return {
-        "Datasets": text["datasets"],
+        "Datasets": text["json_datasets"],
+        "JSON Datasets": text["json_datasets"],
         "PCAP Sources": text["pcap_sources"],
         "Findings": text["findings"],
         "Device IPs": text["device_ips"],
@@ -191,7 +192,8 @@ def _report_text(language: str) -> dict[str, str]:
             "activity_rhythm": "Ritam aktivnosti",
             "next_review": "Sljedeca provjera",
             "recent_project_timeline": "Nedavna vremenska crta projekta",
-            "datasets": "Datasetovi",
+            "datasets": "JSON datasetovi",
+            "json_datasets": "JSON datasetovi",
             "pcap_sources": "PCAP izvori",
             "findings": "Nalazi",
             "device_ips": "IP adrese uredaja",
@@ -220,7 +222,8 @@ def _report_text(language: str) -> dict[str, str]:
         "activity_rhythm": "Activity Rhythm",
         "next_review": "Next Review",
         "recent_project_timeline": "Recent Project Timeline",
-        "datasets": "Datasets",
+        "datasets": "JSON Datasets",
+        "json_datasets": "JSON Datasets",
         "pcap_sources": "PCAP Sources",
         "findings": "Findings",
         "device_ips": "Device IPs",
