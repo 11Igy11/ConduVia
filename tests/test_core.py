@@ -48,7 +48,7 @@ from core.loader import list_json_files, load_folder, load_json_file
 from core.parser import extract_dataset_meta
 from core.pcap_analyzer import analyze_pcap, build_communication_rows, build_investigator_view
 from core.project_datasets import load_project_dataset_flows
-from core.project_identity import identifier_values_match, normalize_identifier_value
+from core.project_identity import identifier_values_match, is_valid_oib, normalize_identifier_value
 from core.project_profile import build_project_activity_profile, format_project_activity_profile
 from core.protocols import describe_ip_proto, format_ip_proto_with_description
 from core.timeutils import LOCAL_TZ, parse_timestamp
@@ -515,6 +515,13 @@ class ProjectTargetTests(unittest.TestCase):
         self.assertEqual(project.subject_imei, "356789012345678")
         self.assertEqual(project.subject_ip, "10.0.0.10")
         self.assertIn("ana@example.test", project.subject_extra_identifiers)
+
+    def test_oib_validation_checks_length_digits_and_control_number(self):
+        self.assertTrue(is_valid_oib("61154777813"))
+        self.assertTrue(is_valid_oib("611 547 77813"))
+        self.assertFalse(is_valid_oib("61154777812"))
+        self.assertFalse(is_valid_oib("6115477781"))
+        self.assertFalse(is_valid_oib("6115477781A"))
 
     def test_identifier_matching_tolerates_phone_formatting_and_dataset_aliases(self):
         self.assertEqual(normalize_identifier_value("+385 91 123-4567", "MSISDN"), "385911234567")

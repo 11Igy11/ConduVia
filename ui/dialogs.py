@@ -11,9 +11,12 @@ from PySide6.QtWidgets import (
     QComboBox,
     QPlainTextEdit,
     QFileDialog,
+    QMessageBox,
     QScrollArea,
     QWidget,
 )
+
+from core.project_identity import is_valid_oib
 
 
 def message_dialog(
@@ -355,7 +358,19 @@ def project_details_dialog(
     btn_cancel.setFixedHeight(36)
     btn_ok.setMinimumWidth(110)
     btn_cancel.setMinimumWidth(110)
-    buttons.accepted.connect(dlg.accept)
+
+    def accept_project_details() -> None:
+        oib = fields["oib"].text().strip()
+        if oib and not is_valid_oib(oib):
+            QMessageBox.warning(
+                dlg,
+                "Invalid OIB",
+                "OIB must contain 11 digits and pass the Croatian control number check.",
+            )
+            return
+        dlg.accept()
+
+    buttons.accepted.connect(accept_project_details)
     buttons.rejected.connect(dlg.reject)
     layout.addWidget(buttons)
 

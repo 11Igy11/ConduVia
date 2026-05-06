@@ -97,6 +97,26 @@ def normalize_identifier_value(value: str, identifier_type: str = "") -> str:
     return raw.casefold()
 
 
+def normalize_oib(value: str) -> str:
+    return "".join(ch for ch in str(value or "") if ch.isdigit())
+
+
+def is_valid_oib(value: str) -> bool:
+    digits = normalize_oib(value)
+    if len(digits) != 11:
+        return False
+
+    carry = 10
+    for ch in digits[:10]:
+        carry = (carry + int(ch)) % 10
+        if carry == 0:
+            carry = 10
+        carry = (carry * 2) % 11
+
+    control = (11 - carry) % 10
+    return control == int(digits[-1])
+
+
 def identifier_values_match(
     project_value: str,
     dataset_value: str,
