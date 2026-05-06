@@ -31,7 +31,6 @@ from ui.dialogs import (
     multiline_input_dialog,
     item_choice_dialog,
     confirm_dialog,
-    ai_settings_dialog,
 )
 from PySide6.QtCore import Qt, QTimer, QThread
 from PySide6.QtGui import QGuiApplication, QIcon, QFont, QPixmap
@@ -48,7 +47,7 @@ from core.db import (
     init_db, add_finding, get_finding,
     update_finding, delete_finding,
     add_activity, get_project,
-    get_app_settings, set_app_setting,
+    get_app_settings,
 )
 # ---------- helpers ----------
 def is_private_ip(ip: str) -> bool:
@@ -481,7 +480,6 @@ class App(QWidget):
         self.btn_load.clicked.connect(self.dataset_controller.load_dataset_dialog)
         self.btn_ai_summary.clicked.connect(self.explore_ui_controller.generate_ai_summary)
         self.btn_add_ai_to_notes.clicked.connect(self.add_ai_summary_to_notes)
-        self.btn_ai_settings.clicked.connect(lambda: self.go_page(self.IDX_SETTINGS, self._nav_settings))
         self.btn_toggle_conv.clicked.connect(self.explore_ui_controller.toggle_conversation)
         self.btn_expand_flows.clicked.connect(self.explore_ui_controller.toggle_flows_expanded)
         self.btn_mark_finding.clicked.connect(self.mark_as_finding)
@@ -956,14 +954,12 @@ class App(QWidget):
 
         self.btn_ai_summary = QPushButton("Generate AI Summary")
         self.btn_add_ai_to_notes = QPushButton("Add AI to Notes")
-        self.btn_ai_settings = QPushButton("AI Settings")
         self.btn_add_ai_to_notes.setEnabled(True)
 
         summary_btn_row = QHBoxLayout()
         summary_btn_row.setSpacing(8)
         summary_btn_row.addWidget(self.btn_ai_summary)
         summary_btn_row.addWidget(self.btn_add_ai_to_notes)
-        summary_btn_row.addWidget(self.btn_ai_settings)
         summary_btn_row.addStretch()
 
         summary_layout.addLayout(summary_btn_row)
@@ -1377,11 +1373,9 @@ class App(QWidget):
         self.lbl_ai_hub_title.setObjectName("HeaderProjectLabel")
         self.btn_ai_hub_add_notes = QPushButton("Add to Notes")
         self.btn_ai_hub_add_notes.setEnabled(False)
-        self.btn_ai_hub_settings = QPushButton("AI Settings")
         ai_title_row.addWidget(self.lbl_ai_hub_title)
         ai_title_row.addStretch()
         ai_title_row.addWidget(self.btn_ai_hub_add_notes)
-        ai_title_row.addWidget(self.btn_ai_hub_settings)
 
         self.lbl_ai_hub_context = QLabel("Generate an AI result from JSON, PCAP or Profile to see it here.")
         self.lbl_ai_hub_context.setObjectName("Muted")
@@ -1397,7 +1391,6 @@ class App(QWidget):
         ai_root.addWidget(self.txt_ai_hub, 1)
 
         self.btn_ai_hub_add_notes.clicked.connect(self.add_ai_hub_to_notes)
-        self.btn_ai_hub_settings.clicked.connect(lambda: self.go_page(self.IDX_SETTINGS, self._nav_settings))
 
         # Explore layout
         explore_layout.addWidget(header_card)
@@ -1948,31 +1941,6 @@ class App(QWidget):
             return
 
         self.add_ai_text_to_notes(text)
-
-    def configure_ai_settings(self):
-        current = self.ai_service.settings
-        values, ok = ai_settings_dialog(
-            self,
-            base_url=current.base_url,
-            model=current.model,
-            timeout_seconds=current.timeout_seconds,
-            width=480,
-        )
-
-        if not ok or not values:
-            return
-
-        values["output_language"] = getattr(current, "output_language", "hr")
-        self.ai_service.update_settings(AISettings(**values))
-        for key, value in self.ai_service.settings.to_mapping().items():
-            set_app_setting(key, value)
-
-        self._message_dialog(
-            "AI Settings",
-            "AI settings updated.",
-            f"Base URL: {values['base_url']}\nModel: {values['model']}\nTimeout: {values['timeout_seconds']} seconds",
-            width=520,
-        )
 
     # ---------- Notes ----------
     def refresh_notes_ui(self):
