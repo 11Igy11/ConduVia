@@ -206,8 +206,12 @@ class PcapPage(QWidget):
         root.addWidget(header)
 
         self.tabs = QTabWidget()
-        self.tabs.addTab(self._build_summary_section(), "Summary")
+        self.tabs.addTab(self._build_investigator_tab(), "Summary")
+        self.tabs.addTab(self._build_highlights_tab(), "Communications")
         self.tabs.addTab(self._build_evidence_section(), "Evidence")
+        self.tabs.addTab(self._build_network_section(), "Network")
+        self.ai_summary_tab = self._build_ai_tab()
+        self.tabs.addTab(self.ai_summary_tab, "AI Summary")
         root.addWidget(self.tabs, 1)
 
         self.btn_open.clicked.connect(self.open_pcap_dialog)
@@ -240,8 +244,19 @@ class PcapPage(QWidget):
         self.evidence_tabs = QTabWidget()
         self.evidence_tabs.addTab(self._build_evidence_tab(), "Evidence")
         self.evidence_tabs.addTab(self._build_artifacts_tab(), "Artifacts")
-        self.evidence_tabs.addTab(self._build_connections_tab(), "Connections")
         layout.addWidget(self.evidence_tabs)
+        return page
+
+    def _build_network_section(self) -> QWidget:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
+        self.network_tabs = QTabWidget()
+        self.network_tabs.addTab(self._build_overview_tab(), "Overview")
+        self.network_tabs.addTab(self._build_connections_tab(), "Connections")
+        layout.addWidget(self.network_tabs)
         return page
 
     def _build_highlights_tab(self) -> QWidget:
@@ -295,18 +310,13 @@ class PcapPage(QWidget):
             indicators_toolbar.addWidget(self.btn_expand_communications)
             indicators_layout.insertLayout(0, indicators_toolbar)
 
-        detail_splitter = QSplitter(Qt.Horizontal)
-        detail_splitter.addWidget(indicators_group)
-        detail_splitter.addWidget(self._group("Selected indicator evidence", self.txt_communication_detail))
-        detail_splitter.setStretchFactor(0, 4)
-        detail_splitter.setStretchFactor(1, 2)
-        detail_splitter.setCollapsible(0, False)
-        detail_splitter.setCollapsible(1, False)
-
         brief_group = self._group("Investigation brief", self.lbl_highlights_brief)
         brief_group.setMaximumHeight(145)
+        detail_group = self._group("Selected indicator evidence", self.txt_communication_detail)
+        detail_group.setMaximumHeight(170)
         layout.addWidget(brief_group)
-        layout.addWidget(detail_splitter, 1)
+        layout.addWidget(indicators_group, 1)
+        layout.addWidget(detail_group)
 
         return page
 
@@ -928,9 +938,8 @@ class PcapPage(QWidget):
         self.btn_ai_summary.setEnabled(False)
         self.btn_ai_summary.setText("Generating...")
         self.txt_pcap_ai_summary.setPlainText("Generating PCAP AI summary...")
-        self.tabs.setCurrentIndex(0)
-        if hasattr(self, "summary_tabs") and hasattr(self, "ai_summary_tab"):
-            self.summary_tabs.setCurrentWidget(self.ai_summary_tab)
+        if hasattr(self, "ai_summary_tab"):
+            self.tabs.setCurrentWidget(self.ai_summary_tab)
 
         project_name = getattr(self.app, "current_project_name", "") or ""
         self._ai_thread = QThread()
