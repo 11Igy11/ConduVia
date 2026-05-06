@@ -9,6 +9,7 @@ from PySide6.QtCore import QAbstractTableModel, QModelIndex, QObject, QThread, Q
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QComboBox,
+    QDialog,
     QFileDialog,
     QFrame,
     QGridLayout,
@@ -245,7 +246,7 @@ class PcapPage(QWidget):
         self.lbl_highlights_brief.setWordWrap(True)
         self.lbl_highlights_brief.setTextInteractionFlags(Qt.TextSelectableByMouse)
 
-        self.tbl_communications = self._table([
+        self.communication_columns = [
             ("service", "Service"),
             ("activity_type", "Indicator"),
             ("confidence", "Confidence"),
@@ -255,7 +256,13 @@ class PcapPage(QWidget):
             ("packets", "Packets"),
             ("duration_ms", "Duration"),
             ("first_seen", "First Seen"),
-        ], fixed_widths={0: 170, 2: 92, 4: 78, 5: 92, 6: 82, 7: 96, 8: 178}, stretch_columns=[1, 3])
+        ]
+        self.communication_fixed_widths = {0: 170, 2: 92, 4: 78, 5: 92, 6: 82, 7: 96, 8: 178}
+        self.tbl_communications = self._table(
+            self.communication_columns,
+            fixed_widths=self.communication_fixed_widths,
+            stretch_columns=[1, 3],
+        )
         self.tbl_communications.setMinimumHeight(420)
         self.tbl_communications.setWordWrap(True)
         self.tbl_communications.verticalHeader().setDefaultSectionSize(40)
@@ -267,8 +274,20 @@ class PcapPage(QWidget):
         self.txt_communication_detail.setMinimumWidth(360)
         self.txt_communication_detail.setPlaceholderText("Select a communication indicator to see the evidence used for classification.")
 
+        indicators_group = self._group("Communication indicators", self.tbl_communications)
+        self.btn_expand_communications = QPushButton("Expand table")
+        self.btn_expand_communications.setFixedHeight(34)
+        self.btn_expand_communications.clicked.connect(self._open_communications_dialog)
+
+        indicators_layout = indicators_group.layout()
+        if indicators_layout is not None:
+            indicators_toolbar = QHBoxLayout()
+            indicators_toolbar.addStretch()
+            indicators_toolbar.addWidget(self.btn_expand_communications)
+            indicators_layout.insertLayout(0, indicators_toolbar)
+
         detail_splitter = QSplitter(Qt.Horizontal)
-        detail_splitter.addWidget(self._group("Communication indicators", self.tbl_communications))
+        detail_splitter.addWidget(indicators_group)
         detail_splitter.addWidget(self._group("Selected indicator evidence", self.txt_communication_detail))
         detail_splitter.setStretchFactor(0, 4)
         detail_splitter.setStretchFactor(1, 2)
@@ -693,6 +712,45 @@ class PcapPage(QWidget):
             "This is a metadata-based indicator. It does not prove message content or confirm a call by itself.",
         ]
         self.txt_communication_detail.setPlainText("\n".join(lines))
+
+    def _open_communications_dialog(self) -> None:
+        model = self.tbl_communications.model()
+        if not isinstance(model, DictTableModel) or not model.rows:
+            QMessageBox.information(self, "Communication indicators", "No communication indicators are loaded.")
+            return
+
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Communication indicators")
+        dlg.resize(1280, 760)
+
+        layout = QVBoxLayout(dlg)
+        layout.setContentsMargins(14, 14, 14, 14)
+        layout.setSpacing(10)
+
+        hint = QLabel("Metadata-based communication indicators. Sort columns, select rows, or right-click to copy values.")
+        hint.setObjectName("MutedLabel")
+        hint.setWordWrap(True)
+        layout.addWidget(hint)
+
+        table = self._table(
+            self.communication_columns,
+            fixed_widths=self.communication_fixed_widths,
+            stretch_columns=[1, 3],
+        )
+        table.setMinimumHeight(560)
+        table.verticalHeader().setDefaultSectionSize(42)
+        self._set_table(table, list(model.rows))
+        layout.addWidget(table, 1)
+
+        footer = QHBoxLayout()
+        footer.addStretch()
+        btn_close = QPushButton("Close")
+        btn_close.setFixedHeight(34)
+        btn_close.clicked.connect(dlg.accept)
+        footer.addWidget(btn_close)
+        layout.addLayout(footer)
+
+        dlg.exec()
 
     def _on_error(self, message: str):
         QMessageBox.critical(self, "PCAP analysis failed", message)
