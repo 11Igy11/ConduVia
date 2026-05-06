@@ -36,6 +36,7 @@ from core.formatters import (
     format_flow_date,
     format_flow_datetime,
     format_flow_time,
+    format_pcap_datetime,
     format_short_date,
     human_bytes,
     safe_int,
@@ -122,6 +123,7 @@ class TimeAndFormatterTests(unittest.TestCase):
         self.assertEqual(format_flow_date("2024-05-28 22:01:02"), "28.05.2024")
         self.assertEqual(format_flow_time("2024-05-28 22:01:02"), "22:01:02")
         self.assertEqual(format_flow_datetime("2024-05-28 22:01:02.123456", milliseconds=True), "28.05.2024 22:01:02.123")
+        self.assertEqual(format_pcap_datetime("2024-05-28 22:01:02.123456"), "28/05/2024 22:01:02.123")
 
     def test_short_date_converts_offset_timestamp_to_local_date(self):
         self.assertEqual(format_short_date("2024-05-28T22:00:00.000+00:00"), "29.05.2024.")

@@ -29,7 +29,7 @@ from PySide6.QtWidgets import (
 )
 
 from core.exporters.pcap_exporter import export_pcap_summary_html
-from core.formatters import format_duration_compact_ms, human_bytes
+from core.formatters import format_duration_compact_ms, format_pcap_datetime, human_bytes
 from core.pcap_analyzer import PcapSummary, analyze_pcap, build_investigator_view
 from core.protocols import format_ip_proto
 from core.workspace import workspace_export_path
@@ -133,6 +133,15 @@ class DictTableModel(QAbstractTableModel):
             return human_bytes(value, precision=2)
         if key in ("bidirectional_duration_ms", "duration_ms"):
             return format_duration_compact_ms(value)
+        if key in {
+            "time",
+            "hour",
+            "first_seen",
+            "last_seen",
+            "bidirectional_first_seen_ms",
+            "bidirectional_last_seen_ms",
+        }:
+            return format_pcap_datetime(value)
         if key == "share":
             try:
                 return f"{float(value):.1f}%"
@@ -620,6 +629,13 @@ class PcapPage(QWidget):
         layout.addWidget(widget)
         return group
 
+    def _format_pcap_time(self, value: Any) -> str:
+        text = format_pcap_datetime(value)
+        return text or "-"
+
+    def _format_pcap_range(self, start: Any, end: Any) -> str:
+        return f"{self._format_pcap_time(start)} - {self._format_pcap_time(end)}"
+
     def open_pcap_dialog(self):
         file_path, _ = QFileDialog.getOpenFileName(
             self,
@@ -670,7 +686,7 @@ class PcapPage(QWidget):
         self.lbl_stats.setText(
             f"{summary.format} | Packets: {summary.packet_count:,} | "
             f"Volume: {human_bytes(summary.wire_bytes, precision=2)} | "
-            f"Period: {summary.first_seen or '-'} - {summary.last_seen or '-'}"
+            f"Period: {self._format_pcap_range(summary.first_seen, summary.last_seen)}"
         )
         investigator = build_investigator_view(summary)
         self._set_highlights(summary)
@@ -735,8 +751,8 @@ class PcapPage(QWidget):
             f"Volume: {human_bytes(row.get('bytes'), precision=2)}",
             f"Packets: {row.get('packets') or 0}",
             f"Duration: {format_duration_compact_ms(row.get('duration_ms'))}",
-            f"First seen: {row.get('first_seen') or '-'}",
-            f"Last seen: {row.get('last_seen') or '-'}",
+            f"First seen: {self._format_pcap_time(row.get('first_seen'))}",
+            f"Last seen: {self._format_pcap_time(row.get('last_seen'))}",
             "",
             "Evidence:",
             str(row.get("evidence") or "-"),
@@ -852,8 +868,8 @@ class PcapPage(QWidget):
             "",
             f"Source: {artifact.get('source') or '-'}",
             f"Destination: {artifact.get('destination') or '-'}",
-            f"First seen: {artifact.get('first_seen') or '-'}",
-            f"Last seen: {artifact.get('last_seen') or '-'}",
+            f"First seen: {self._format_pcap_time(artifact.get('first_seen'))}",
+            f"Last seen: {self._format_pcap_time(artifact.get('last_seen'))}",
             "",
             "Meaning:",
             str(artifact.get("explanation") or "-"),
@@ -874,7 +890,7 @@ class PcapPage(QWidget):
             f"Format: {summary.format}",
             f"Packets: {summary.packet_count:,}",
             f"Traffic volume: {human_bytes(summary.wire_bytes, precision=2)}",
-            f"Capture period: {summary.first_seen or '-'} - {summary.last_seen or '-'}",
+            f"Capture period: {self._format_pcap_range(summary.first_seen, summary.last_seen)}",
             f"Device IP: {summary.likely_device_ip or '-'}",
             "",
             "What is visible:",
@@ -1082,7 +1098,7 @@ class PcapPage(QWidget):
             f"File: {self.summary.file_name}",
             f"Source: {self.summary.file_path}",
             f"Device IP: {self.summary.likely_device_ip or '-'}",
-            f"Capture period: {self.summary.first_seen or '-'} - {self.summary.last_seen or '-'}",
+            f"Capture period: {self._format_pcap_range(self.summary.first_seen, self.summary.last_seen)}",
             f"Packets: {self.summary.packet_count:,}",
             f"Volume: {human_bytes(self.summary.wire_bytes, precision=2)}",
             "",
