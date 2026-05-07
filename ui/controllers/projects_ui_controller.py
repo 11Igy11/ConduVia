@@ -11,6 +11,7 @@ from core.db import (
     list_recent_datasets,
     list_pcap_sources,
     list_activity,
+    touch_project,
     update_project,
 )
 from core.formatters import format_pcap_datetime, human_bytes
@@ -48,6 +49,12 @@ class ProjectsUIController:
         self.refresh_case_dashboard(None)
         self.app.refresh_activity_profile_ui()
         self.app.refresh_activity_ui_for_project(None)
+
+    def _short_text(self, value: str, limit: int = 54) -> str:
+        text = (value or "").strip()
+        if len(text) <= limit:
+            return text
+        return text[: max(0, limit - 3)] + "..."
 
     def create_project_dialog(self):
         values, ok = project_details_dialog(
@@ -173,6 +180,13 @@ class ProjectsUIController:
             return
         pid = int(item.data(Qt.UserRole))
         self.set_active_project(pid)
+        self.refresh_projects()
+        for idx in range(self.app.projects_list.count()):
+            refreshed_item = self.app.projects_list.item(idx)
+            if int(refreshed_item.data(Qt.UserRole)) == pid:
+                self.app.projects_list.setCurrentItem(refreshed_item)
+                break
+        self.on_project_selected_preview()
 
     def delete_selected_project(self):
         item = self.app.projects_list.currentItem()
@@ -355,6 +369,7 @@ class ProjectsUIController:
             self.app.refresh_activity_profile_ui()
 
     def set_active_project(self, project_id: int):
+        touch_project(project_id)
         p = get_project(project_id)
         if not p:
             self.app._message_dialog("Project", "Project not found.", width=400)
@@ -482,7 +497,7 @@ class ProjectsUIController:
         if hasattr(self.app, "lbl_recent_json_count"):
             self.app.lbl_recent_json_count.setText(f"{json_count:,} JSON datasets")
             if json_count:
-                newest = self.app.project_recent_json_rows[0].get("name") or "-"
+                newest = self._short_text(self.app.project_recent_json_rows[0].get("name") or "-")
                 self.app.lbl_recent_json_detail.setText(f"Most recent: {newest}")
             else:
                 self.app.lbl_recent_json_detail.setText("No JSON datasets saved for this project.")
@@ -490,7 +505,7 @@ class ProjectsUIController:
         if hasattr(self.app, "lbl_recent_pcap_count"):
             self.app.lbl_recent_pcap_count.setText(f"{pcap_count:,} PCAP datasets")
             if pcap_count:
-                newest = self.app.project_recent_pcap_rows[0].get("name") or "-"
+                newest = self._short_text(self.app.project_recent_pcap_rows[0].get("name") or "-")
                 self.app.lbl_recent_pcap_detail.setText(f"Most recent: {newest}")
             else:
                 self.app.lbl_recent_pcap_detail.setText("No PCAP sources saved for this project.")
@@ -498,7 +513,7 @@ class ProjectsUIController:
         if hasattr(self.app, "lbl_recent_activity_count"):
             self.app.lbl_recent_activity_count.setText(f"{activity_count:,} events")
             if activity_count:
-                newest = self.app.project_activity_rows[0].get("event") or "-"
+                newest = self._short_text(self.app.project_activity_rows[0].get("event") or "-")
                 self.app.lbl_recent_activity_detail.setText(f"Latest: {newest}")
             else:
                 self.app.lbl_recent_activity_detail.setText("No project activity yet.")
@@ -609,5 +624,7 @@ class ProjectsUIController:
         opened = self.app.dataset_controller.load_dataset_dialog()
         if opened == "json":
             self.app.go_to_json_tab(0)
+        elif opened == "pcap":
+            self.app.go_page(self.app.IDX_PCAP, self.app._nav_pcap)
 
     

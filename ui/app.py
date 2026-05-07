@@ -10,7 +10,7 @@ from ui.settings_page import SettingsPage
 import html
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 from core.protocols import format_ip_proto
 from core.workspace import write_project_notes_backup
 from ui.controllers.flow_controller import FlowController
@@ -764,12 +764,14 @@ class App(QWidget):
 
         self.btn_new_project = QPushButton("New project")
         self.btn_open_project = QPushButton("Open project")
+        self.btn_open_new_dataset = QPushButton("Open dataset")
         self.btn_edit_project = QPushButton("Edit project")
         self.btn_refresh_projects = QPushButton("Refresh")
         self.btn_delete_project = QPushButton("Delete selected")
 
         btn_row.addWidget(self.btn_new_project)
         btn_row.addWidget(self.btn_open_project)
+        btn_row.addWidget(self.btn_open_new_dataset)
         btn_row.addWidget(self.btn_edit_project)
         btn_row.addWidget(self.btn_refresh_projects)
         btn_row.addWidget(self.btn_delete_project)
@@ -787,7 +789,6 @@ class App(QWidget):
 
         self.btn_open_dataset = QPushButton("Open selected")
         self.btn_open_dataset.hide()
-        self.btn_open_new_dataset = QPushButton("Open new dataset")
         self.btn_expand_json_datasets = QPushButton("Open JSON list")
         self.btn_expand_pcap_datasets = QPushButton("Open PCAP list")
         self.btn_expand_project_activity = QPushButton("Open activity log")
@@ -804,6 +805,7 @@ class App(QWidget):
                     ("path", "Path"),
                 ],
                 self.project_recent_json_rows,
+                on_double_click=self._open_json_dataset_row,
             )
         )
         self.btn_expand_pcap_datasets.clicked.connect(
@@ -818,6 +820,7 @@ class App(QWidget):
                     ("path", "Path"),
                 ],
                 self.project_recent_pcap_rows,
+                on_double_click=self._open_pcap_dataset_row,
             )
         )
         self.btn_expand_project_activity.clicked.connect(
@@ -922,7 +925,7 @@ class App(QWidget):
                 "Unique JSON files or folders saved to the active project.",
                 self.lbl_recent_json_count,
                 self.lbl_recent_json_detail,
-                [self.btn_expand_json_datasets, self.btn_open_new_dataset],
+                [self.btn_expand_json_datasets],
             ),
             0,
             0,
@@ -1570,12 +1573,15 @@ class App(QWidget):
         lbl_title.setTextInteractionFlags(Qt.TextSelectableByMouse)
         lbl_description = QLabel(description)
         lbl_description.setObjectName("Muted")
-        lbl_description.setWordWrap(True)
+        lbl_description.setWordWrap(False)
+        lbl_description.setMaximumHeight(24)
         lbl_description.setTextInteractionFlags(Qt.TextSelectableByMouse)
 
         layout.addWidget(lbl_title)
         layout.addWidget(lbl_description)
         layout.addWidget(count_label)
+        detail_label.setWordWrap(False)
+        detail_label.setMaximumHeight(24)
         layout.addWidget(detail_label)
         layout.addStretch()
 
@@ -1591,6 +1597,7 @@ class App(QWidget):
         title: str,
         columns: list[tuple[str, str]],
         rows: list[dict[str, Any]],
+        on_double_click: Callable[[dict[str, Any], QDialog], None] | None = None,
     ) -> None:
         if not rows:
             self._message_dialog(title, "No rows are loaded.", width=380)
@@ -1628,6 +1635,17 @@ class App(QWidget):
         table.setMinimumHeight(480)
         table.horizontalHeader().setSectionResizeMode(QHeaderView.Interactive)
 
+        if on_double_click is not None:
+            def handle_double_click(index):
+                model = table.model()
+                if not isinstance(model, DictTableModel) or not index.isValid():
+                    return
+                row_idx = index.row()
+                if 0 <= row_idx < len(model.rows):
+                    on_double_click(model.rows[row_idx], dlg)
+
+            table.doubleClicked.connect(handle_double_click)
+
         for idx, (key, label) in enumerate(columns):
             name = f"{key} {label}".lower()
             width = 140
@@ -1651,6 +1669,30 @@ class App(QWidget):
         footer.addWidget(btn_close)
         layout.addLayout(footer)
         dlg.exec()
+
+    def _open_json_dataset_row(self, row: dict[str, Any], dialog: QDialog) -> None:
+        path_text = str(row.get("path") or "")
+        path = Path(path_text)
+        if not path_text or not path.exists():
+            self._message_dialog("JSON dataset", "Path not found.", path_text or "-", width=460)
+            return
+        dialog.accept()
+        if path.is_file():
+            self.dataset_controller.load_dataset_file(str(path))
+        elif path.is_dir():
+            self.dataset_controller.load_dataset_path(str(path))
+        self.go_to_json_tab(0)
+
+    def _open_pcap_dataset_row(self, row: dict[str, Any], dialog: QDialog) -> None:
+        path_text = str(row.get("path") or "")
+        path = Path(path_text)
+        if not path_text or not path.is_file():
+            self._message_dialog("PCAP dataset", "PCAP file not found.", path_text or "-", width=460)
+            return
+        dialog.accept()
+        self.go_page(self.IDX_PCAP, self._nav_pcap)
+        if hasattr(self, "pcap_page"):
+            self.pcap_page.load_pcap(str(path))
 
     def refresh_activity_profile_ui(self):
         if hasattr(self, "activity_profile_page"):
