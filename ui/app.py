@@ -827,8 +827,8 @@ class App(QWidget):
             lambda: self._open_project_rows_dialog(
                 "Recent activity",
                 [
-                    ("created_at", "Time"),
                     ("event", "Event"),
+                    ("created_at", "Time"),
                     ("detail", "Detail"),
                 ],
                 self.project_activity_rows,
@@ -1649,12 +1649,16 @@ class App(QWidget):
         for idx, (key, label) in enumerate(columns):
             name = f"{key} {label}".lower()
             width = 140
-            if "path" in name or "detail" in name:
-                width = 420
+            if "detail" in name:
+                width = 620
+            elif "path" in name:
+                width = 520
+            elif "event" in name:
+                width = 320
             elif "period" in name:
                 width = 300
             elif "time" in name or "created" in name:
-                width = 190
+                width = 220
             elif "name" in name:
                 width = 260
             table.setColumnWidth(idx, width)

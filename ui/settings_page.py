@@ -56,9 +56,11 @@ class SettingsPage(QWidget):
         self.edit_ai_model.setPlaceholderText("llama3")
         self.edit_ai_timeout = QLineEdit()
         self.edit_ai_timeout.setPlaceholderText("600")
-        self.edit_ai_url.setFixedWidth(620)
-        self.edit_ai_model.setFixedWidth(620)
-        self.edit_ai_timeout.setFixedWidth(260)
+        standard_width = 360
+        compact_width = 130
+        self.edit_ai_url.setFixedWidth(standard_width)
+        self.edit_ai_model.setFixedWidth(standard_width)
+        self.edit_ai_timeout.setFixedWidth(compact_width)
 
         for label, edit in (
             ("Base URL", self.edit_ai_url),
@@ -88,7 +90,7 @@ class SettingsPage(QWidget):
         self.cmb_output_language = QComboBox()
         self.cmb_output_language.addItem("Croatian", "hr")
         self.cmb_output_language.addItem("English", "en")
-        self.cmb_output_language.setFixedWidth(260)
+        self.cmb_output_language.setFixedWidth(compact_width)
 
         language_row = QHBoxLayout()
         language_label = QLabel("Report / AI language")
@@ -113,7 +115,7 @@ class SettingsPage(QWidget):
         self.cmb_theme = QComboBox()
         self.cmb_theme.addItem("Dark", "dark")
         self.cmb_theme.addItem("Light", "light")
-        self.cmb_theme.setFixedWidth(260)
+        self.cmb_theme.setFixedWidth(compact_width)
 
         theme_row = QHBoxLayout()
         theme_label = QLabel("Theme")
