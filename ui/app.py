@@ -408,7 +408,7 @@ class App(QWidget):
         self.btn_nav_notes = QPushButton("Notes")
         self.btn_nav_ai = QPushButton("AI")
         self.btn_nav_json = QPushButton("JSON")
-        self.btn_global_refresh = QPushButton("Refresh")
+        self.btn_global_refresh = QPushButton("Refresh All")
         self.btn_nav_pcap = QPushButton("PCAP")
         self.btn_nav_settings = QPushButton("Settings")
         self.btn_nav_help = QPushButton("Help")
@@ -426,6 +426,7 @@ class App(QWidget):
         ):
             b.setObjectName("NavButton")
             b.setFixedHeight(40)
+        self.btn_global_refresh.setToolTip("Refresh projects, notes, findings, profile, PCAP view and settings.")
 
         # activ button reference (for highlight)
         self._nav_projects = self.btn_nav_projects
@@ -1497,11 +1498,18 @@ class App(QWidget):
         self.refresh_findings_ui()
         self.refresh_notes_ui()
         self.refresh_activity_profile_ui()
+        if hasattr(self, "pcap_page"):
+            self.pcap_page.refresh_current_view()
 
         if hasattr(self, "settings_page"):
             self.settings_page.refresh()
 
-        self._message_dialog("Refresh", "Application views refreshed.", width=360)
+        self._message_dialog(
+            "Refresh All",
+            "Application views refreshed.",
+            "Refreshed projects, project dashboard, recent datasets, notes, findings, activity profile, PCAP view and settings.",
+            width=460,
+        )
 
     def apply_theme(self, theme: str | None) -> None:
         qapp = QApplication.instance()

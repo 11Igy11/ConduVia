@@ -42,6 +42,7 @@ from core.db import (
     list_project_pcap_device_ips,
     set_project_subject,
 )
+from ui.activity_profile_page import BarChartWidget
 from ui.explore_widgets import AITextWorker, CopyableTableView
 
 
@@ -270,7 +271,7 @@ class PcapPage(QWidget):
         self.lbl_highlights_brief.setWordWrap(True)
         self.lbl_highlights_brief.setTextInteractionFlags(Qt.TextSelectableByMouse)
 
-        self.communication_columns = [
+        self.communication_full_columns = [
             ("service", "Service"),
             ("activity_type", "Indicator"),
             ("confidence", "Confidence"),
@@ -281,21 +282,31 @@ class PcapPage(QWidget):
             ("duration_ms", "Duration"),
             ("first_seen", "First Seen"),
         ]
-        self.communication_fixed_widths = {0: 170, 2: 92, 4: 72, 5: 92, 6: 82, 7: 96, 8: 170}
+        self.communication_columns = [
+            ("service", "Service"),
+            ("activity_type", "Indicator"),
+            ("host", "Host / Signal"),
+            ("bytes", "Volume"),
+            ("packets", "Packets"),
+            ("duration_ms", "Duration"),
+            ("first_seen", "First Seen"),
+        ]
+        self.communication_fixed_widths = {0: 170, 1: 190, 3: 95, 4: 85, 5: 100, 6: 175}
+        self.communication_full_fixed_widths = {0: 170, 1: 190, 2: 95, 3: 240, 4: 80, 5: 95, 6: 85, 7: 105, 8: 175}
         self.tbl_communications = self._table(
             self.communication_columns,
             fixed_widths=self.communication_fixed_widths,
-            stretch_columns=[1, 3],
+            stretch_columns=[2],
         )
-        self.tbl_communications.setMinimumHeight(420)
+        self.tbl_communications.setMinimumHeight(360)
         self.tbl_communications.setWordWrap(True)
         self.tbl_communications.verticalHeader().setDefaultSectionSize(40)
-        self.tbl_communications.sortByColumn(5, Qt.DescendingOrder)
+        self.tbl_communications.sortByColumn(3, Qt.DescendingOrder)
         self.tbl_communications.selectionModel().currentRowChanged.connect(self._on_communication_selected)
 
         self.txt_communication_detail = QTextEdit()
         self.txt_communication_detail.setReadOnly(True)
-        self.txt_communication_detail.setMinimumWidth(360)
+        self.txt_communication_detail.setMinimumWidth(420)
         self.txt_communication_detail.setPlaceholderText("Select a communication indicator to see the evidence used for classification.")
 
         self.btn_expand_communications = QPushButton("Expand table")
@@ -313,12 +324,26 @@ class PcapPage(QWidget):
 
         brief_group = self._group("Investigation brief", self.lbl_highlights_brief)
         brief_group.setMaximumHeight(145)
+        table_panel = QWidget()
+        table_layout = QVBoxLayout(table_panel)
+        table_layout.setContentsMargins(0, 0, 0, 0)
+        table_layout.setSpacing(8)
+        table_layout.addLayout(indicators_header)
+        table_layout.addWidget(self.tbl_communications, 1)
+
         detail_group = self._group("Selected indicator evidence", self.txt_communication_detail)
-        detail_group.setMaximumHeight(150)
+        detail_group.setMinimumWidth(430)
+
+        body = QSplitter(Qt.Horizontal)
+        body.addWidget(table_panel)
+        body.addWidget(detail_group)
+        body.setStretchFactor(0, 3)
+        body.setStretchFactor(1, 2)
+        body.setCollapsible(0, False)
+        body.setCollapsible(1, False)
+
         layout.addWidget(brief_group)
-        layout.addLayout(indicators_header)
-        layout.addWidget(self.tbl_communications, 1)
-        layout.addWidget(detail_group)
+        layout.addWidget(body, 1)
 
         return page
 
@@ -365,39 +390,42 @@ class PcapPage(QWidget):
         card_layout.addWidget(self.lbl_key_points)
         card_layout.addWidget(self.lbl_limitations)
 
-        self.tbl_services = self._table([
-            ("service", "Service group"),
-            ("count", "Signals"),
-            ("share", "Share"),
-            ("example", "Example"),
-        ], fixed_widths={1: 88, 2: 78}, stretch_columns=[0, 3])
-        self.tbl_visibility = self._table([
-            ("label", "Visibility"),
-            ("count", "Signals"),
-            ("share", "Share"),
-        ], fixed_widths={1: 88, 2: 78}, stretch_columns=[0])
-        self.tbl_activity = self._table([
-            ("hour", "Hour"),
-            ("packets", "Packets"),
-            ("share", "Share"),
-        ], fixed_widths={0: 170, 1: 110, 2: 78}, stretch_columns=[])
+        self.chart_services = BarChartWidget(
+            "Visible service groups",
+            value_key="count",
+            value_label_key="value",
+            label_width=190,
+            label_limit=38,
+            max_rows=8,
+        )
+        self.chart_activity = BarChartWidget(
+            "Activity timeline by hour",
+            value_key="count",
+            value_label_key="value",
+            label_width=175,
+            label_limit=28,
+            max_rows=8,
+        )
+        self.chart_visibility = BarChartWidget(
+            "Visible vs encrypted indicators",
+            value_key="count",
+            value_label_key="value",
+            count_list=True,
+            max_rows=6,
+        )
 
         top = QHBoxLayout()
         top.setSpacing(10)
-        self.grp_services = self._group("Visible service groups", self.tbl_services)
-        self.grp_visibility = self._group("Visible vs encrypted indicators", self.tbl_visibility)
-        self.grp_activity = self._group("Activity timeline by hour", self.tbl_activity)
+        self.chart_services.setMinimumHeight(260)
+        self.chart_activity.setMinimumHeight(260)
+        self.chart_visibility.setMinimumHeight(170)
 
-        self.grp_services.setMinimumHeight(220)
-        self.grp_visibility.setMinimumHeight(220)
-        self.grp_activity.setMinimumHeight(240)
-
-        top.addWidget(self.grp_services, 3)
-        top.addWidget(self.grp_visibility, 2)
+        top.addWidget(self.chart_services, 1)
+        top.addWidget(self.chart_activity, 1)
 
         layout.addWidget(self.investigator_card, 0)
         layout.addLayout(top, 2)
-        layout.addWidget(self.grp_activity, 2)
+        layout.addWidget(self.chart_visibility, 1)
         layout.addStretch()
 
         scroll.setWidget(content)
@@ -444,24 +472,21 @@ class PcapPage(QWidget):
         self.lbl_overview_text.setTextInteractionFlags(Qt.TextSelectableByMouse)
         overview_card_layout.addWidget(self.lbl_overview_text)
 
-        grid = QGridLayout()
-        grid.setSpacing(10)
-        self.tbl_protocols = self._table([("protocol", "Protocol"), ("number", "Number"), ("packets", "Packets")], stretch_columns=[0])
-        self.tbl_endpoints = self._table([("ip", "Endpoint IP"), ("packets", "Packets")], stretch_columns=[0])
-        self.tbl_ports = self._table([("protocol", "Protocol"), ("port", "Port"), ("packets", "Packets")], stretch_columns=[0])
-        grp_protocols = self._group("Protocols", self.tbl_protocols)
-        grp_endpoints = self._group("Top endpoints", self.tbl_endpoints)
-        grp_ports = self._group("Top ports", self.tbl_ports)
-        grp_protocols.setMinimumHeight(250)
-        grp_endpoints.setMinimumHeight(250)
-        grp_ports.setMinimumHeight(300)
-
-        grid.addWidget(grp_protocols, 0, 0)
-        grid.addWidget(grp_endpoints, 0, 1)
-        grid.addWidget(grp_ports, 1, 0, 1, 2)
+        self.tbl_network_overview = self._table(
+            [
+                ("section", "Section"),
+                ("value", "Value"),
+                ("detail", "Detail"),
+                ("packets", "Packets"),
+            ],
+            fixed_widths={0: 145, 3: 105},
+            stretch_columns=[1, 2],
+        )
+        self.tbl_network_overview.setMinimumHeight(430)
+        self.tbl_network_overview.verticalHeader().setDefaultSectionSize(38)
 
         layout.addWidget(self.overview_card)
-        layout.addLayout(grid)
+        layout.addWidget(self._group("Network overview", self.tbl_network_overview), 1)
         layout.addStretch()
 
         scroll.setWidget(content)
@@ -483,9 +508,11 @@ class PcapPage(QWidget):
         self.lbl_evidence_hint.setTextInteractionFlags(Qt.TextSelectableByMouse)
         layout.addWidget(self.lbl_evidence_hint)
 
-        self.tbl_dns = self._table([("query", "DNS Query"), ("count", "Count")], fixed_widths={1: 90}, stretch_columns=[0])
-        self.tbl_sni = self._table([("host", "TLS SNI Host"), ("count", "Count")], fixed_widths={1: 90}, stretch_columns=[0])
-        self.tbl_http = self._table([("host", "HTTP Host"), ("count", "Count")], fixed_widths={1: 90}, stretch_columns=[0])
+        self.tbl_visible_metadata = self._table(
+            [("type", "Type"), ("value", "Visible Value"), ("count", "Count")],
+            fixed_widths={0: 140, 2: 90},
+            stretch_columns=[1],
+        )
         self.tbl_samples = self._table([
             ("time", "Time"),
             ("type", "Type"),
@@ -494,18 +521,9 @@ class PcapPage(QWidget):
             ("value", "Visible Value"),
         ], fixed_widths={0: 178, 1: 130, 2: 180, 3: 180}, stretch_columns=[4])
 
-        for table in (self.tbl_dns, self.tbl_sni, self.tbl_http):
-            table.setMinimumHeight(240)
-            table.horizontalHeader().setStretchLastSection(False)
-
+        self.tbl_visible_metadata.setMinimumHeight(250)
         self.tbl_samples.setMinimumHeight(320)
         self.tbl_samples.verticalHeader().setDefaultSectionSize(38)
-
-        metadata_tabs = QTabWidget()
-        metadata_tabs.setMinimumHeight(270)
-        metadata_tabs.addTab(self.tbl_dns, "DNS")
-        metadata_tabs.addTab(self.tbl_sni, "TLS SNI")
-        metadata_tabs.addTab(self.tbl_http, "HTTP")
 
         samples_panel = QWidget()
         samples_layout = QVBoxLayout(samples_panel)
@@ -522,7 +540,7 @@ class PcapPage(QWidget):
         samples_layout.addWidget(samples_hint)
         samples_layout.addWidget(self.tbl_samples, 1)
 
-        layout.addWidget(self._group("Visible metadata", metadata_tabs), 0)
+        layout.addWidget(self._group("Visible metadata", self.tbl_visible_metadata), 0)
         layout.addWidget(self._group("Readable payload / metadata samples", samples_panel), 1)
         return page
 
@@ -557,22 +575,24 @@ class PcapPage(QWidget):
 
         self.tbl_artifacts = self._table(
             columns,
-            fixed_widths={0: 150, 1: 180, 3: 80, 4: 150, 5: 170, 6: 170},
-            stretch_columns=[2],
+            fixed_widths={0: 150, 1: 180, 2: 360, 3: 80, 4: 150, 5: 170, 6: 170},
+            stretch_columns=[],
         )
-        self.tbl_artifacts.setMinimumHeight(420)
+        self.tbl_artifacts.setMinimumHeight(360)
         self.tbl_artifacts.selectionModel().currentRowChanged.connect(self._on_artifact_selected)
 
         self.txt_artifact_detail = QTextEdit()
         self.txt_artifact_detail.setReadOnly(True)
-        self.txt_artifact_detail.setMinimumWidth(360)
+        self.txt_artifact_detail.setMinimumHeight(150)
         self.txt_artifact_detail.setPlaceholderText("Select an artifact to see source, destination and explanation.")
 
-        splitter = QSplitter(Qt.Horizontal)
+        splitter = QSplitter(Qt.Vertical)
         splitter.addWidget(self._group("Extracted artifacts", self.tbl_artifacts))
         splitter.addWidget(self._group("Artifact details", self.txt_artifact_detail))
-        splitter.setStretchFactor(0, 1)
-        splitter.setStretchFactor(1, 0)
+        splitter.setStretchFactor(0, 4)
+        splitter.setStretchFactor(1, 1)
+        splitter.setCollapsible(0, False)
+        splitter.setCollapsible(1, False)
         layout.addWidget(splitter, 1)
         return page
 
@@ -593,7 +613,7 @@ class PcapPage(QWidget):
             ("bidirectional_first_seen_ms", "First Seen"),
             ("bidirectional_last_seen_ms", "Last Seen"),
             ("pcap_payload_preview", "Visible Preview"),
-        ], stretch_columns=[11])
+        ], fixed_widths={0: 145, 1: 105, 2: 145, 3: 125, 4: 92, 5: 145, 6: 260, 7: 110, 8: 105, 9: 180, 10: 180, 11: 300}, stretch_columns=[])
         layout.addWidget(self.tbl_connections)
         return page
 
@@ -698,19 +718,137 @@ class PcapPage(QWidget):
         investigator = build_investigator_view(summary)
         self._set_highlights(summary)
         self._set_investigator_text(investigator)
-        self._set_table(self.tbl_services, investigator["service_rows"])
-        self._set_table(self.tbl_visibility, investigator["visibility_rows"])
-        self._set_table(self.tbl_activity, investigator["activity_rows"])
+        self.chart_services.set_rows(
+            self._service_chart_rows(investigator["service_rows"]),
+            empty_text="No visible service groups were identified.",
+        )
+        self.chart_activity.set_rows(
+            self._activity_chart_rows(investigator["activity_rows"]),
+            empty_text="No hourly activity timeline is available.",
+        )
+        self.chart_visibility.set_rows(
+            self._visibility_chart_rows(investigator["visibility_rows"]),
+            empty_text="No visibility indicators are available.",
+        )
         self.lbl_overview_text.setText(self._overview_text(summary))
-        self._set_table(self.tbl_protocols, summary.protocols)
-        self._set_table(self.tbl_endpoints, summary.top_endpoints)
-        self._set_table(self.tbl_ports, summary.top_ports)
-        self._set_table(self.tbl_dns, summary.dns_queries)
-        self._set_table(self.tbl_sni, summary.tls_sni)
-        self._set_table(self.tbl_http, summary.http_hosts)
+        self._set_table(self.tbl_network_overview, self._network_overview_rows(summary))
+        self._set_table(self.tbl_visible_metadata, self._visible_metadata_rows(summary))
         self._set_table(self.tbl_samples, summary.readable_samples)
         self._set_artifact_tables(summary.artifacts)
         self._set_table(self.tbl_connections, summary.flows)
+
+    def refresh_current_view(self) -> None:
+        if not self.summary:
+            return
+        summary = self.summary
+        investigator = build_investigator_view(summary)
+        self._set_highlights(summary)
+        self._set_investigator_text(investigator)
+        self.chart_services.set_rows(
+            self._service_chart_rows(investigator["service_rows"]),
+            empty_text="No visible service groups were identified.",
+        )
+        self.chart_activity.set_rows(
+            self._activity_chart_rows(investigator["activity_rows"]),
+            empty_text="No hourly activity timeline is available.",
+        )
+        self.chart_visibility.set_rows(
+            self._visibility_chart_rows(investigator["visibility_rows"]),
+            empty_text="No visibility indicators are available.",
+        )
+        self.lbl_overview_text.setText(self._overview_text(summary))
+        self._set_table(self.tbl_network_overview, self._network_overview_rows(summary))
+        self._set_table(self.tbl_visible_metadata, self._visible_metadata_rows(summary))
+        self._set_table(self.tbl_samples, summary.readable_samples)
+        self._set_artifact_tables(summary.artifacts)
+        self._set_table(self.tbl_connections, summary.flows)
+
+    def _service_chart_rows(self, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        chart_rows = []
+        for row in rows or []:
+            count = int(row.get("count") or 0)
+            share = row.get("share")
+            try:
+                share_text = f"{float(share):.1f}%"
+            except Exception:
+                share_text = str(share or "-")
+            label = str(row.get("service") or "-")
+            example = str(row.get("example") or "").strip()
+            chart_rows.append({
+                "label": f"{label} - {example}" if example else label,
+                "count": count,
+                "value": f"{count} / {share_text}",
+            })
+        return chart_rows
+
+    def _activity_chart_rows(self, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        chart_rows = []
+        for row in rows or []:
+            packets = int(row.get("packets") or 0)
+            share = row.get("share")
+            try:
+                share_text = f"{float(share):.1f}%"
+            except Exception:
+                share_text = str(share or "-")
+            chart_rows.append({
+                "label": str(row.get("hour") or "-"),
+                "count": packets,
+                "value": f"{packets:,} / {share_text}",
+            })
+        return chart_rows
+
+    def _visibility_chart_rows(self, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        chart_rows = []
+        for row in rows or []:
+            count = int(row.get("count") or 0)
+            share = row.get("share")
+            try:
+                share_text = f"{float(share):.1f}%"
+            except Exception:
+                share_text = str(share or "-")
+            chart_rows.append({
+                "label": str(row.get("label") or "-"),
+                "count": count,
+                "value": f"{count:,} ({share_text})",
+            })
+        return chart_rows
+
+    def _visible_metadata_rows(self, summary: PcapSummary) -> list[dict[str, Any]]:
+        rows: list[dict[str, Any]] = []
+        for item in summary.dns_queries or []:
+            rows.append({"type": "DNS query", "value": item.get("query"), "count": item.get("count")})
+        for item in summary.tls_sni or []:
+            rows.append({"type": "TLS SNI", "value": item.get("host"), "count": item.get("count")})
+        for item in summary.http_hosts or []:
+            rows.append({"type": "HTTP host", "value": item.get("host"), "count": item.get("count")})
+        return rows
+
+    def _network_overview_rows(self, summary: PcapSummary) -> list[dict[str, Any]]:
+        rows: list[dict[str, Any]] = []
+        for item in summary.protocols or []:
+            rows.append({
+                "section": "Protocol",
+                "value": item.get("protocol"),
+                "detail": f"Number: {item.get('number') or '-'}",
+                "packets": item.get("packets"),
+            })
+        for item in summary.top_endpoints or []:
+            rows.append({
+                "section": "Endpoint",
+                "value": item.get("ip"),
+                "detail": "Top observed endpoint",
+                "packets": item.get("packets"),
+            })
+        for item in summary.top_ports or []:
+            protocol = item.get("protocol")
+            port = item.get("port")
+            rows.append({
+                "section": "Port",
+                "value": f"{format_ip_proto(protocol) if isinstance(protocol, int) else protocol}/{port}",
+                "detail": "Top observed port",
+                "packets": item.get("packets"),
+            })
+        return rows
 
     def _set_highlights(self, summary: PcapSummary) -> None:
         rows = summary.communication_rows or []
@@ -780,7 +918,7 @@ class PcapPage(QWidget):
 
         dlg = QDialog(self)
         dlg.setWindowTitle("Communication indicators")
-        dlg.resize(1280, 760)
+        dlg.resize(1500, 820)
 
         layout = QVBoxLayout(dlg)
         layout.setContentsMargins(14, 14, 14, 14)
@@ -792,17 +930,17 @@ class PcapPage(QWidget):
         layout.addWidget(hint)
 
         table = self._table(
-            self.communication_columns,
-            fixed_widths=self.communication_fixed_widths,
-            stretch_columns=[1, 3],
+            self.communication_full_columns,
+            fixed_widths=self.communication_full_fixed_widths,
+            stretch_columns=[3],
         )
-        table.setMinimumHeight(560)
+        table.setMinimumWidth(980)
         table.verticalHeader().setDefaultSectionSize(42)
         self._set_table(table, list(model.rows))
 
         detail = QTextEdit()
         detail.setReadOnly(True)
-        detail.setMinimumHeight(160)
+        detail.setMinimumWidth(420)
         detail.setPlaceholderText("Select a communication indicator to see the evidence used for classification.")
 
         def update_detail(current: QModelIndex, previous: QModelIndex | None = None) -> None:
@@ -817,11 +955,11 @@ class PcapPage(QWidget):
 
         table.selectionModel().currentRowChanged.connect(update_detail)
 
-        splitter = QSplitter(Qt.Vertical)
+        splitter = QSplitter(Qt.Horizontal)
         splitter.addWidget(table)
         splitter.addWidget(self._group("Selected indicator evidence", detail))
-        splitter.setStretchFactor(0, 4)
-        splitter.setStretchFactor(1, 1)
+        splitter.setStretchFactor(0, 3)
+        splitter.setStretchFactor(1, 2)
         splitter.setCollapsible(0, False)
         splitter.setCollapsible(1, False)
         layout.addWidget(splitter, 1)

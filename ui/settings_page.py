@@ -56,9 +56,9 @@ class SettingsPage(QWidget):
         self.edit_ai_model.setPlaceholderText("llama3")
         self.edit_ai_timeout = QLineEdit()
         self.edit_ai_timeout.setPlaceholderText("600")
-        self.edit_ai_url.setMinimumWidth(620)
-        self.edit_ai_model.setMinimumWidth(420)
-        self.edit_ai_timeout.setMaximumWidth(140)
+        self.edit_ai_url.setFixedWidth(620)
+        self.edit_ai_model.setFixedWidth(620)
+        self.edit_ai_timeout.setFixedWidth(260)
 
         for label, edit in (
             ("Base URL", self.edit_ai_url),
@@ -88,7 +88,7 @@ class SettingsPage(QWidget):
         self.cmb_output_language = QComboBox()
         self.cmb_output_language.addItem("Croatian", "hr")
         self.cmb_output_language.addItem("English", "en")
-        self.cmb_output_language.setMaximumWidth(260)
+        self.cmb_output_language.setFixedWidth(260)
 
         language_row = QHBoxLayout()
         language_label = QLabel("Report / AI language")
@@ -113,7 +113,7 @@ class SettingsPage(QWidget):
         self.cmb_theme = QComboBox()
         self.cmb_theme.addItem("Dark", "dark")
         self.cmb_theme.addItem("Light", "light")
-        self.cmb_theme.setMaximumWidth(260)
+        self.cmb_theme.setFixedWidth(260)
 
         theme_row = QHBoxLayout()
         theme_label = QLabel("Theme")
@@ -126,11 +126,14 @@ class SettingsPage(QWidget):
         root.addWidget(theme_panel)
 
         button_row = QHBoxLayout()
+        button_row.setContentsMargins(22, 0, 22, 0)
+        button_row.addStretch(1)
         self.btn_save_ai = QPushButton("Save settings")
-        self.btn_reload = QPushButton("Reload")
+        self.btn_reload = QPushButton("Reload settings")
+        self.btn_save_ai.setFixedWidth(150)
+        self.btn_reload.setFixedWidth(150)
         button_row.addWidget(self.btn_save_ai)
         button_row.addWidget(self.btn_reload)
-        button_row.addStretch()
         root.addLayout(button_row)
 
         self.lbl_status = QLabel("")

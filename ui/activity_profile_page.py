@@ -153,8 +153,8 @@ class ActivityProfilePage(QWidget):
 
         chart_grid = QGridLayout()
         chart_grid.setSpacing(12)
-        chart_grid.addWidget(self.evidence_chart, 0, 0)
-        chart_grid.addWidget(self.device_ip_chart, 0, 1)
+        chart_grid.addWidget(self.device_ip_chart, 0, 0)
+        chart_grid.addWidget(self.activity_chart, 0, 1)
         chart_grid.setColumnStretch(0, 1)
         chart_grid.setColumnStretch(1, 1)
         scroll_layout.addLayout(chart_grid)
