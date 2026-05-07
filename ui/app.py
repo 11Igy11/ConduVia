@@ -853,13 +853,11 @@ class App(QWidget):
 
         dashboard_header = QHBoxLayout()
         dashboard_header.setSpacing(14)
-        dashboard_header.addWidget(self.lbl_case_dashboard_title)
-        dashboard_header.addWidget(self.lbl_case_dashboard_subject, 1)
 
         self.lbl_case_dashboard_logo = QLabel()
         self.lbl_case_dashboard_logo.setObjectName("CaseDashboardLogo")
-        self.lbl_case_dashboard_logo.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        self.lbl_case_dashboard_logo.setFixedSize(96, 44)
+        self.lbl_case_dashboard_logo.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        self.lbl_case_dashboard_logo.setFixedSize(58, 44)
         logo_path = Path(__file__).resolve().parent.parent / "assets" / "ViaNyquist.png"
         logo_pixmap = QPixmap(str(logo_path))
         if not logo_pixmap.isNull():
@@ -871,6 +869,8 @@ class App(QWidget):
                 )
             )
         dashboard_header.addWidget(self.lbl_case_dashboard_logo)
+        dashboard_header.addWidget(self.lbl_case_dashboard_title)
+        dashboard_header.addWidget(self.lbl_case_dashboard_subject, 1)
         dashboard_layout.addLayout(dashboard_header)
 
         self.case_metric_cards = []
