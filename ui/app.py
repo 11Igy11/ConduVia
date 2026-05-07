@@ -4,7 +4,7 @@ from core.ai.assistant_service import AIAssistantService, AISettings
 import ipaddress
 from ui.registry_page import RegistryPage
 from ui.listing_page import ListingPage
-from ui.pcap_page import PcapPage
+from ui.pcap_page import DictTableModel, PcapPage
 from ui.activity_profile_page import ActivityProfilePage
 from ui.settings_page import SettingsPage
 import html
@@ -21,7 +21,7 @@ from ui.controllers.dataset_controller import DatasetController
 from ui.controllers.explore_ui_controller import ExploreUIController
 
 from ui.explore_models import FlowTableModel, NumericSortProxy
-from ui.explore_widgets import AITextWorker, FlowTableView
+from ui.explore_widgets import AITextWorker, CopyableTableView, FlowTableView
 from ui.findings_page import FindingsPage
 from ui.controllers.notes_controller import NotesController
 from ui.dialogs import (
@@ -40,7 +40,7 @@ from PySide6.QtWidgets import (
     QTextEdit, QTabWidget, QLineEdit,
     QSplitter, QGroupBox,
     QListWidget, QListWidgetItem,
-    QComboBox, QFrame, QSizePolicy, QScrollArea, QHeaderView,
+    QAbstractItemView, QComboBox, QDialog, QFrame, QSizePolicy, QScrollArea, QHeaderView,
     QTableView, QMenu
 )
 from core.db import (
@@ -779,17 +779,58 @@ class App(QWidget):
         self.projects_info.setReadOnly(True)
         self.projects_info.setPlaceholderText("Select a project to see details.")
 
-        self.lbl_recent = QLabel("Recent JSON datasets:")
         self.recent_list = QListWidget()
-
-        recent_btn_row = QHBoxLayout()
+        self.recent_list.hide()
+        self.project_recent_json_rows: list[dict[str, Any]] = []
+        self.project_recent_pcap_rows: list[dict[str, Any]] = []
+        self.project_activity_rows: list[dict[str, Any]] = []
 
         self.btn_open_dataset = QPushButton("Open selected")
+        self.btn_open_dataset.hide()
         self.btn_open_new_dataset = QPushButton("Open new dataset")
+        self.btn_expand_json_datasets = QPushButton("Open JSON list")
+        self.btn_expand_pcap_datasets = QPushButton("Open PCAP list")
+        self.btn_expand_project_activity = QPushButton("Open activity log")
+        for button in (self.btn_open_new_dataset, self.btn_expand_json_datasets, self.btn_expand_pcap_datasets, self.btn_expand_project_activity):
+            button.setFixedHeight(38)
 
-        recent_btn_row.addWidget(self.btn_open_dataset)
-        recent_btn_row.addWidget(self.btn_open_new_dataset)
-        recent_btn_row.addStretch()
+        self.btn_expand_json_datasets.clicked.connect(
+            lambda: self._open_project_rows_dialog(
+                "Recent JSON datasets",
+                [
+                    ("status", "Status"),
+                    ("name", "Name"),
+                    ("kind", "Kind"),
+                    ("path", "Path"),
+                ],
+                self.project_recent_json_rows,
+            )
+        )
+        self.btn_expand_pcap_datasets.clicked.connect(
+            lambda: self._open_project_rows_dialog(
+                "Recent PCAP datasets",
+                [
+                    ("name", "Name"),
+                    ("packets", "Packets"),
+                    ("volume", "Volume"),
+                    ("device_ip", "Device IP"),
+                    ("period", "Period"),
+                    ("path", "Path"),
+                ],
+                self.project_recent_pcap_rows,
+            )
+        )
+        self.btn_expand_project_activity.clicked.connect(
+            lambda: self._open_project_rows_dialog(
+                "Recent activity",
+                [
+                    ("created_at", "Time"),
+                    ("event", "Event"),
+                    ("detail", "Detail"),
+                ],
+                self.project_activity_rows,
+            )
+        )
 
         projects_layout.addWidget(self.lbl_active_project)
         projects_layout.addLayout(btn_row)
@@ -852,31 +893,67 @@ class App(QWidget):
 
         projects_layout.addLayout(middle_row, 1)
 
-        bottom_row = QHBoxLayout()
-
-        # --- Left: Recent datasets ---
-        recent_col = QVBoxLayout()
-        recent_col.addWidget(self.lbl_recent)
-        recent_col.addWidget(self.recent_list, 1)
-        recent_col.addLayout(recent_btn_row)
-
-        # --- Right: Activity log ---
-        activity_col = QVBoxLayout()
-        activity_col.addWidget(QLabel("Recent activity"))
-
         self.lst_activity = QListWidget()
-        activity_col.addWidget(self.lst_activity, 1)
+        self.lst_activity.hide()
 
-        activity_footer = QWidget()
-        activity_footer.setFixedHeight(self.btn_open_dataset.sizeHint().height())
+        self.lbl_recent_json_count = QLabel("0 JSON datasets")
+        self.lbl_recent_json_count.setObjectName("ProfileMetric")
+        self.lbl_recent_json_detail = QLabel("No JSON datasets saved for this project.")
+        self.lbl_recent_json_detail.setObjectName("Muted")
+        self.lbl_recent_json_detail.setWordWrap(True)
 
-        activity_col.addWidget(activity_footer) 
-       
+        self.lbl_recent_pcap_count = QLabel("0 PCAP datasets")
+        self.lbl_recent_pcap_count.setObjectName("ProfileMetric")
+        self.lbl_recent_pcap_detail = QLabel("No PCAP sources saved for this project.")
+        self.lbl_recent_pcap_detail.setObjectName("Muted")
+        self.lbl_recent_pcap_detail.setWordWrap(True)
 
-        bottom_row.addLayout(recent_col, 3)
-        bottom_row.addLayout(activity_col, 2)
+        self.lbl_recent_activity_count = QLabel("0 events")
+        self.lbl_recent_activity_count.setObjectName("ProfileMetric")
+        self.lbl_recent_activity_detail = QLabel("No project activity yet.")
+        self.lbl_recent_activity_detail.setObjectName("Muted")
+        self.lbl_recent_activity_detail.setWordWrap(True)
 
-        projects_layout.addLayout(bottom_row, 1)
+        bottom_grid = QGridLayout()
+        bottom_grid.setSpacing(14)
+        bottom_grid.addWidget(
+            self._project_launcher_card(
+                "Recent JSON datasets",
+                "Unique JSON files or folders saved to the active project.",
+                self.lbl_recent_json_count,
+                self.lbl_recent_json_detail,
+                [self.btn_expand_json_datasets, self.btn_open_new_dataset],
+            ),
+            0,
+            0,
+        )
+        bottom_grid.addWidget(
+            self._project_launcher_card(
+                "Recent PCAP datasets",
+                "Unique PCAP captures saved to the active project.",
+                self.lbl_recent_pcap_count,
+                self.lbl_recent_pcap_detail,
+                [self.btn_expand_pcap_datasets],
+            ),
+            0,
+            1,
+        )
+        bottom_grid.addWidget(
+            self._project_launcher_card(
+                "Recent activity",
+                "Central project activity log for datasets, PCAP sources, findings and notes.",
+                self.lbl_recent_activity_count,
+                self.lbl_recent_activity_detail,
+                [self.btn_expand_project_activity],
+            ),
+            0,
+            2,
+        )
+        bottom_grid.setColumnStretch(0, 1)
+        bottom_grid.setColumnStretch(1, 1)
+        bottom_grid.setColumnStretch(2, 1)
+
+        projects_layout.addLayout(bottom_grid, 1)
 
         # -------- Explore page --------
         explore_container = QWidget()
@@ -1474,6 +1551,107 @@ class App(QWidget):
         self.pages.setCurrentIndex(idx)
         self._set_active_nav(active_btn)
 
+    def _project_launcher_card(
+        self,
+        title: str,
+        description: str,
+        count_label: QLabel,
+        detail_label: QLabel,
+        buttons: list[QPushButton],
+    ) -> QFrame:
+        card = QFrame()
+        card.setObjectName("Card")
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(10)
+
+        lbl_title = QLabel(title)
+        lbl_title.setObjectName("SectionTitle")
+        lbl_title.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        lbl_description = QLabel(description)
+        lbl_description.setObjectName("Muted")
+        lbl_description.setWordWrap(True)
+        lbl_description.setTextInteractionFlags(Qt.TextSelectableByMouse)
+
+        layout.addWidget(lbl_title)
+        layout.addWidget(lbl_description)
+        layout.addWidget(count_label)
+        layout.addWidget(detail_label)
+        layout.addStretch()
+
+        button_row = QHBoxLayout()
+        button_row.addStretch()
+        for button in buttons:
+            button_row.addWidget(button)
+        layout.addLayout(button_row)
+        return card
+
+    def _open_project_rows_dialog(
+        self,
+        title: str,
+        columns: list[tuple[str, str]],
+        rows: list[dict[str, Any]],
+    ) -> None:
+        if not rows:
+            self._message_dialog(title, "No rows are loaded.", width=380)
+            return
+
+        dlg = QDialog(self)
+        dlg.setWindowTitle(title)
+        screen = QGuiApplication.primaryScreen()
+        if screen is not None:
+            available = screen.availableGeometry()
+            dlg.resize(min(1180, available.width() - 120), min(680, available.height() - 120))
+        else:
+            dlg.resize(1080, 640)
+
+        layout = QVBoxLayout(dlg)
+        layout.setContentsMargins(14, 14, 14, 14)
+        layout.setSpacing(10)
+
+        hint = QLabel("Expanded project view. Sort columns or right-click to copy values.")
+        hint.setObjectName("Muted")
+        hint.setWordWrap(True)
+        layout.addWidget(hint)
+
+        table = CopyableTableView(self)
+        table.setModel(DictTableModel(columns, rows))
+        table.setSortingEnabled(True)
+        table.setAlternatingRowColors(True)
+        table.setSelectionBehavior(QTableView.SelectRows)
+        table.setSelectionMode(QAbstractItemView.SingleSelection)
+        table.setEditTriggers(QTableView.NoEditTriggers)
+        table.verticalHeader().setVisible(False)
+        table.setHorizontalScrollMode(QAbstractItemView.ScrollPerPixel)
+        table.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
+        table.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        table.setMinimumHeight(480)
+        table.horizontalHeader().setSectionResizeMode(QHeaderView.Interactive)
+
+        for idx, (key, label) in enumerate(columns):
+            name = f"{key} {label}".lower()
+            width = 140
+            if "path" in name or "detail" in name:
+                width = 420
+            elif "period" in name:
+                width = 300
+            elif "time" in name or "created" in name:
+                width = 190
+            elif "name" in name:
+                width = 260
+            table.setColumnWidth(idx, width)
+
+        layout.addWidget(table, 1)
+
+        footer = QHBoxLayout()
+        footer.addStretch()
+        btn_close = QPushButton("Close")
+        btn_close.setFixedHeight(34)
+        btn_close.clicked.connect(dlg.accept)
+        footer.addWidget(btn_close)
+        layout.addLayout(footer)
+        dlg.exec()
+
     def refresh_activity_profile_ui(self):
         if hasattr(self, "activity_profile_page"):
             self.activity_profile_page.refresh(self.current_project_id, self.current_project_name)
@@ -2003,14 +2181,19 @@ class App(QWidget):
 
     def refresh_activity_ui_for_project(self, project_id: int | None):
         self.lst_activity.clear()
+        self.project_activity_rows = []
 
         if project_id is None:
             self.lst_activity.addItem(QListWidgetItem("(no project selected)"))
+            if hasattr(self, "projects_ui_controller"):
+                self.projects_ui_controller._refresh_project_launcher_cards()
             return
 
         rows = self.notes_controller.load_activity(project_id)
         if not rows:
             self.lst_activity.addItem(QListWidgetItem("(no activity yet)"))
+            if hasattr(self, "projects_ui_controller"):
+                self.projects_ui_controller._refresh_project_launcher_cards()
             return
 
         for r in rows:
@@ -2024,6 +2207,13 @@ class App(QWidget):
             item = QListWidgetItem(f"{ts}\n{label}")
             item.setToolTip(str(msg or ""))
             self.lst_activity.addItem(item)
+            self.project_activity_rows.append({
+                "created_at": str(ts or ""),
+                "event": label,
+                "detail": str(msg or ""),
+            })
+        if hasattr(self, "projects_ui_controller"):
+            self.projects_ui_controller._refresh_project_launcher_cards()
 
     def refresh_activity_ui(self):
         self.refresh_activity_ui_for_project(self.current_project_id)

@@ -10,8 +10,10 @@ from core.db import (
     delete_project,
     list_recent_datasets,
     list_pcap_sources,
+    list_activity,
     update_project,
 )
+from core.formatters import format_pcap_datetime, human_bytes
 from core.project_identity import project_identifiers_text, subject_display_label
 from core.project_profile import build_project_activity_profile
 from core.workspace import (
@@ -39,6 +41,10 @@ class ProjectsUIController:
 
         self.app.projects_info.setText("Select a project to see details.")
         self.app.recent_list.clear()
+        self.app.project_recent_json_rows = []
+        self.app.project_recent_pcap_rows = []
+        self.app.project_activity_rows = []
+        self._refresh_project_launcher_cards()
         self.refresh_case_dashboard(None)
         self.app.refresh_activity_profile_ui()
         self.app.refresh_activity_ui_for_project(None)
@@ -122,6 +128,10 @@ class ProjectsUIController:
         if not item:
             self.app.projects_info.setText("Select a project to see details.")
             self.app.recent_list.clear()
+            self.app.project_recent_json_rows = []
+            self.app.project_recent_pcap_rows = []
+            self.app.project_activity_rows = []
+            self._refresh_project_launcher_cards()
             self.refresh_case_dashboard(None)
             return
 
@@ -400,25 +410,98 @@ class ProjectsUIController:
     def refresh_recent_datasets(self, project_id: int):
         self.app.recent_list.clear()
         paths = list_recent_datasets(project_id, limit=15)
+        self.app.project_recent_json_rows = []
 
         if not paths:
             self.app.recent_list.addItem(QListWidgetItem("(no JSON datasets yet)"))
-            return
+        else:
+            for fp in paths:
+                p = Path(str(fp))
 
-        for fp in paths:
-            p = Path(str(fp))
+                if p.is_file():
+                    status = "Available"
+                    kind = "JSON file"
+                    label = f"[FILE] {p.name}"
+                elif p.is_dir():
+                    status = "Available"
+                    kind = "Folder"
+                    label = f"[FOLDER] {p.name}"
+                else:
+                    status = "Missing"
+                    kind = "Path"
+                    label = f"[MISSING] {p.name or str(fp)}"
 
-            if p.is_file():
-                label = f"[FILE] {p.name}"
-            elif p.is_dir():
-                label = f"[FOLDER] {p.name}"
+                item = QListWidgetItem(label)
+                item.setToolTip(str(fp))
+                item.setData(Qt.UserRole, str(fp))
+                self.app.recent_list.addItem(item)
+                self.app.project_recent_json_rows.append({
+                    "status": status,
+                    "name": p.name or str(fp),
+                    "kind": kind,
+                    "path": str(fp),
+                })
+
+        pcap_sources = list_pcap_sources(project_id, limit=500)
+        self.app.project_recent_pcap_rows = []
+        for source in pcap_sources:
+            period = " - ".join(
+                value
+                for value in (
+                    format_pcap_datetime(source.first_seen),
+                    format_pcap_datetime(source.last_seen),
+                )
+                if value
+            )
+            self.app.project_recent_pcap_rows.append({
+                "name": source.file_name or Path(source.file_path).name,
+                "packets": f"{source.packet_count:,}",
+                "volume": human_bytes(source.wire_bytes, precision=2),
+                "device_ip": source.likely_device_ip or "-",
+                "period": period or "-",
+                "path": source.file_path,
+            })
+
+        activity_rows = list_activity(project_id, limit=500)
+        self.app.project_activity_rows = []
+        for row in activity_rows:
+            event = self.activity_label(str(row["event_type"] or ""), str(row["message"] or ""))
+            self.app.project_activity_rows.append({
+                "created_at": str(row["created_at"] or ""),
+                "event": event,
+                "detail": str(row["message"] or ""),
+            })
+
+        self._refresh_project_launcher_cards()
+
+    def _refresh_project_launcher_cards(self) -> None:
+        json_count = len(getattr(self.app, "project_recent_json_rows", []) or [])
+        pcap_count = len(getattr(self.app, "project_recent_pcap_rows", []) or [])
+        activity_count = len(getattr(self.app, "project_activity_rows", []) or [])
+
+        if hasattr(self.app, "lbl_recent_json_count"):
+            self.app.lbl_recent_json_count.setText(f"{json_count:,} JSON datasets")
+            if json_count:
+                newest = self.app.project_recent_json_rows[0].get("name") or "-"
+                self.app.lbl_recent_json_detail.setText(f"Most recent: {newest}")
             else:
-                label = f"[MISSING] {p.name or str(fp)}"
+                self.app.lbl_recent_json_detail.setText("No JSON datasets saved for this project.")
 
-            item = QListWidgetItem(label)
-            item.setToolTip(str(fp))
-            item.setData(Qt.UserRole, str(fp))
-            self.app.recent_list.addItem(item)
+        if hasattr(self.app, "lbl_recent_pcap_count"):
+            self.app.lbl_recent_pcap_count.setText(f"{pcap_count:,} PCAP datasets")
+            if pcap_count:
+                newest = self.app.project_recent_pcap_rows[0].get("name") or "-"
+                self.app.lbl_recent_pcap_detail.setText(f"Most recent: {newest}")
+            else:
+                self.app.lbl_recent_pcap_detail.setText("No PCAP sources saved for this project.")
+
+        if hasattr(self.app, "lbl_recent_activity_count"):
+            self.app.lbl_recent_activity_count.setText(f"{activity_count:,} events")
+            if activity_count:
+                newest = self.app.project_activity_rows[0].get("event") or "-"
+                self.app.lbl_recent_activity_detail.setText(f"Latest: {newest}")
+            else:
+                self.app.lbl_recent_activity_detail.setText("No project activity yet.")
 
     def refresh_case_dashboard(self, project_id: int | None):
         if not hasattr(self.app, "lbl_case_dashboard_title"):

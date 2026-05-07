@@ -11,8 +11,6 @@ from PySide6.QtWidgets import (
     QGridLayout,
     QHBoxLayout,
     QLabel,
-    QListWidget,
-    QListWidgetItem,
     QProgressBar,
     QPushButton,
     QScrollArea,
@@ -216,21 +214,7 @@ class ActivityProfilePage(QWidget):
         top.setStretchFactor(0, 1)
         top.setStretchFactor(1, 1)
 
-        self.lst_timeline = QListWidget()
-        self.lst_timeline.setMinimumHeight(220)
-
         scroll_layout.addWidget(top)
-
-        case_activity_title = QLabel("Case Activity")
-        case_activity_title.setObjectName("SectionTitle")
-        scroll_layout.addWidget(case_activity_title)
-
-        case_activity = QSplitter(Qt.Horizontal)
-        case_activity.addWidget(self.activity_chart)
-        case_activity.addWidget(self._section("Recent activity", self.lst_timeline))
-        case_activity.setStretchFactor(0, 1)
-        case_activity.setStretchFactor(1, 2)
-        scroll_layout.addWidget(case_activity)
         scroll_layout.addStretch()
         scroll.setWidget(content)
         root.addWidget(scroll, 1)
@@ -264,14 +248,6 @@ class ActivityProfilePage(QWidget):
         recommendation_lines = list(profile.get("recommendation_lines") or [])
         self.txt_next.setPlainText("\n".join(recommendation_lines))
 
-        self.lst_timeline.clear()
-        timeline = list(profile.get("timeline_lines") or [])
-        if not timeline:
-            self.lst_timeline.addItem(QListWidgetItem("(no project activity yet)"))
-        else:
-            for line in timeline:
-                self.lst_timeline.addItem(QListWidgetItem(line.removeprefix("- ")))
-
     def clear(self):
         self.lbl_title.setText("Activity Profile")
         self.lbl_subtitle.setText("Open a project to build a device/user activity profile from JSON datasets, PCAP sources, findings and notes.")
@@ -296,8 +272,6 @@ class ActivityProfilePage(QWidget):
         self.txt_summary.clear()
         self.txt_next.clear()
         self.txt_ai_summary.clear()
-        self.lst_timeline.clear()
-        self.lst_timeline.addItem(QListWidgetItem("(no active project)"))
 
     def generate_ai_summary(self):
         if not self.profile:
