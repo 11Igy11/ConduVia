@@ -264,8 +264,8 @@ class PcapPage(QWidget):
     def _build_highlights_tab(self) -> QWidget:
         page = QWidget()
         layout = QVBoxLayout(page)
-        layout.setContentsMargins(12, 12, 12, 12)
-        layout.setSpacing(10)
+        layout.setContentsMargins(14, 14, 14, 14)
+        layout.setSpacing(14)
 
         self.lbl_highlights_brief = QLabel("Open a PCAP file to see communication highlights.")
         self.lbl_highlights_brief.setObjectName("PcapPlainSummary")
@@ -304,47 +304,39 @@ class PcapPage(QWidget):
         self.tbl_communications.verticalHeader().setDefaultSectionSize(40)
         self.tbl_communications.sortByColumn(3, Qt.DescendingOrder)
         self.tbl_communications.selectionModel().currentRowChanged.connect(self._on_communication_selected)
+        self.tbl_communications.hide()
 
         self.txt_communication_detail = QTextEdit()
         self.txt_communication_detail.setReadOnly(True)
         self.txt_communication_detail.setMinimumWidth(300)
         self.txt_communication_detail.setPlaceholderText("Select a communication indicator to see the evidence used for classification.")
+        self.txt_communication_detail.hide()
 
-        self.btn_expand_communications = QPushButton("Expand table")
-        self.btn_expand_communications.setFixedHeight(34)
+        self.btn_expand_communications = QPushButton("Open full communication table")
+        self.btn_expand_communications.setFixedHeight(38)
         self.btn_expand_communications.clicked.connect(self._open_communications_dialog)
-
-        indicators_header = QHBoxLayout()
-        indicators_header.setContentsMargins(0, 0, 0, 0)
-        indicators_header.setSpacing(8)
-        indicators_title = QLabel("Communication indicators")
-        indicators_title.setObjectName("SectionTitle")
-        indicators_header.addWidget(indicators_title)
-        indicators_header.addStretch()
-        indicators_header.addWidget(self.btn_expand_communications)
 
         brief_group = self._group("Investigation brief", self.lbl_highlights_brief)
         brief_group.setMaximumHeight(145)
-        table_panel = QWidget()
-        table_layout = QVBoxLayout(table_panel)
-        table_layout.setContentsMargins(0, 0, 0, 0)
-        table_layout.setSpacing(8)
-        table_layout.addLayout(indicators_header)
-        table_layout.addWidget(self.tbl_communications, 1)
 
-        detail_group = self._group("Selected indicator evidence", self.txt_communication_detail)
-        detail_group.setMinimumWidth(320)
+        self.lbl_communication_count = QLabel("0 indicators")
+        self.lbl_communication_count.setObjectName("ProfileMetric")
+        self.lbl_communication_count.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self.lbl_communication_breakdown = QLabel("Messaging/push: 0 | Possible call/media: 0 | Services: 0")
+        self.lbl_communication_breakdown.setObjectName("MutedLabel")
+        self.lbl_communication_breakdown.setWordWrap(True)
+        self.lbl_communication_breakdown.setTextInteractionFlags(Qt.TextSelectableByMouse)
 
-        body = QSplitter(Qt.Horizontal)
-        body.addWidget(table_panel)
-        body.addWidget(detail_group)
-        body.setStretchFactor(0, 5)
-        body.setStretchFactor(1, 1)
-        body.setCollapsible(0, False)
-        body.setCollapsible(1, False)
-
+        communication_card = self._evidence_launcher_card(
+            "Communication indicators",
+            "Metadata-based app/service indicators. Open the full table to sort, copy and inspect evidence for each row.",
+            self.lbl_communication_count,
+            self.lbl_communication_breakdown,
+            self.btn_expand_communications,
+        )
         layout.addWidget(brief_group)
-        layout.addWidget(body, 1)
+        layout.addWidget(communication_card, 0)
+        layout.addStretch()
 
         return page
 
@@ -485,23 +477,31 @@ class PcapPage(QWidget):
         )
         self.tbl_network_overview.setMinimumHeight(430)
         self.tbl_network_overview.verticalHeader().setDefaultSectionSize(38)
-        self.btn_expand_network_overview = QPushButton("Expand")
-        self.btn_expand_network_overview.setFixedHeight(32)
+        self.tbl_network_overview.hide()
+        self.btn_expand_network_overview = QPushButton("Open full network table")
+        self.btn_expand_network_overview.setFixedHeight(38)
         self.btn_expand_network_overview.clicked.connect(
             lambda: self._open_table_dialog("Network overview", self.tbl_network_overview)
         )
-        network_panel = QWidget()
-        network_layout = QVBoxLayout(network_panel)
-        network_layout.setContentsMargins(0, 0, 0, 0)
-        network_layout.setSpacing(8)
-        network_header = QHBoxLayout()
-        network_header.addStretch()
-        network_header.addWidget(self.btn_expand_network_overview)
-        network_layout.addLayout(network_header)
-        network_layout.addWidget(self.tbl_network_overview, 1)
+
+        self.lbl_network_overview_count = QLabel("0 rows")
+        self.lbl_network_overview_count.setObjectName("ProfileMetric")
+        self.lbl_network_overview_count.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self.lbl_network_overview_breakdown = QLabel("Protocols: 0 | Endpoints: 0 | Ports: 0")
+        self.lbl_network_overview_breakdown.setObjectName("MutedLabel")
+        self.lbl_network_overview_breakdown.setWordWrap(True)
+        self.lbl_network_overview_breakdown.setTextInteractionFlags(Qt.TextSelectableByMouse)
+
+        network_card = self._evidence_launcher_card(
+            "Network overview",
+            "Combined view of protocols, top endpoints and top ports observed in the capture.",
+            self.lbl_network_overview_count,
+            self.lbl_network_overview_breakdown,
+            self.btn_expand_network_overview,
+        )
 
         layout.addWidget(self.overview_card)
-        layout.addWidget(self._group("Network overview", network_panel), 1)
+        layout.addWidget(network_card, 0)
         layout.addStretch()
 
         scroll.setWidget(content)
@@ -646,8 +646,8 @@ class PcapPage(QWidget):
     def _build_artifacts_tab(self) -> QWidget:
         page = QWidget()
         layout = QVBoxLayout(page)
-        layout.setContentsMargins(8, 8, 8, 8)
-        layout.setSpacing(10)
+        layout.setContentsMargins(14, 14, 14, 14)
+        layout.setSpacing(14)
 
         controls = QHBoxLayout()
         controls.setSpacing(10)
@@ -657,8 +657,8 @@ class PcapPage(QWidget):
         self.cmb_artifact_category.currentIndexChanged.connect(self._apply_artifact_filter)
         self.lbl_artifact_count = QLabel("")
         self.lbl_artifact_count.setObjectName("MutedLabel")
-        self.btn_expand_artifacts = QPushButton("Expand")
-        self.btn_expand_artifacts.setFixedHeight(32)
+        self.btn_expand_artifacts = QPushButton("Open full artifacts table")
+        self.btn_expand_artifacts.setFixedHeight(38)
         self.btn_expand_artifacts.clicked.connect(
             lambda: self._open_table_dialog("Extracted artifacts", self.tbl_artifacts)
         )
@@ -666,7 +666,6 @@ class PcapPage(QWidget):
         controls.addWidget(self.lbl_artifact_count)
         controls.addStretch()
         controls.addWidget(self.btn_expand_artifacts)
-        layout.addLayout(controls)
 
         columns = [
             ("category", "Category"),
@@ -676,47 +675,59 @@ class PcapPage(QWidget):
             ("visibility", "Visibility"),
             ("first_seen", "First Seen"),
             ("last_seen", "Last Seen"),
+            ("source", "Source"),
+            ("destination", "Destination"),
+            ("explanation", "Meaning"),
         ]
 
         self.tbl_artifacts = self._table(
             columns,
-            fixed_widths={0: 150, 1: 180, 2: 360, 3: 80, 4: 150, 5: 170, 6: 170},
+            fixed_widths={0: 150, 1: 180, 2: 360, 3: 80, 4: 150, 5: 170, 6: 170, 7: 210, 8: 210, 9: 380},
             stretch_columns=[],
         )
         self.tbl_artifacts.setMinimumHeight(360)
         self.tbl_artifacts.selectionModel().currentRowChanged.connect(self._on_artifact_selected)
+        self.tbl_artifacts.hide()
 
         self.txt_artifact_detail = QTextEdit()
         self.txt_artifact_detail.setReadOnly(True)
         self.txt_artifact_detail.setMinimumHeight(150)
         self.txt_artifact_detail.setPlaceholderText("Select an artifact to see source, destination and explanation.")
+        self.txt_artifact_detail.hide()
 
-        splitter = QSplitter(Qt.Vertical)
-        splitter.addWidget(self._group("Extracted artifacts", self.tbl_artifacts))
-        splitter.addWidget(self._group("Artifact details", self.txt_artifact_detail))
-        splitter.setStretchFactor(0, 4)
-        splitter.setStretchFactor(1, 1)
-        splitter.setCollapsible(0, False)
-        splitter.setCollapsible(1, False)
-        layout.addWidget(splitter, 1)
+        self.lbl_artifact_total = QLabel("0 artifacts")
+        self.lbl_artifact_total.setObjectName("ProfileMetric")
+        self.lbl_artifact_total.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self.lbl_artifact_breakdown = QLabel("No artifact categories loaded.")
+        self.lbl_artifact_breakdown.setObjectName("MutedLabel")
+        self.lbl_artifact_breakdown.setWordWrap(True)
+        self.lbl_artifact_breakdown.setTextInteractionFlags(Qt.TextSelectableByMouse)
+
+        layout.addLayout(controls)
+        layout.addWidget(
+            self._evidence_launcher_card(
+                "Extracted artifacts",
+                "Visible web, local network, credential and Windows/enterprise indicators extracted from readable capture data.",
+                self.lbl_artifact_total,
+                self.lbl_artifact_breakdown,
+                self.btn_expand_artifacts,
+            ),
+            0,
+        )
+        layout.addStretch()
         return page
 
     def _build_connections_tab(self) -> QWidget:
         page = QWidget()
         layout = QVBoxLayout(page)
-        layout.setContentsMargins(8, 8, 8, 8)
-        layout.setSpacing(8)
-        header = QHBoxLayout()
-        title = QLabel("Connections")
-        title.setObjectName("SectionTitle")
-        self.btn_expand_connections = QPushButton("Expand")
-        self.btn_expand_connections.setFixedHeight(32)
+        layout.setContentsMargins(14, 14, 14, 14)
+        layout.setSpacing(14)
+
+        self.btn_expand_connections = QPushButton("Open full connections table")
+        self.btn_expand_connections.setFixedHeight(38)
         self.btn_expand_connections.clicked.connect(
             lambda: self._open_table_dialog("Connections", self.tbl_connections)
         )
-        header.addWidget(title)
-        header.addStretch()
-        header.addWidget(self.btn_expand_connections)
         self.tbl_connections = self._table([
             ("src_ip", "Source IP"),
             ("src_port", "Source Port"),
@@ -731,8 +742,27 @@ class PcapPage(QWidget):
             ("bidirectional_last_seen_ms", "Last Seen"),
             ("pcap_payload_preview", "Visible Preview"),
         ], fixed_widths={0: 145, 1: 105, 2: 145, 3: 125, 4: 92, 5: 145, 6: 260, 7: 110, 8: 105, 9: 180, 10: 180, 11: 300}, stretch_columns=[])
-        layout.addLayout(header)
-        layout.addWidget(self.tbl_connections)
+        self.tbl_connections.hide()
+
+        self.lbl_connections_count = QLabel("0 connections")
+        self.lbl_connections_count.setObjectName("ProfileMetric")
+        self.lbl_connections_count.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self.lbl_connections_breakdown = QLabel("No connection rows loaded.")
+        self.lbl_connections_breakdown.setObjectName("MutedLabel")
+        self.lbl_connections_breakdown.setWordWrap(True)
+        self.lbl_connections_breakdown.setTextInteractionFlags(Qt.TextSelectableByMouse)
+
+        layout.addWidget(
+            self._evidence_launcher_card(
+                "Connections",
+                "Full flow-level connection rows from the capture, including endpoints, ports, protocol, volume, timing and visible previews.",
+                self.lbl_connections_count,
+                self.lbl_connections_breakdown,
+                self.btn_expand_connections,
+            ),
+            0,
+        )
+        layout.addStretch()
         return page
 
     def _table(
@@ -913,10 +943,10 @@ class PcapPage(QWidget):
             empty_text="No visibility indicators are available.",
         )
         self.lbl_overview_text.setText(self._overview_text(summary))
-        self._set_table(self.tbl_network_overview, self._network_overview_rows(summary))
+        self._set_network_overview_table(summary)
         self._set_evidence_tables(summary)
         self._set_artifact_tables(summary.artifacts)
-        self._set_table(self.tbl_connections, summary.flows)
+        self._set_connections_table(summary)
 
     def refresh_current_view(self) -> None:
         if not self.summary:
@@ -938,10 +968,10 @@ class PcapPage(QWidget):
             empty_text="No visibility indicators are available.",
         )
         self.lbl_overview_text.setText(self._overview_text(summary))
-        self._set_table(self.tbl_network_overview, self._network_overview_rows(summary))
+        self._set_network_overview_table(summary)
         self._set_evidence_tables(summary)
         self._set_artifact_tables(summary.artifacts)
-        self._set_table(self.tbl_connections, summary.flows)
+        self._set_connections_table(summary)
 
     def _service_chart_rows(self, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         chart_rows = []
@@ -1044,6 +1074,27 @@ class PcapPage(QWidget):
             })
         return rows
 
+    def _set_network_overview_table(self, summary: PcapSummary) -> None:
+        rows = self._network_overview_rows(summary)
+        self._set_table(self.tbl_network_overview, rows)
+        self.lbl_network_overview_count.setText(f"{len(rows):,} rows")
+        self.lbl_network_overview_breakdown.setText(
+            f"Protocols: {len(summary.protocols or []):,} | "
+            f"Endpoints: {len(summary.top_endpoints or []):,} | "
+            f"Ports: {len(summary.top_ports or []):,}"
+        )
+
+    def _set_connections_table(self, summary: PcapSummary) -> None:
+        rows = summary.flows or []
+        self._set_table(self.tbl_connections, rows)
+        payload_rows = sum(1 for row in rows if str(row.get("pcap_payload_preview") or "").strip())
+        device_ip = summary.likely_device_ip or "-"
+        self.lbl_connections_count.setText(f"{len(rows):,} connections")
+        self.lbl_connections_breakdown.setText(
+            f"Device IP: {device_ip} | Visible previews: {payload_rows:,} | "
+            f"Packets: {summary.packet_count:,} | Volume: {human_bytes(summary.wire_bytes, precision=2)}"
+        )
+
     def _set_highlights(self, summary: PcapSummary) -> None:
         rows = summary.communication_rows or []
         media_like = sum(1 for row in rows if "media" in str(row.get("activity_type") or "").lower() or "call" in str(row.get("activity_type") or "").lower())
@@ -1063,6 +1114,12 @@ class PcapPage(QWidget):
             "Classification is based on metadata such as host names, ports, protocol, duration and volume. It is an investigative indicator, not content proof.",
         ]
         self.lbl_highlights_brief.setText("\n".join(lines))
+        self.lbl_communication_count.setText(f"{len(rows):,} indicators")
+        self.lbl_communication_breakdown.setText(
+            f"Messaging/push: {messaging_like:,} | "
+            f"Possible call/media: {media_like:,} | "
+            f"Services: {len(services):,}"
+        )
         self._set_table(self.tbl_communications, rows)
         if rows:
             self.tbl_communications.selectRow(0)
@@ -1201,6 +1258,11 @@ class PcapPage(QWidget):
         for category, count in sorted(counts.items()):
             self.cmb_artifact_category.addItem(f"{category} ({count})", category)
         self.cmb_artifact_category.blockSignals(False)
+        if counts:
+            top_categories = ", ".join(f"{category}: {count:,}" for category, count in sorted(counts.items())[:6])
+        else:
+            top_categories = "No artifact categories loaded."
+        self.lbl_artifact_breakdown.setText(top_categories)
         self._apply_artifact_filter()
 
     def _apply_artifact_filter(self, *args) -> None:
@@ -1212,6 +1274,9 @@ class PcapPage(QWidget):
         ]
         self._set_table(self.tbl_artifacts, rows)
         self.lbl_artifact_count.setText(f"{len(rows)} shown")
+        selected_category = self.cmb_artifact_category.currentData() if hasattr(self, "cmb_artifact_category") else ""
+        label = "artifacts" if not selected_category else f"{selected_category} artifacts"
+        self.lbl_artifact_total.setText(f"{len(rows):,} {label}")
         if rows:
             self.tbl_artifacts.selectRow(0)
         else:
