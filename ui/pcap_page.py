@@ -8,6 +8,7 @@ from typing import Any
 from PySide6.QtCore import QAbstractTableModel, QModelIndex, QObject, QThread, Qt, Signal
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QApplication,
     QComboBox,
     QDialog,
     QFileDialog,
@@ -306,7 +307,7 @@ class PcapPage(QWidget):
 
         self.txt_communication_detail = QTextEdit()
         self.txt_communication_detail.setReadOnly(True)
-        self.txt_communication_detail.setMinimumWidth(420)
+        self.txt_communication_detail.setMinimumWidth(300)
         self.txt_communication_detail.setPlaceholderText("Select a communication indicator to see the evidence used for classification.")
 
         self.btn_expand_communications = QPushButton("Expand table")
@@ -332,13 +333,13 @@ class PcapPage(QWidget):
         table_layout.addWidget(self.tbl_communications, 1)
 
         detail_group = self._group("Selected indicator evidence", self.txt_communication_detail)
-        detail_group.setMinimumWidth(430)
+        detail_group.setMinimumWidth(320)
 
         body = QSplitter(Qt.Horizontal)
         body.addWidget(table_panel)
         body.addWidget(detail_group)
-        body.setStretchFactor(0, 3)
-        body.setStretchFactor(1, 2)
+        body.setStretchFactor(0, 5)
+        body.setStretchFactor(1, 1)
         body.setCollapsible(0, False)
         body.setCollapsible(1, False)
 
@@ -396,7 +397,7 @@ class PcapPage(QWidget):
             value_label_key="value",
             label_width=190,
             label_limit=38,
-            max_rows=8,
+            max_rows=24,
         )
         self.chart_activity = BarChartWidget(
             "Activity timeline by hour",
@@ -404,7 +405,7 @@ class PcapPage(QWidget):
             value_label_key="value",
             label_width=175,
             label_limit=28,
-            max_rows=8,
+            max_rows=24,
         )
         self.chart_visibility = BarChartWidget(
             "Visible vs encrypted indicators",
@@ -484,9 +485,23 @@ class PcapPage(QWidget):
         )
         self.tbl_network_overview.setMinimumHeight(430)
         self.tbl_network_overview.verticalHeader().setDefaultSectionSize(38)
+        self.btn_expand_network_overview = QPushButton("Expand")
+        self.btn_expand_network_overview.setFixedHeight(32)
+        self.btn_expand_network_overview.clicked.connect(
+            lambda: self._open_table_dialog("Network overview", self.tbl_network_overview)
+        )
+        network_panel = QWidget()
+        network_layout = QVBoxLayout(network_panel)
+        network_layout.setContentsMargins(0, 0, 0, 0)
+        network_layout.setSpacing(8)
+        network_header = QHBoxLayout()
+        network_header.addStretch()
+        network_header.addWidget(self.btn_expand_network_overview)
+        network_layout.addLayout(network_header)
+        network_layout.addWidget(self.tbl_network_overview, 1)
 
         layout.addWidget(self.overview_card)
-        layout.addWidget(self._group("Network overview", self.tbl_network_overview), 1)
+        layout.addWidget(self._group("Network overview", network_panel), 1)
         layout.addStretch()
 
         scroll.setWidget(content)
@@ -525,10 +540,35 @@ class PcapPage(QWidget):
         self.tbl_samples.setMinimumHeight(320)
         self.tbl_samples.verticalHeader().setDefaultSectionSize(38)
 
+        self.btn_expand_metadata = QPushButton("Expand")
+        self.btn_expand_metadata.setFixedHeight(32)
+        self.btn_expand_metadata.clicked.connect(
+            lambda: self._open_table_dialog("Visible metadata", self.tbl_visible_metadata)
+        )
+        metadata_panel = QWidget()
+        metadata_layout = QVBoxLayout(metadata_panel)
+        metadata_layout.setContentsMargins(0, 0, 0, 0)
+        metadata_layout.setSpacing(8)
+        metadata_header = QHBoxLayout()
+        metadata_header.addStretch()
+        metadata_header.addWidget(self.btn_expand_metadata)
+        metadata_layout.addLayout(metadata_header)
+        metadata_layout.addWidget(self.tbl_visible_metadata, 1)
+
         samples_panel = QWidget()
         samples_layout = QVBoxLayout(samples_panel)
         samples_layout.setContentsMargins(0, 0, 0, 0)
         samples_layout.setSpacing(8)
+
+        self.btn_expand_samples = QPushButton("Expand")
+        self.btn_expand_samples.setFixedHeight(32)
+        self.btn_expand_samples.clicked.connect(
+            lambda: self._open_table_dialog("Readable payload / metadata samples", self.tbl_samples)
+        )
+        samples_header = QHBoxLayout()
+        samples_header.addStretch()
+        samples_header.addWidget(self.btn_expand_samples)
+        samples_layout.addLayout(samples_header)
 
         samples_hint = QLabel(
             "Visible values are extracted from DNS names, TLS SNI, HTTP host/header data and plaintext payload previews. "
@@ -540,7 +580,7 @@ class PcapPage(QWidget):
         samples_layout.addWidget(samples_hint)
         samples_layout.addWidget(self.tbl_samples, 1)
 
-        layout.addWidget(self._group("Visible metadata", self.tbl_visible_metadata), 0)
+        layout.addWidget(self._group("Visible metadata", metadata_panel), 0)
         layout.addWidget(self._group("Readable payload / metadata samples", samples_panel), 1)
         return page
 
@@ -558,9 +598,15 @@ class PcapPage(QWidget):
         self.cmb_artifact_category.currentIndexChanged.connect(self._apply_artifact_filter)
         self.lbl_artifact_count = QLabel("")
         self.lbl_artifact_count.setObjectName("MutedLabel")
+        self.btn_expand_artifacts = QPushButton("Expand")
+        self.btn_expand_artifacts.setFixedHeight(32)
+        self.btn_expand_artifacts.clicked.connect(
+            lambda: self._open_table_dialog("Extracted artifacts", self.tbl_artifacts)
+        )
         controls.addWidget(self.cmb_artifact_category)
         controls.addWidget(self.lbl_artifact_count)
         controls.addStretch()
+        controls.addWidget(self.btn_expand_artifacts)
         layout.addLayout(controls)
 
         columns = [
@@ -600,6 +646,18 @@ class PcapPage(QWidget):
         page = QWidget()
         layout = QVBoxLayout(page)
         layout.setContentsMargins(8, 8, 8, 8)
+        layout.setSpacing(8)
+        header = QHBoxLayout()
+        title = QLabel("Connections")
+        title.setObjectName("SectionTitle")
+        self.btn_expand_connections = QPushButton("Expand")
+        self.btn_expand_connections.setFixedHeight(32)
+        self.btn_expand_connections.clicked.connect(
+            lambda: self._open_table_dialog("Connections", self.tbl_connections)
+        )
+        header.addWidget(title)
+        header.addStretch()
+        header.addWidget(self.btn_expand_connections)
         self.tbl_connections = self._table([
             ("src_ip", "Source IP"),
             ("src_port", "Source Port"),
@@ -614,6 +672,7 @@ class PcapPage(QWidget):
             ("bidirectional_last_seen_ms", "Last Seen"),
             ("pcap_payload_preview", "Visible Preview"),
         ], fixed_widths={0: 145, 1: 105, 2: 145, 3: 125, 4: 92, 5: 145, 6: 260, 7: 110, 8: 105, 9: 180, 10: 180, 11: 300}, stretch_columns=[])
+        layout.addLayout(header)
         layout.addWidget(self.tbl_connections)
         return page
 
@@ -655,6 +714,54 @@ class PcapPage(QWidget):
         layout = QVBoxLayout(group)
         layout.addWidget(widget)
         return group
+
+    def _dialog_size(self, preferred_width: int, preferred_height: int) -> tuple[int, int]:
+        screen = QApplication.primaryScreen()
+        if screen is None:
+            return preferred_width, preferred_height
+        available = screen.availableGeometry()
+        width = min(preferred_width, max(760, available.width() - 120))
+        height = min(preferred_height, max(520, available.height() - 120))
+        return width, height
+
+    def _open_table_dialog(self, title: str, source_table: QTableView) -> None:
+        source_model = source_table.model()
+        if not isinstance(source_model, DictTableModel) or not source_model.rows:
+            QMessageBox.information(self, title, "No rows are loaded.")
+            return
+
+        dlg = QDialog(self)
+        dlg.setWindowTitle(title)
+        dlg.resize(*self._dialog_size(1180, 720))
+
+        layout = QVBoxLayout(dlg)
+        layout.setContentsMargins(14, 14, 14, 14)
+        layout.setSpacing(10)
+
+        hint = QLabel("Expanded table view. Sort columns, select rows, or right-click to copy values.")
+        hint.setObjectName("MutedLabel")
+        hint.setWordWrap(True)
+        layout.addWidget(hint)
+
+        fixed_widths = {
+            idx: max(110, min(420, source_table.columnWidth(idx)))
+            for idx in range(source_model.columnCount())
+        }
+        table = self._table(source_model.columns, fixed_widths=fixed_widths, stretch_columns=[])
+        table.setMinimumHeight(520)
+        table.verticalHeader().setDefaultSectionSize(max(34, source_table.verticalHeader().defaultSectionSize()))
+        self._set_table(table, list(source_model.rows))
+        layout.addWidget(table, 1)
+
+        footer = QHBoxLayout()
+        footer.addStretch()
+        btn_close = QPushButton("Close")
+        btn_close.setFixedHeight(34)
+        btn_close.clicked.connect(dlg.accept)
+        footer.addWidget(btn_close)
+        layout.addLayout(footer)
+
+        dlg.exec()
 
     def _format_pcap_time(self, value: Any) -> str:
         text = format_pcap_datetime(value)
@@ -918,7 +1025,7 @@ class PcapPage(QWidget):
 
         dlg = QDialog(self)
         dlg.setWindowTitle("Communication indicators")
-        dlg.resize(1500, 820)
+        dlg.resize(*self._dialog_size(1180, 720))
 
         layout = QVBoxLayout(dlg)
         layout.setContentsMargins(14, 14, 14, 14)
@@ -940,7 +1047,7 @@ class PcapPage(QWidget):
 
         detail = QTextEdit()
         detail.setReadOnly(True)
-        detail.setMinimumWidth(420)
+        detail.setMinimumWidth(320)
         detail.setPlaceholderText("Select a communication indicator to see the evidence used for classification.")
 
         def update_detail(current: QModelIndex, previous: QModelIndex | None = None) -> None:
@@ -958,8 +1065,8 @@ class PcapPage(QWidget):
         splitter = QSplitter(Qt.Horizontal)
         splitter.addWidget(table)
         splitter.addWidget(self._group("Selected indicator evidence", detail))
-        splitter.setStretchFactor(0, 3)
-        splitter.setStretchFactor(1, 2)
+        splitter.setStretchFactor(0, 5)
+        splitter.setStretchFactor(1, 1)
         splitter.setCollapsible(0, False)
         splitter.setCollapsible(1, False)
         layout.addWidget(splitter, 1)
