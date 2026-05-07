@@ -81,6 +81,10 @@ def write_project_workspace_manifest(
     identifiers: str = "",
     json_datasets: list[str] | tuple[str, ...] | None = None,
     pcap_sources: list[str] | tuple[str, ...] | None = None,
+    findings: list[str] | tuple[str, ...] | None = None,
+    activity: list[str] | tuple[str, ...] | None = None,
+    profile_report: str = "",
+    case_snapshot: str = "",
 ) -> None:
     folder = (base_folder or "").strip()
     if not folder:
@@ -89,6 +93,10 @@ def write_project_workspace_manifest(
     ensure_workspace_structure(folder)
     json_items = [str(item) for item in (json_datasets or []) if str(item or "").strip()]
     pcap_items = [str(item) for item in (pcap_sources or []) if str(item or "").strip()]
+    finding_items = [str(item) for item in (findings or []) if str(item or "").strip()]
+    activity_items = [str(item) for item in (activity or []) if str(item or "").strip()]
+    profile_text = (profile_report or "").strip()
+    snapshot_text = (case_snapshot or "").strip()
 
     lines = [
         "ViaNyquist project workspace",
@@ -100,6 +108,8 @@ def write_project_workspace_manifest(
         "",
         f"JSON datasets: {len(json_items)}",
         f"PCAP sources: {len(pcap_items)}",
+        f"Findings: {len(finding_items)}",
+        f"Activity events: {len(activity_items)}",
         "",
         "Workspace folders:",
     ]
@@ -110,7 +120,11 @@ def write_project_workspace_manifest(
         "- project_manifest.txt is a lightweight case index.",
         "- datasets/json_datasets.txt lists saved JSON dataset references.",
         "- datasets/pcap_sources.txt lists saved PCAP source references.",
+        "- findings/findings.txt lists saved finding references and notes.",
         "- notes/project_notes.txt is maintained from ViaNyquist Notes.",
+        "- reports/activity_profile.txt contains the current Activity Profile snapshot.",
+        "- reports/activity_log.txt contains the current project activity log.",
+        "- reports/case_snapshot.txt contains a compact beta case folder summary.",
     ])
 
     Path(folder, "project_manifest.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -125,6 +139,30 @@ def write_project_workspace_manifest(
         "datasets",
         "pcap_sources.txt",
         "\n".join(pcap_items) + ("\n" if pcap_items else ""),
+    )
+    write_workspace_text_file(
+        folder,
+        "findings",
+        "findings.txt",
+        "\n\n".join(finding_items) + ("\n" if finding_items else "No findings saved for this project.\n"),
+    )
+    write_workspace_text_file(
+        folder,
+        "reports",
+        "activity_log.txt",
+        "\n".join(activity_items) + ("\n" if activity_items else "No activity recorded for this project.\n"),
+    )
+    write_workspace_text_file(
+        folder,
+        "reports",
+        "activity_profile.txt",
+        profile_text + ("\n" if profile_text else "No activity profile available.\n"),
+    )
+    write_workspace_text_file(
+        folder,
+        "reports",
+        "case_snapshot.txt",
+        snapshot_text + ("\n" if snapshot_text else "No case snapshot available.\n"),
     )
 
 def make_safe_project_folder_name(project_name: str) -> str:

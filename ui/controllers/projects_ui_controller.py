@@ -8,21 +8,24 @@ from core.db import (
     list_projects,
     get_project,
     delete_project,
+    get_project_notes,
     list_recent_datasets,
     list_pcap_sources,
     list_activity,
+    list_findings,
     touch_project,
     update_project,
 )
-from core.formatters import format_pcap_datetime, human_bytes
+from core.formatters import format_duration_compact_ms, format_pcap_datetime, human_bytes
 from core.project_identity import project_identifiers_text, subject_display_label
-from core.project_profile import build_project_activity_profile
+from core.project_profile import build_project_activity_profile, format_project_activity_profile
 from core.workspace import (
     ensure_workspace_structure,
     build_workspace_path,
     move_workspace_folder,
     delete_workspace_folder,
     looks_like_vianyquist_workspace,   
+    write_project_notes_backup,
     write_project_workspace_manifest,
 )
 from ui.dialogs import project_details_dialog
@@ -393,6 +396,7 @@ class ProjectsUIController:
         self.app.refresh_findings_ui()
         self.app.refresh_notes_ui()
         self.app.refresh_activity_profile_ui()
+        self.sync_project_workspace(p.id)
 
     def sync_project_workspace(self, project_id: int | None) -> None:
         if project_id is None:
@@ -412,6 +416,19 @@ class ProjectsUIController:
                 pieces.append(f"sha256={source.file_sha256}")
             pcap_sources.append(" | ".join(piece for piece in pieces if piece))
 
+        profile = build_project_activity_profile(project_id)
+        activity_lines = self._workspace_activity_lines(project_id)
+        finding_lines = self._workspace_finding_lines(project_id)
+        case_snapshot = self._workspace_case_snapshot(
+            project=project,
+            profile=profile,
+            json_count=len(json_datasets),
+            pcap_count=len(pcap_sources),
+            finding_count=len(finding_lines),
+            activity_count=len(activity_lines),
+        )
+
+        write_project_notes_backup(project.base_folder, get_project_notes(project_id))
         write_project_workspace_manifest(
             project.base_folder,
             project_name=project.name,
@@ -420,7 +437,96 @@ class ProjectsUIController:
             identifiers=project_identifiers_text(project),
             json_datasets=json_datasets,
             pcap_sources=pcap_sources,
+            findings=finding_lines,
+            activity=activity_lines,
+            profile_report=format_project_activity_profile(profile),
+            case_snapshot=case_snapshot,
         )
+
+    def _workspace_activity_lines(self, project_id: int) -> list[str]:
+        lines: list[str] = []
+        for row in list_activity(project_id, limit=1000):
+            created_at = str(row["created_at"] or "")
+            event_type = str(row["event_type"] or "")
+            message = str(row["message"] or "")
+            label = self.activity_label(event_type, message)
+            lines.append(f"{created_at} | {event_type or '-'} | {label}")
+        return lines
+
+    def _workspace_finding_lines(self, project_id: int) -> list[str]:
+        lines: list[str] = []
+        for row in list_findings(project_id, limit=1000):
+            title = str(row["title"] or "Untitled finding")
+            status = str(row["status"] or "-")
+            tags = str(row["tags"] or "-")
+            protocol = str(row["protocol"] or "-")
+            app_name = str(row["application_name"] or "-")
+            host = str(row["requested_server_name"] or "-")
+            src = self._endpoint_text(row["src_ip"], row["src_port"])
+            dst = self._endpoint_text(row["dst_ip"], row["dst_port"])
+            volume = human_bytes(row["bidirectional_bytes"], precision=2)
+            packets = row["bidirectional_packets"] if row["bidirectional_packets"] is not None else "-"
+            duration = format_duration_compact_ms(row["bidirectional_duration_ms"]) or "-"
+            note = str(row["note"] or "").strip()
+
+            parts = [
+                f"#{row['id']} | {status} | {title}",
+                f"Tags: {tags}",
+                f"Flow: {src} -> {dst} | {protocol} | {app_name} | Host/SNI: {host}",
+                f"Volume: {volume} | Packets: {packets} | Duration: {duration}",
+            ]
+            if note:
+                parts.extend(["Note:", note])
+            lines.append("\n".join(parts))
+        return lines
+
+    def _workspace_case_snapshot(
+        self,
+        *,
+        project,
+        profile: dict,
+        json_count: int,
+        pcap_count: int,
+        finding_count: int,
+        activity_count: int,
+    ) -> str:
+        lines = [
+            "ViaNyquist beta case snapshot",
+            "",
+            f"Project: {project.name}",
+            f"Project ID: {project.id}",
+            f"Subject: {subject_display_label(project)}",
+            f"Known identifiers: {project_identifiers_text(project)}",
+            "",
+            f"Unique JSON datasets: {json_count}",
+            f"Unique PCAP sources: {pcap_count}",
+            f"Findings: {finding_count}",
+            f"Activity events: {activity_count}",
+        ]
+
+        capture_range = profile.get("capture_range") or {}
+        if capture_range.get("start") or capture_range.get("end"):
+            lines.append(
+                "Observed PCAP capture range: "
+                f"{format_pcap_datetime(capture_range.get('start')) or '-'} to "
+                f"{format_pcap_datetime(capture_range.get('end')) or '-'}"
+            )
+
+        pcap_ips = profile.get("pcap_device_ips") or {}
+        if pcap_ips:
+            ip_text = ", ".join(f"{ip} ({count})" for ip, count in pcap_ips.items())
+            lines.append(f"Observed PCAP device IPs: {ip_text}")
+
+        warnings = self._case_dashboard_warnings(project, profile)
+        lines.append("")
+        lines.append("Review:")
+        lines.append("No immediate project consistency warnings." if not warnings else " | ".join(warnings))
+        return "\n".join(lines)
+
+    def _endpoint_text(self, ip_value, port_value) -> str:
+        ip = str(ip_value or "-")
+        port = str(port_value or "").strip()
+        return f"{ip}:{port}" if port else ip
 
     def refresh_recent_datasets(self, project_id: int):
         self.app.recent_list.clear()

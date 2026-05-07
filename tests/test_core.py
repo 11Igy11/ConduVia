@@ -467,17 +467,31 @@ class WorkspaceTests(unittest.TestCase):
                 identifiers="MSISDN: 385911234567",
                 json_datasets=[str(root / "dataset.json")],
                 pcap_sources=["sample.pcap | C:/captures/sample.pcap | sha256=abc"],
+                findings=["#1 | open | Important flow"],
+                activity=["2026-05-07 08:00:00 | dataset_loaded | JSON dataset loaded"],
+                profile_report="Project Activity Profile\n- Dataset loads: 1",
+                case_snapshot="ViaNyquist beta case snapshot\nProject: Case A",
             )
 
             manifest = (root / "project_manifest.txt").read_text(encoding="utf-8")
             json_refs = (root / "datasets" / "json_datasets.txt").read_text(encoding="utf-8")
             pcap_refs = (root / "datasets" / "pcap_sources.txt").read_text(encoding="utf-8")
+            findings = (root / "findings" / "findings.txt").read_text(encoding="utf-8")
+            activity = (root / "reports" / "activity_log.txt").read_text(encoding="utf-8")
+            profile = (root / "reports" / "activity_profile.txt").read_text(encoding="utf-8")
+            snapshot = (root / "reports" / "case_snapshot.txt").read_text(encoding="utf-8")
 
         self.assertIn("Project: Case A", manifest)
         self.assertIn("Subject: Ana Horvat", manifest)
         self.assertIn("JSON datasets: 1", manifest)
+        self.assertIn("Findings: 1", manifest)
+        self.assertIn("Activity events: 1", manifest)
         self.assertIn("dataset.json", json_refs)
         self.assertIn("sample.pcap", pcap_refs)
+        self.assertIn("Important flow", findings)
+        self.assertIn("dataset_loaded", activity)
+        self.assertIn("Project Activity Profile", profile)
+        self.assertIn("beta case snapshot", snapshot)
 
 
 class AppSettingsTests(unittest.TestCase):
