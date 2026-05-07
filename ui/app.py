@@ -404,23 +404,23 @@ class App(QWidget):
         sidebar = QVBoxLayout()
 
         self.btn_nav_projects = QPushButton("Projects")
-        self.btn_nav_profile = QPushButton("Profile")
-        self.btn_nav_notes = QPushButton("Notes")
-        self.btn_nav_ai = QPushButton("AI")
         self.btn_nav_json = QPushButton("JSON")
-        self.btn_global_refresh = QPushButton("Refresh All")
         self.btn_nav_pcap = QPushButton("PCAP")
+        self.btn_nav_ai = QPushButton("AI output")
+        self.btn_nav_notes = QPushButton("Notes")
+        self.btn_nav_profile = QPushButton("Profile")
+        self.btn_global_refresh = QPushButton("Refresh")
         self.btn_nav_settings = QPushButton("Settings")
         self.btn_nav_help = QPushButton("Help")
 
         for b in (
             self.btn_nav_projects,
-            self.btn_nav_profile,
-            self.btn_nav_notes,
-            self.btn_nav_ai,
             self.btn_nav_json,
-            self.btn_global_refresh,
             self.btn_nav_pcap,
+            self.btn_nav_ai,
+            self.btn_nav_notes,
+            self.btn_nav_profile,
+            self.btn_global_refresh,
             self.btn_nav_settings,
             self.btn_nav_help,
         ):
@@ -441,13 +441,13 @@ class App(QWidget):
         self._nav_settings = self.btn_nav_settings
 
         sidebar.addWidget(self.btn_nav_projects)
-        sidebar.addWidget(self.btn_nav_profile)
-        sidebar.addWidget(self.btn_nav_notes)
-        sidebar.addWidget(self.btn_nav_ai)
         sidebar.addWidget(self.btn_nav_json)
-        sidebar.addWidget(self.btn_global_refresh)
-        sidebar.addStretch()
         sidebar.addWidget(self.btn_nav_pcap)
+        sidebar.addWidget(self.btn_nav_ai)
+        sidebar.addWidget(self.btn_nav_notes)
+        sidebar.addWidget(self.btn_nav_profile)
+        sidebar.addStretch()
+        sidebar.addWidget(self.btn_global_refresh)
         sidebar.addWidget(self.btn_nav_settings)
         sidebar.addWidget(self.btn_nav_help)
 
