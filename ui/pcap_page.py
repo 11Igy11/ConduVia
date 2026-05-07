@@ -270,7 +270,7 @@ class PcapPage(QWidget):
         self.lbl_highlights_brief.setWordWrap(True)
         self.lbl_highlights_brief.setTextInteractionFlags(Qt.TextSelectableByMouse)
 
-        self.communication_full_columns = [
+        self.communication_columns = [
             ("service", "Service"),
             ("activity_type", "Indicator"),
             ("confidence", "Confidence"),
@@ -281,26 +281,16 @@ class PcapPage(QWidget):
             ("duration_ms", "Duration"),
             ("first_seen", "First Seen"),
         ]
-        self.communication_columns = [
-            ("service", "Service"),
-            ("activity_type", "Indicator"),
-            ("host", "Host / Signal"),
-            ("bytes", "Volume"),
-            ("packets", "Packets"),
-            ("duration_ms", "Duration"),
-            ("first_seen", "First Seen"),
-        ]
-        self.communication_fixed_widths = {0: 170, 3: 92, 4: 82, 5: 96, 6: 170}
-        self.communication_full_fixed_widths = {0: 170, 2: 92, 4: 72, 5: 92, 6: 82, 7: 96, 8: 170}
+        self.communication_fixed_widths = {0: 170, 2: 92, 4: 72, 5: 92, 6: 82, 7: 96, 8: 170}
         self.tbl_communications = self._table(
             self.communication_columns,
             fixed_widths=self.communication_fixed_widths,
-            stretch_columns=[1, 2],
+            stretch_columns=[1, 3],
         )
-        self.tbl_communications.setMinimumHeight(260)
+        self.tbl_communications.setMinimumHeight(420)
         self.tbl_communications.setWordWrap(True)
         self.tbl_communications.verticalHeader().setDefaultSectionSize(40)
-        self.tbl_communications.sortByColumn(3, Qt.DescendingOrder)
+        self.tbl_communications.sortByColumn(5, Qt.DescendingOrder)
         self.tbl_communications.selectionModel().currentRowChanged.connect(self._on_communication_selected)
 
         self.txt_communication_detail = QTextEdit()
@@ -322,22 +312,13 @@ class PcapPage(QWidget):
         indicators_header.addWidget(self.btn_expand_communications)
 
         brief_group = self._group("Investigation brief", self.lbl_highlights_brief)
-        brief_group.setMaximumHeight(135)
+        brief_group.setMaximumHeight(145)
         detail_group = self._group("Selected indicator evidence", self.txt_communication_detail)
-        detail_group.setMinimumHeight(150)
-        detail_group.setMaximumHeight(220)
-
-        communication_split = QSplitter(Qt.Vertical)
-        communication_split.addWidget(self.tbl_communications)
-        communication_split.addWidget(detail_group)
-        communication_split.setStretchFactor(0, 3)
-        communication_split.setStretchFactor(1, 1)
-        communication_split.setCollapsible(0, False)
-        communication_split.setCollapsible(1, False)
-
+        detail_group.setMaximumHeight(150)
         layout.addWidget(brief_group)
         layout.addLayout(indicators_header)
-        layout.addWidget(communication_split, 1)
+        layout.addWidget(self.tbl_communications, 1)
+        layout.addWidget(detail_group)
 
         return page
 
@@ -407,16 +388,16 @@ class PcapPage(QWidget):
         self.grp_visibility = self._group("Visible vs encrypted indicators", self.tbl_visibility)
         self.grp_activity = self._group("Activity timeline by hour", self.tbl_activity)
 
-        self.grp_services.setMinimumHeight(260)
-        self.grp_activity.setMinimumHeight(260)
-        self.grp_visibility.setMinimumHeight(180)
+        self.grp_services.setMinimumHeight(220)
+        self.grp_visibility.setMinimumHeight(220)
+        self.grp_activity.setMinimumHeight(240)
 
         top.addWidget(self.grp_services, 3)
-        top.addWidget(self.grp_activity, 2)
+        top.addWidget(self.grp_visibility, 2)
 
         layout.addWidget(self.investigator_card, 0)
         layout.addLayout(top, 2)
-        layout.addWidget(self.grp_visibility, 1)
+        layout.addWidget(self.grp_activity, 2)
         layout.addStretch()
 
         scroll.setWidget(content)
@@ -511,17 +492,17 @@ class PcapPage(QWidget):
             ("source", "Source"),
             ("destination", "Destination"),
             ("value", "Visible Value"),
-        ], fixed_widths={0: 178, 1: 130, 2: 190, 3: 190}, stretch_columns=[4])
+        ], fixed_widths={0: 178, 1: 130, 2: 180, 3: 180}, stretch_columns=[4])
 
         for table in (self.tbl_dns, self.tbl_sni, self.tbl_http):
             table.setMinimumHeight(240)
             table.horizontalHeader().setStretchLastSection(False)
 
-        self.tbl_samples.setMinimumHeight(360)
+        self.tbl_samples.setMinimumHeight(320)
         self.tbl_samples.verticalHeader().setDefaultSectionSize(38)
 
         metadata_tabs = QTabWidget()
-        metadata_tabs.setMinimumHeight(250)
+        metadata_tabs.setMinimumHeight(270)
         metadata_tabs.addTab(self.tbl_dns, "DNS")
         metadata_tabs.addTab(self.tbl_sni, "TLS SNI")
         metadata_tabs.addTab(self.tbl_http, "HTTP")
@@ -579,21 +560,19 @@ class PcapPage(QWidget):
             fixed_widths={0: 150, 1: 180, 3: 80, 4: 150, 5: 170, 6: 170},
             stretch_columns=[2],
         )
-        self.tbl_artifacts.setMinimumHeight(360)
+        self.tbl_artifacts.setMinimumHeight(420)
         self.tbl_artifacts.selectionModel().currentRowChanged.connect(self._on_artifact_selected)
 
         self.txt_artifact_detail = QTextEdit()
         self.txt_artifact_detail.setReadOnly(True)
-        self.txt_artifact_detail.setMinimumHeight(150)
+        self.txt_artifact_detail.setMinimumWidth(360)
         self.txt_artifact_detail.setPlaceholderText("Select an artifact to see source, destination and explanation.")
 
-        splitter = QSplitter(Qt.Vertical)
+        splitter = QSplitter(Qt.Horizontal)
         splitter.addWidget(self._group("Extracted artifacts", self.tbl_artifacts))
         splitter.addWidget(self._group("Artifact details", self.txt_artifact_detail))
-        splitter.setStretchFactor(0, 3)
-        splitter.setStretchFactor(1, 1)
-        splitter.setCollapsible(0, False)
-        splitter.setCollapsible(1, False)
+        splitter.setStretchFactor(0, 1)
+        splitter.setStretchFactor(1, 0)
         layout.addWidget(splitter, 1)
         return page
 
@@ -614,19 +593,7 @@ class PcapPage(QWidget):
             ("bidirectional_first_seen_ms", "First Seen"),
             ("bidirectional_last_seen_ms", "Last Seen"),
             ("pcap_payload_preview", "Visible Preview"),
-        ], fixed_widths={
-            0: 145,
-            1: 95,
-            2: 145,
-            3: 110,
-            4: 90,
-            5: 120,
-            6: 230,
-            7: 100,
-            8: 95,
-            9: 180,
-            10: 180,
-        }, stretch_columns=[11])
+        ], stretch_columns=[11])
         layout.addWidget(self.tbl_connections)
         return page
 
@@ -825,8 +792,8 @@ class PcapPage(QWidget):
         layout.addWidget(hint)
 
         table = self._table(
-            self.communication_full_columns,
-            fixed_widths=self.communication_full_fixed_widths,
+            self.communication_columns,
+            fixed_widths=self.communication_fixed_widths,
             stretch_columns=[1, 3],
         )
         table.setMinimumHeight(560)
