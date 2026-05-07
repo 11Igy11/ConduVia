@@ -518,9 +518,9 @@ class ProjectsUIController:
             lines.append(f"Observed PCAP device IPs: {ip_text}")
 
         warnings = self._case_dashboard_warnings(project, profile)
-        lines.append("")
-        lines.append("Review:")
-        lines.append("No immediate project consistency warnings." if not warnings else " | ".join(warnings))
+        if warnings:
+            lines.append("")
+            lines.append("Consistency warnings: " + " | ".join(warnings))
         return "\n".join(lines)
 
     def _endpoint_text(self, ip_value, port_value) -> str:
@@ -633,7 +633,6 @@ class ProjectsUIController:
             self.app.lbl_case_dashboard_subject.setText("Select a project to see case context.")
             for idx, title in enumerate(("JSON Datasets", "PCAP", "Findings", "Device IPs")):
                 self.app.case_metric_cards[idx].setText(f"{title}: 0")
-            self.app.lbl_case_dashboard_warnings.setText("")
             return
 
         project = get_project(project_id)
@@ -657,11 +656,6 @@ class ProjectsUIController:
         ]
         for idx, (title, value) in enumerate(values):
             self.app.case_metric_cards[idx].setText(f"{title}: {value}")
-
-        warnings = self._case_dashboard_warnings(project, profile)
-        self.app.lbl_case_dashboard_warnings.setText(
-            "Review: " + " | ".join(warnings) if warnings else "Review: no immediate project consistency warnings."
-        )
 
     def _case_dashboard_warnings(self, project, profile: dict) -> list[str]:
         warnings: list[str] = []

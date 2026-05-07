@@ -855,6 +855,22 @@ class App(QWidget):
         dashboard_header.setSpacing(14)
         dashboard_header.addWidget(self.lbl_case_dashboard_title)
         dashboard_header.addWidget(self.lbl_case_dashboard_subject, 1)
+
+        self.lbl_case_dashboard_logo = QLabel()
+        self.lbl_case_dashboard_logo.setObjectName("CaseDashboardLogo")
+        self.lbl_case_dashboard_logo.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        self.lbl_case_dashboard_logo.setFixedSize(96, 44)
+        logo_path = Path(__file__).resolve().parent.parent / "assets" / "ViaNyquist.png"
+        logo_pixmap = QPixmap(str(logo_path))
+        if not logo_pixmap.isNull():
+            self.lbl_case_dashboard_logo.setPixmap(
+                logo_pixmap.scaled(
+                    self.lbl_case_dashboard_logo.size(),
+                    Qt.KeepAspectRatio,
+                    Qt.SmoothTransformation,
+                )
+            )
+        dashboard_header.addWidget(self.lbl_case_dashboard_logo)
         dashboard_layout.addLayout(dashboard_header)
 
         self.case_metric_cards = []
@@ -869,14 +885,9 @@ class App(QWidget):
             self.case_metric_cards.append(card)
             case_metrics.addWidget(card, 1)
 
-        self.lbl_case_dashboard_warnings = QLabel("")
-        self.lbl_case_dashboard_warnings.setWordWrap(True)
-        self.lbl_case_dashboard_warnings.setObjectName("Muted")
-
         dashboard_metrics_row = QHBoxLayout()
-        dashboard_metrics_row.setSpacing(12)
-        dashboard_metrics_row.addLayout(case_metrics, 3)
-        dashboard_metrics_row.addWidget(self.lbl_case_dashboard_warnings, 2)
+        dashboard_metrics_row.setSpacing(8)
+        dashboard_metrics_row.addLayout(case_metrics, 1)
         dashboard_layout.addLayout(dashboard_metrics_row)
 
         projects_layout.addWidget(self.case_dashboard)
