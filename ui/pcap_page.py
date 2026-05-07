@@ -511,8 +511,8 @@ class PcapPage(QWidget):
     def _build_evidence_tab(self) -> QWidget:
         page = QWidget()
         layout = QVBoxLayout(page)
-        layout.setContentsMargins(12, 12, 12, 12)
-        layout.setSpacing(12)
+        layout.setContentsMargins(14, 14, 14, 14)
+        layout.setSpacing(14)
 
         self.lbl_evidence_hint = QLabel(
             "This view shows readable metadata and unencrypted payload snippets only. "
@@ -539,50 +539,109 @@ class PcapPage(QWidget):
         self.tbl_visible_metadata.setMinimumHeight(250)
         self.tbl_samples.setMinimumHeight(320)
         self.tbl_samples.verticalHeader().setDefaultSectionSize(38)
+        self.tbl_visible_metadata.hide()
+        self.tbl_samples.hide()
 
-        self.btn_expand_metadata = QPushButton("Expand")
-        self.btn_expand_metadata.setFixedHeight(32)
+        self.btn_expand_metadata = QPushButton("Open full metadata table")
+        self.btn_expand_metadata.setFixedHeight(38)
         self.btn_expand_metadata.clicked.connect(
             lambda: self._open_table_dialog("Visible metadata", self.tbl_visible_metadata)
         )
-        metadata_panel = QWidget()
-        metadata_layout = QVBoxLayout(metadata_panel)
-        metadata_layout.setContentsMargins(0, 0, 0, 0)
-        metadata_layout.setSpacing(8)
-        metadata_header = QHBoxLayout()
-        metadata_header.addStretch()
-        metadata_header.addWidget(self.btn_expand_metadata)
-        metadata_layout.addLayout(metadata_header)
-        metadata_layout.addWidget(self.tbl_visible_metadata, 1)
 
-        samples_panel = QWidget()
-        samples_layout = QVBoxLayout(samples_panel)
-        samples_layout.setContentsMargins(0, 0, 0, 0)
-        samples_layout.setSpacing(8)
-
-        self.btn_expand_samples = QPushButton("Expand")
-        self.btn_expand_samples.setFixedHeight(32)
+        self.btn_expand_samples = QPushButton("Open full samples table")
+        self.btn_expand_samples.setFixedHeight(38)
         self.btn_expand_samples.clicked.connect(
             lambda: self._open_table_dialog("Readable payload / metadata samples", self.tbl_samples)
         )
-        samples_header = QHBoxLayout()
-        samples_header.addStretch()
-        samples_header.addWidget(self.btn_expand_samples)
-        samples_layout.addLayout(samples_header)
 
-        samples_hint = QLabel(
+        self.lbl_visible_metadata_count = QLabel("0 rows")
+        self.lbl_visible_metadata_count.setObjectName("ProfileMetric")
+        self.lbl_visible_metadata_count.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self.lbl_visible_metadata_breakdown = QLabel("DNS: 0 | TLS SNI: 0 | HTTP hosts: 0")
+        self.lbl_visible_metadata_breakdown.setObjectName("MutedLabel")
+        self.lbl_visible_metadata_breakdown.setWordWrap(True)
+        self.lbl_visible_metadata_breakdown.setTextInteractionFlags(Qt.TextSelectableByMouse)
+
+        self.lbl_samples_count = QLabel("0 rows")
+        self.lbl_samples_count.setObjectName("ProfileMetric")
+        self.lbl_samples_count.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self.lbl_samples_hint = QLabel(
             "Visible values are extracted from DNS names, TLS SNI, HTTP host/header data and plaintext payload previews. "
             "Treat them as observable network evidence, not as decrypted message content."
         )
-        samples_hint.setObjectName("MutedLabel")
-        samples_hint.setWordWrap(True)
-        samples_hint.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        samples_layout.addWidget(samples_hint)
-        samples_layout.addWidget(self.tbl_samples, 1)
+        self.lbl_samples_hint.setObjectName("MutedLabel")
+        self.lbl_samples_hint.setWordWrap(True)
+        self.lbl_samples_hint.setTextInteractionFlags(Qt.TextSelectableByMouse)
 
-        layout.addWidget(self._group("Visible metadata", metadata_panel), 0)
-        layout.addWidget(self._group("Readable payload / metadata samples", samples_panel), 1)
+        cards = QGridLayout()
+        cards.setSpacing(14)
+        cards.addWidget(
+            self._evidence_launcher_card(
+                "Visible metadata",
+                "DNS queries, TLS SNI names and HTTP host values observed in the capture.",
+                self.lbl_visible_metadata_count,
+                self.lbl_visible_metadata_breakdown,
+                self.btn_expand_metadata,
+            ),
+            0,
+            0,
+        )
+        cards.addWidget(
+            self._evidence_launcher_card(
+                "Readable payload / metadata samples",
+                "Timestamped values that can be inspected as rows when the full table is opened.",
+                self.lbl_samples_count,
+                self.lbl_samples_hint,
+                self.btn_expand_samples,
+            ),
+            0,
+            1,
+        )
+        cards.setColumnStretch(0, 1)
+        cards.setColumnStretch(1, 1)
+
+        layout.addLayout(cards)
+
+        workflow_hint = QLabel(
+            "Use the full table view for investigation work: sorting, copying values and reading wide columns. "
+            "The embedded Evidence page is intentionally a compact overview."
+        )
+        workflow_hint.setObjectName("MutedLabel")
+        workflow_hint.setWordWrap(True)
+        workflow_hint.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        layout.addWidget(workflow_hint)
+        layout.addStretch()
         return page
+
+    def _evidence_launcher_card(
+        self,
+        title: str,
+        description: str,
+        count_label: QLabel,
+        detail_label: QLabel,
+        button: QPushButton,
+    ) -> QFrame:
+        card = QFrame()
+        card.setObjectName("Card")
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(18, 18, 18, 18)
+        layout.setSpacing(10)
+
+        lbl_title = QLabel(title)
+        lbl_title.setObjectName("SectionTitle")
+        lbl_title.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        lbl_description = QLabel(description)
+        lbl_description.setObjectName("MutedLabel")
+        lbl_description.setWordWrap(True)
+        lbl_description.setTextInteractionFlags(Qt.TextSelectableByMouse)
+
+        layout.addWidget(lbl_title)
+        layout.addWidget(lbl_description)
+        layout.addWidget(count_label)
+        layout.addWidget(detail_label)
+        layout.addStretch()
+        layout.addWidget(button, 0, Qt.AlignRight)
+        return card
 
     def _build_artifacts_tab(self) -> QWidget:
         page = QWidget()
@@ -744,7 +803,7 @@ class PcapPage(QWidget):
         layout.addWidget(hint)
 
         fixed_widths = {
-            idx: max(110, min(420, source_table.columnWidth(idx)))
+            idx: self._expanded_column_width(source_model.columns[idx], source_table.columnWidth(idx))
             for idx in range(source_model.columnCount())
         }
         table = self._table(source_model.columns, fixed_widths=fixed_widths, stretch_columns=[])
@@ -762,6 +821,22 @@ class PcapPage(QWidget):
         layout.addLayout(footer)
 
         dlg.exec()
+
+    def _expanded_column_width(self, column: tuple[str, str], current_width: int) -> int:
+        key, title = column
+        name = f"{key} {title}".lower()
+        preferred = 140
+        if "time" in name or "seen" in name:
+            preferred = 190
+        if "source" in name or "destination" in name or "endpoint" in name:
+            preferred = 210
+        if "host" in name or "signal" in name or "query" in name:
+            preferred = 300
+        if "value" in name or "evidence" in name or "detail" in name:
+            preferred = 380
+        if "packet" in name or "count" in name or "port" in name:
+            preferred = 120
+        return max(preferred, max(110, min(440, current_width)))
 
     def _format_pcap_time(self, value: Any) -> str:
         text = format_pcap_datetime(value)
@@ -839,8 +914,7 @@ class PcapPage(QWidget):
         )
         self.lbl_overview_text.setText(self._overview_text(summary))
         self._set_table(self.tbl_network_overview, self._network_overview_rows(summary))
-        self._set_table(self.tbl_visible_metadata, self._visible_metadata_rows(summary))
-        self._set_table(self.tbl_samples, summary.readable_samples)
+        self._set_evidence_tables(summary)
         self._set_artifact_tables(summary.artifacts)
         self._set_table(self.tbl_connections, summary.flows)
 
@@ -865,8 +939,7 @@ class PcapPage(QWidget):
         )
         self.lbl_overview_text.setText(self._overview_text(summary))
         self._set_table(self.tbl_network_overview, self._network_overview_rows(summary))
-        self._set_table(self.tbl_visible_metadata, self._visible_metadata_rows(summary))
-        self._set_table(self.tbl_samples, summary.readable_samples)
+        self._set_evidence_tables(summary)
         self._set_artifact_tables(summary.artifacts)
         self._set_table(self.tbl_connections, summary.flows)
 
@@ -929,6 +1002,20 @@ class PcapPage(QWidget):
         for item in summary.http_hosts or []:
             rows.append({"type": "HTTP host", "value": item.get("host"), "count": item.get("count")})
         return rows
+
+    def _set_evidence_tables(self, summary: PcapSummary) -> None:
+        metadata_rows = self._visible_metadata_rows(summary)
+        sample_rows = summary.readable_samples or []
+        self._set_table(self.tbl_visible_metadata, metadata_rows)
+        self._set_table(self.tbl_samples, sample_rows)
+
+        self.lbl_visible_metadata_count.setText(f"{len(metadata_rows):,} visible rows")
+        self.lbl_visible_metadata_breakdown.setText(
+            f"DNS: {len(summary.dns_queries or []):,} | "
+            f"TLS SNI: {len(summary.tls_sni or []):,} | "
+            f"HTTP hosts: {len(summary.http_hosts or []):,}"
+        )
+        self.lbl_samples_count.setText(f"{len(sample_rows):,} readable rows")
 
     def _network_overview_rows(self, summary: PcapSummary) -> list[dict[str, Any]]:
         rows: list[dict[str, Any]] = []
