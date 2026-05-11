@@ -576,7 +576,7 @@ class BarChartWidget(QFrame):
             line.setSpacing(8)
             name = QLabel(_short_label(label, self.label_limit))
             name.setMinimumWidth(self.label_width)
-            name.setToolTip(label)
+            name.setToolTip(str(row.get("tooltip") or label))
             value = QLabel(display_value)
             value.setMinimumWidth(72)
             value.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
