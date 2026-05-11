@@ -1051,6 +1051,7 @@ class App(QWidget):
 
         self.search = QLineEdit()
         self.search.setPlaceholderText("Search IP / SNI / app...")
+        self.search.setMinimumHeight(40)
 
         self.tabs = QTabWidget()
 
@@ -1297,6 +1298,7 @@ class App(QWidget):
         toolbar.addStretch()
         toolbar.addLayout(right_actions)
 
+        flows_tab_layout.addWidget(self.search)
         flows_tab_layout.addWidget(toolbar_wrap)
         self.splitter = QSplitter(Qt.Horizontal)
 
@@ -1499,10 +1501,8 @@ class App(QWidget):
         self.btn_ai_hub_add_notes.clicked.connect(self.add_ai_hub_to_notes)
 
         # Explore layout
-        explore_layout.addWidget(header_card)
         explore_layout.addWidget(self.lbl_mode)
         explore_layout.addWidget(self.lbl_conv_summary)
-        explore_layout.addWidget(self.search)
         explore_layout.addWidget(self.tabs, 1)
 
         # Pages
@@ -1528,6 +1528,7 @@ class App(QWidget):
         self.listing_page = ListingPage(self)
         self.json_tabs.addTab(self.listing_page, "Listing")
 
+        json_layout.addWidget(header_card)
         json_layout.addWidget(self.json_tabs, 1)
         self.pages.addWidget(json_page)
 
