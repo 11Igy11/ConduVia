@@ -39,7 +39,7 @@ from PySide6.QtWidgets import (
     QPushButton, QLabel, QStackedWidget,
     QTextEdit, QTabWidget, QLineEdit,
     QSplitter, QGroupBox,
-    QListWidget, QListWidgetItem,
+    QListWidget,
     QAbstractItemView, QComboBox, QDialog, QFrame, QSizePolicy, QScrollArea, QHeaderView,
     QTableView, QMenu
 )
@@ -525,12 +525,10 @@ class App(QWidget):
         self.btn_edit_project.clicked.connect(self.projects_ui_controller.edit_selected_project)
         self.btn_delete_project.clicked.connect(self.projects_ui_controller.delete_selected_project)
         self.projects_list.itemSelectionChanged.connect(self.projects_ui_controller.on_project_selected_preview)
-        self.btn_open_dataset.clicked.connect(self.projects_ui_controller.open_selected_dataset)
         self.btn_open_new_dataset.clicked.connect(self.projects_ui_controller.open_new_dataset)
 
         # 10b) Double click shortcuts
         self.projects_list.itemDoubleClicked.connect(lambda _: self.projects_ui_controller.open_selected_project())
-        self.recent_list.itemDoubleClicked.connect(lambda _: self.projects_ui_controller.open_selected_dataset())
 
         # 11) Findings page
         fp = self.findings_page
@@ -841,14 +839,10 @@ class App(QWidget):
         self.projects_info.setReadOnly(True)
         self.projects_info.setPlaceholderText("Select a project to see details.")
 
-        self.recent_list = QListWidget()
-        self.recent_list.hide()
         self.project_recent_json_rows: list[dict[str, Any]] = []
         self.project_recent_pcap_rows: list[dict[str, Any]] = []
         self.project_activity_rows: list[dict[str, Any]] = []
 
-        self.btn_open_dataset = QPushButton("Open selected")
-        self.btn_open_dataset.hide()
         self.btn_expand_json_datasets = QPushButton("Open JSON list")
         self.btn_expand_pcap_datasets = QPushButton("Open PCAP list")
         self.btn_expand_project_activity = QPushButton("Open activity log")
@@ -966,9 +960,6 @@ class App(QWidget):
         middle_row.addLayout(right_col, 3)
 
         projects_layout.addLayout(middle_row, 1)
-
-        self.lst_activity = QListWidget()
-        self.lst_activity.hide()
 
         self.lbl_recent_json_count = QLabel("0 JSON datasets")
         self.lbl_recent_json_count.setObjectName("ProfileMetric")
@@ -1511,9 +1502,6 @@ class App(QWidget):
         self.txt_notes = QTextEdit()
         self.txt_notes.setPlaceholderText("Write case notes here… (autosave)")
         notes_root.addWidget(self.txt_notes, 1)
-
-        self.tabs.addTab(notes_tab, "Notes")
-        self.tabs.removeTab(3)
 
         ai_page = QWidget()
         ai_root = QVBoxLayout(ai_page)
@@ -2283,13 +2271,14 @@ class App(QWidget):
     # ---------- Notes ----------
     def refresh_notes_ui(self):
         self.txt_notes.blockSignals(True)
-        self.lst_activity.clear()
 
         if self.current_project_id is None:
             self.txt_notes.setPlainText("")
             self.txt_notes.setPlaceholderText("Select an active project to use Notes.")
             self.txt_notes.setEnabled(False)
-            self.lst_activity.addItem(QListWidgetItem("(no active project)"))
+            self.project_activity_rows = []
+            if hasattr(self, "projects_ui_controller"):
+                self.projects_ui_controller._refresh_project_launcher_cards()
             self.txt_notes.blockSignals(False)
             return
 
@@ -2302,18 +2291,15 @@ class App(QWidget):
         self.refresh_activity_ui()
 
     def refresh_activity_ui_for_project(self, project_id: int | None):
-        self.lst_activity.clear()
         self.project_activity_rows = []
 
         if project_id is None:
-            self.lst_activity.addItem(QListWidgetItem("(no project selected)"))
             if hasattr(self, "projects_ui_controller"):
                 self.projects_ui_controller._refresh_project_launcher_cards()
             return
 
         rows = self.notes_controller.load_activity(project_id)
         if not rows:
-            self.lst_activity.addItem(QListWidgetItem("(no activity yet)"))
             if hasattr(self, "projects_ui_controller"):
                 self.projects_ui_controller._refresh_project_launcher_cards()
             return
@@ -2326,9 +2312,6 @@ class App(QWidget):
                 label = self.projects_ui_controller.activity_label(str(et), str(msg))
             else:
                 label = str(et).replace("_", " ").title()
-            item = QListWidgetItem(f"{ts}\n{label}")
-            item.setToolTip(str(msg or ""))
-            self.lst_activity.addItem(item)
             self.project_activity_rows.append({
                 "created_at": str(ts or ""),
                 "event": label,
