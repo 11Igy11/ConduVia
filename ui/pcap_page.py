@@ -389,8 +389,8 @@ class PcapPage(QWidget):
             "Visible service groups",
             value_key="count",
             value_label_key="value",
-            label_width=190,
-            label_limit=38,
+            label_width=175,
+            label_limit=34,
             max_rows=24,
         )
         self.chart_activity = BarChartWidget(
