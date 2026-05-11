@@ -11,7 +11,6 @@ import html
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable
-from core.protocols import format_ip_proto
 from core.workspace import write_project_notes_backup
 from ui.controllers.flow_controller import FlowController
 from ui.controllers.findings_controller import FindingsController
@@ -59,9 +58,6 @@ def is_private_ip(ip: str) -> bool:
 def status_emoji(status: str) -> str:
     s = (status or "").strip() or "New"
     return {"New": "🆕", "Investigating": "🟡", "Confirmed": "✅", "False Positive": "⚪"}.get(s, "🆕")
-
-def esc(s: Any) -> str:
-    return html.escape("" if s is None else str(s))
 
 def normalize_tags(tags: str) -> str:
     # keep it simple: comma-separated, trim, remove empties, keep order, avoid duplicates
