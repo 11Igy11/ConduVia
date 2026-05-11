@@ -286,110 +286,6 @@ def apply_app_stylesheet(qapp: QApplication, theme: str | None = "dark") -> None
 
 # ---------- Main App ----------
 class App(QWidget):
-    def build_home_page(self) -> QWidget:
-        page = QWidget()
-        layout = QVBoxLayout(page)
-        layout.setContentsMargins(28, 24, 28, 24)
-        layout.setSpacing(16)
-
-    # ---------- header (logo + title) ----------
-        header = QHBoxLayout()
-        header.setSpacing(14)
-
-        logo = QLabel()
-        logo.setFixedSize(64, 64)
-
-        icon_path = self.project_dir / "assets" / "ViaNyquist.ico"
-        pm = QPixmap(str(icon_path)) if icon_path.exists() else QPixmap()
-
-        if not pm.isNull():
-            logo.setPixmap(pm.scaled(64, 64, Qt.KeepAspectRatio, Qt.SmoothTransformation))
-
-        title_col = QVBoxLayout()
-        title_col.setSpacing(2)
-
-        title = QLabel("ViaNyquist")
-        f = QFont()
-        f.setPointSize(30)
-        f.setBold(True)
-        title.setFont(f)
-
-        subtitle = QLabel("Network flow analysis")
-        subtitle.setStyleSheet("color: #666666; font-size: 14px;")
-
-        title_col.addWidget(title)
-        title_col.addWidget(subtitle)
-
-        header.addWidget(logo, 0)
-        header.addLayout(title_col, 1)
-        header.addStretch()
-
-        layout.addLayout(header) 
-
-    # ---------- main card ----------
-        card = QFrame()
-        card.setFrameShape(QFrame.StyledPanel)
-        card.setStyleSheet("""
-        QFrame {
-            background: #ffffff;
-            border: 1px solid #e6e6e6;
-            border-radius: 12px;
-        }
-    """)
-        card_layout = QVBoxLayout(card)
-        card_layout.setContentsMargins(20, 18, 20, 18)
-        card_layout.setSpacing(12)
-
-    # Quick start block
-        qs_title = QLabel("Quick start")
-        qs_title.setStyleSheet("font-size: 14px; font-weight: 600; color: #111827;")
-
-        info = QLabel(
-        "1) Create/Open a project\n"
-        "2) Load a dataset folder\n"        
-    )
-        info.setStyleSheet("color: #374151; font-size: 13px;")
-        info.setWordWrap(True)
-
-    # Actions
-        actions = QHBoxLayout()
-        actions.setSpacing(10)
-
-        self.btn_home_projects = QPushButton("Projects")
-        self.btn_home_explore = QPushButton("Explore")
-        self.btn_home_registry = QPushButton("Registry")
-
-        for b in (self.btn_home_projects, self.btn_home_explore, self.btn_home_registry):
-            b.setFixedHeight(36)
-                
-        # subtle style for others
-        for b in (self.btn_home_projects, self.btn_home_explore, self.btn_home_registry):
-            b.setStyleSheet("""
-            QPushButton {
-                background: #ffffff;
-                color: #111827;
-                border: 1px solid #e5e7eb;
-                border-radius: 8px;
-                padding: 0 12px;
-            }
-            QPushButton:hover { background: #f9fafb; }
-        """)
-
-        actions.addWidget(self.btn_home_projects)
-        actions.addWidget(self.btn_home_explore)
-        actions.addWidget(self.btn_home_registry)
-        actions.addStretch()
-
-        card_layout.addWidget(qs_title)
-        card_layout.addWidget(info)
-        card_layout.addSpacing(6)
-        card_layout.addLayout(actions)
-
-        layout.addWidget(card)
-        layout.addStretch()
-
-        return page    
-
     def go_to_explore_flows(self):
         self.go_to_json_tab(0)
         self.tabs.setCurrentIndex(1)
@@ -553,9 +449,6 @@ class App(QWidget):
         self.registry_page.openExploreWithConversation.connect(self._open_from_registry)
         self.registry_page.openExploreWithSearch.connect(self._open_from_registry_search)
 
-    def _post_init(self) -> None:
-        pass
-    
     def _open_from_registry_search(self, q: str):
         self.go_to_explore_flows()
         self.explore_ui_controller.leave_conversation(clear_search=False)
@@ -588,7 +481,6 @@ class App(QWidget):
 
         self._build_ui()
         self._wire_ui()
-        self._post_init()
 
         # init
         self.projects_ui_controller.refresh_projects()

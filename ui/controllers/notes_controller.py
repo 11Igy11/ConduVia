@@ -2,9 +2,6 @@ from core.db import get_project_notes, set_project_notes, list_activity
 
 
 class NotesController:
-    def __init__(self):
-        pass
-
     # ---------- Notes ----------
     def load_notes(self, project_id: int | None) -> str:
         if project_id is None:
