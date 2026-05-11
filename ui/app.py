@@ -416,6 +416,7 @@ class App(QWidget):
         self.btn_nav_projects = QPushButton("Projects")
         self.btn_nav_json = QPushButton("JSON")
         self.btn_nav_pcap = QPushButton("PCAP")
+        self.btn_nav_osint = QPushButton("OSINT")
         self.btn_nav_ai = QPushButton("AI output")
         self.btn_nav_notes = QPushButton("Notes")
         self.btn_nav_profile = QPushButton("Profile")
@@ -427,6 +428,7 @@ class App(QWidget):
             self.btn_nav_projects,
             self.btn_nav_json,
             self.btn_nav_pcap,
+            self.btn_nav_osint,
             self.btn_nav_ai,
             self.btn_nav_notes,
             self.btn_nav_profile,
@@ -448,11 +450,13 @@ class App(QWidget):
         self._nav_registry = self.btn_nav_json
         self._nav_listing = self.btn_nav_json
         self._nav_pcap = self.btn_nav_pcap
+        self._nav_osint = self.btn_nav_osint
         self._nav_settings = self.btn_nav_settings
 
         sidebar.addWidget(self.btn_nav_projects)
         sidebar.addWidget(self.btn_nav_json)
         sidebar.addWidget(self.btn_nav_pcap)
+        sidebar.addWidget(self.btn_nav_osint)
         sidebar.addWidget(self.btn_nav_ai)
         sidebar.addWidget(self.btn_nav_notes)
         sidebar.addWidget(self.btn_nav_profile)
@@ -471,6 +475,7 @@ class App(QWidget):
         self.btn_nav_json.clicked.connect(lambda: self.go_to_json_tab(0))
         self.btn_global_refresh.clicked.connect(self.refresh_all_views)
         self.btn_nav_pcap.clicked.connect(lambda: self.go_page(self.IDX_PCAP, self._nav_pcap))
+        self.btn_nav_osint.clicked.connect(lambda: self.go_page(self.IDX_OSINT, self._nav_osint))
         self.btn_nav_settings.clicked.connect(lambda: self.go_page(self.IDX_SETTINGS, self._nav_settings))
         self.btn_nav_help.clicked.connect(self.open_user_manual)
 
@@ -741,6 +746,50 @@ class App(QWidget):
         self._last_ai_source = ""
         self._last_ai_text = ""
 
+    def _build_osint_page(self) -> QWidget:
+        page = QWidget()
+        root = QVBoxLayout(page)
+        root.setContentsMargins(10, 10, 10, 10)
+        root.setSpacing(14)
+
+        header = QFrame()
+        header.setObjectName("ProfileHero")
+        header_layout = QVBoxLayout(header)
+        header_layout.setContentsMargins(18, 16, 18, 16)
+        header_layout.setSpacing(8)
+
+        title = QLabel("OSINT")
+        title.setObjectName("ProfileTitle")
+        subtitle = QLabel("Under construction. This module will later collect open-source profile signals for the active case.")
+        subtitle.setObjectName("ProfileSubtitle")
+        subtitle.setWordWrap(True)
+
+        header_layout.addWidget(title)
+        header_layout.addWidget(subtitle)
+        root.addWidget(header)
+
+        panel = QFrame()
+        panel.setObjectName("ProfilePanel")
+        panel_layout = QVBoxLayout(panel)
+        panel_layout.setContentsMargins(18, 16, 18, 16)
+        panel_layout.setSpacing(10)
+
+        panel_title = QLabel("Planned module")
+        panel_title.setObjectName("ProfilePanelTitle")
+        body = QLabel(
+            "OSINT will be a separate workspace for social network, messaging-app and public-source indicators. "
+            "For beta, this page is only a navigation placeholder so the final module has a reserved place in the application."
+        )
+        body.setObjectName("Muted")
+        body.setWordWrap(True)
+        body.setTextInteractionFlags(Qt.TextSelectableByMouse)
+
+        panel_layout.addWidget(panel_title)
+        panel_layout.addWidget(body)
+        root.addWidget(panel)
+        root.addStretch()
+        return page
+
     def _build_ui(self) -> None:
         outer = QVBoxLayout(self)
         outer.setContentsMargins(8, 8, 8, 4)
@@ -762,7 +811,8 @@ class App(QWidget):
         self.IDX_REGISTRY = self.IDX_JSON
         self.IDX_LISTING = self.IDX_JSON
         self.IDX_PCAP = 5
-        self.IDX_SETTINGS = 6
+        self.IDX_OSINT = 6
+        self.IDX_SETTINGS = 7
 
         # -------- Projects page --------
         projects_page = QWidget()
@@ -1535,6 +1585,9 @@ class App(QWidget):
         self.pcap_page = PcapPage(self)
         self.pages.addWidget(self.pcap_page)
 
+        self.osint_page = self._build_osint_page()
+        self.pages.addWidget(self.osint_page)
+
         self.settings_page = SettingsPage(self)
         self.pages.addWidget(self.settings_page)
 
@@ -1561,6 +1614,7 @@ class App(QWidget):
             self._nav_ai,
             self._nav_json,
             self._nav_pcap,
+            self._nav_osint,
             self._nav_settings,
         ):
             b.setProperty("active", b is active)
