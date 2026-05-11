@@ -44,7 +44,6 @@ class ProjectsUIController:
             self.app.projects_list.addItem(item)
 
         self.app.projects_info.setText("Select a project to see details.")
-        self.app.recent_list.clear()
         self.app.project_recent_json_rows = []
         self.app.project_recent_pcap_rows = []
         self.app.project_activity_rows = []
@@ -137,7 +136,6 @@ class ProjectsUIController:
         item = self.app.projects_list.currentItem()
         if not item:
             self.app.projects_info.setText("Select a project to see details.")
-            self.app.recent_list.clear()
             self.app.project_recent_json_rows = []
             self.app.project_recent_pcap_rows = []
             self.app.project_activity_rows = []
@@ -529,39 +527,28 @@ class ProjectsUIController:
         return f"{ip}:{port}" if port else ip
 
     def refresh_recent_datasets(self, project_id: int):
-        self.app.recent_list.clear()
         paths = list_recent_datasets(project_id, limit=15)
         self.app.project_recent_json_rows = []
 
-        if not paths:
-            self.app.recent_list.addItem(QListWidgetItem("(no JSON datasets yet)"))
-        else:
-            for fp in paths:
-                p = Path(str(fp))
+        for fp in paths:
+            p = Path(str(fp))
 
-                if p.is_file():
-                    status = "Available"
-                    kind = "JSON file"
-                    label = f"[FILE] {p.name}"
-                elif p.is_dir():
-                    status = "Available"
-                    kind = "Folder"
-                    label = f"[FOLDER] {p.name}"
-                else:
-                    status = "Missing"
-                    kind = "Path"
-                    label = f"[MISSING] {p.name or str(fp)}"
+            if p.is_file():
+                status = "Available"
+                kind = "JSON file"
+            elif p.is_dir():
+                status = "Available"
+                kind = "Folder"
+            else:
+                status = "Missing"
+                kind = "Path"
 
-                item = QListWidgetItem(label)
-                item.setToolTip(str(fp))
-                item.setData(Qt.UserRole, str(fp))
-                self.app.recent_list.addItem(item)
-                self.app.project_recent_json_rows.append({
-                    "status": status,
-                    "name": p.name or str(fp),
-                    "kind": kind,
-                    "path": str(fp),
-                })
+            self.app.project_recent_json_rows.append({
+                "status": status,
+                "name": p.name or str(fp),
+                "kind": kind,
+                "path": str(fp),
+            })
 
         pcap_sources = list_pcap_sources(project_id, limit=500)
         self.app.project_recent_pcap_rows = []
@@ -690,27 +677,6 @@ class ProjectsUIController:
         if detail:
             return f"{label}: {detail}"
         return label
-
-    def open_selected_dataset(self):
-        item = self.app.recent_list.currentItem()
-        if not item:
-            return
-
-        fp = item.data(Qt.UserRole)
-        if not fp or str(fp).startswith("("):
-            return
-
-        p = Path(str(fp))
-
-        if p.is_file():
-            self.app.dataset_controller.load_dataset_file(str(p))
-        elif p.is_dir():
-            self.app.dataset_controller.load_dataset_path(str(p))
-        else:
-            self.app._message_dialog("Dataset", "Path not found.", str(p), width=460)
-            return
-
-        self.app.go_to_json_tab(0)
 
     def open_new_dataset(self):
         if self.app.current_project_id is None:
