@@ -6,7 +6,8 @@ from typing import Any
 from core.formatters import human_bytes, safe_int, format_short_date
 from core.timeutils import parse_flow_timestamp
 from core.exporters.registry_exporter import export_registry_html
-from core.db import get_project
+from core.db import get_app_settings, get_project
+from core.workspace import workspace_export_path
 
 from PySide6.QtCore import Qt, Signal, QAbstractTableModel, QModelIndex, QSortFilterProxyModel, QSize, QRectF
 from PySide6.QtGui import QPainter, QColor, QPen, QFontMetrics
@@ -18,6 +19,7 @@ from PySide6.QtWidgets import (
 
 from core.parser import extract_dataset_meta, build_registry_columns, compute_registry_summary
 from core.analyst import compute_analyst_summary
+from ui.explore_widgets import CopyableTableView
 
 # ----------------- helpers -----------------
 def _human_bytes(n: int | float | None) -> str:
@@ -911,7 +913,7 @@ class RegistryPage(QWidget):
 
         # Insights table
         self.pairs_model = PairsModel()
-        self.pairs_view = QTableView()
+        self.pairs_view = CopyableTableView(self.app)
         self.pairs_view.setModel(self.pairs_model)
         self.pairs_view.setAlternatingRowColors(True)
         self.pairs_view.verticalHeader().setVisible(False)
@@ -969,7 +971,7 @@ class RegistryPage(QWidget):
         self.lbl_dataset_disabled.setWordWrap(True)
         dp.addWidget(self.lbl_dataset_disabled)
 
-        self.table = QTableView()
+        self.table = CopyableTableView(self.app)
         self.table.setSortingEnabled(False)
         self.table.setAlternatingRowColors(True)
         self.table.setSelectionBehavior(QTableView.SelectRows)
@@ -1135,7 +1137,7 @@ class RegistryPage(QWidget):
             chip("LIID", liid),
         ]
         if bt or et:
-            chips.append(chip("Period", f"{_fmt_dt_short(bt)} → {_fmt_dt_short(et)}"))
+            chips.append(chip("Order validity", f"{_fmt_dt_short(bt)} → {_fmt_dt_short(et)}"))
 
         self.lbl_meta_chips.setText("".join(chips))
 
@@ -1263,7 +1265,7 @@ class RegistryPage(QWidget):
             reasons_html = "<b>Top deviation signals:</b> —"
 
         coverage_html = (
-            f"<b>Coverage:</b> " + " | ".join(coverage_parts) + " | "
+            f"<b>Observed activity:</b> " + " | ".join(coverage_parts) + " | "
             f"<b>Outbound share:</b> {out_share:.1f}%"
         )
 
@@ -1497,10 +1499,16 @@ class RegistryPage(QWidget):
             return
 
         default_name = "ViaNyquist_Registry_Report.html"
+        project = self._current_project()
+        default_path = (
+            str(workspace_export_path(project.base_folder, default_name))
+            if project and project.base_folder
+            else str(self._folder / default_name)
+        )
         out_path, _ = QFileDialog.getSaveFileName(
             self,
             "Export report",
-            str(self._folder / default_name),
+            default_path,
             "HTML (*.html)"
         )
 
@@ -1520,8 +1528,9 @@ class RegistryPage(QWidget):
                 tab_defs=self._tab_defs,
                 compare_result=self._compare_result,
                 include_full=bool(self.chk_full.isChecked()),
-                project=self._current_project(),
+                project=project,
                 project_name=getattr(self.app, "current_project_name", "") or "",
+                report_language=get_app_settings().get("output_language", "hr"),
             )
 
             QMessageBox.information(self, "Export", f"Report saved:\n{out_path}")

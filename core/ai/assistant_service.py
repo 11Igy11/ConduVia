@@ -19,6 +19,7 @@ from core.ai.prompts import (
     build_finding_explanation_prompt,
     build_pcap_summary_prompt,
 )
+from core.output_language import normalize_output_language
 from core.pcap_analyzer import PcapSummary
 
 
@@ -27,6 +28,7 @@ class AISettings:
     base_url: str = "http://localhost:11434"
     model: str = "llama3"
     timeout_seconds: int = 600
+    output_language: str = "hr"
 
     @classmethod
     def from_env(cls) -> "AISettings":
@@ -40,6 +42,7 @@ class AISettings:
             base_url=os.environ.get("VIANYQUIST_AI_BASE_URL", cls.base_url),
             model=os.environ.get("VIANYQUIST_AI_MODEL", cls.model),
             timeout_seconds=timeout,
+            output_language=normalize_output_language(os.environ.get("VIANYQUIST_OUTPUT_LANGUAGE", cls.output_language)),
         )
 
     @classmethod
@@ -59,6 +62,9 @@ class AISettings:
             base_url=pick("base_url", defaults.base_url) or defaults.base_url,
             model=pick("model", defaults.model) or defaults.model,
             timeout_seconds=timeout,
+            output_language=normalize_output_language(
+                values.get("output.language") or values.get("ai.output_language") or defaults.output_language
+            ),
         )
 
     def to_mapping(self) -> dict[str, str]:
@@ -66,6 +72,8 @@ class AISettings:
             "ai.base_url": self.base_url,
             "ai.model": self.model,
             "ai.timeout_seconds": str(self.timeout_seconds),
+            "ai.output_language": normalize_output_language(self.output_language),
+            "output.language": normalize_output_language(self.output_language),
         }
 
     @property
@@ -123,7 +131,10 @@ class AIAssistantService:
         total_flows=total_flows,
     )
 
-        prompt = SYSTEM_PROMPT + "\n\n" + build_dataset_summary_prompt(context)
+        prompt = SYSTEM_PROMPT + "\n\n" + build_dataset_summary_prompt(
+            context,
+            language=self.settings.output_language,
+        )
         return self._generate(prompt)
         
     def explain_flow(self, flow: dict[str, Any]) -> str:
@@ -131,7 +142,10 @@ class AIAssistantService:
             return "No flow selected."
 
         context = build_flow_context(flow)
-        prompt = SYSTEM_PROMPT + "\n\n" + build_flow_explanation_prompt(context)
+        prompt = SYSTEM_PROMPT + "\n\n" + build_flow_explanation_prompt(
+            context,
+            language=self.settings.output_language,
+        )
         return self._generate(prompt)
         
     def explain_finding(self, finding: dict[str, Any]) -> str:
@@ -139,7 +153,10 @@ class AIAssistantService:
             return "No finding selected."
 
         context = build_finding_context(finding)
-        prompt = SYSTEM_PROMPT + "\n\n" + build_finding_explanation_prompt(context)
+        prompt = SYSTEM_PROMPT + "\n\n" + build_finding_explanation_prompt(
+            context,
+            language=self.settings.output_language,
+        )
         return self._generate(prompt)
 
     def generate_pcap_summary(
@@ -151,7 +168,10 @@ class AIAssistantService:
             return "No PCAP analysis loaded."
 
         context = build_pcap_context(summary, project_name=project_name)
-        prompt = SYSTEM_PROMPT + "\n\n" + build_pcap_summary_prompt(context)
+        prompt = SYSTEM_PROMPT + "\n\n" + build_pcap_summary_prompt(
+            context,
+            language=self.settings.output_language,
+        )
         return self._generate(prompt)
 
     def generate_activity_profile_summary(
@@ -163,5 +183,8 @@ class AIAssistantService:
             return "No activity profile loaded."
 
         context = build_activity_profile_context(profile, project_name=project_name)
-        prompt = SYSTEM_PROMPT + "\n\n" + build_activity_profile_summary_prompt(context)
+        prompt = SYSTEM_PROMPT + "\n\n" + build_activity_profile_summary_prompt(
+            context,
+            language=self.settings.output_language,
+        )
         return self._generate(prompt)

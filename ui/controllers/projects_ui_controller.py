@@ -8,17 +8,25 @@ from core.db import (
     list_projects,
     get_project,
     delete_project,
+    get_project_notes,
     list_recent_datasets,
+    list_pcap_sources,
+    list_activity,
+    list_findings,
+    touch_project,
     update_project,
 )
+from core.formatters import format_duration_compact_ms, format_pcap_datetime, human_bytes
 from core.project_identity import project_identifiers_text, subject_display_label
-from core.project_profile import build_project_activity_profile
+from core.project_profile import build_project_activity_profile, format_project_activity_profile
 from core.workspace import (
     ensure_workspace_structure,
     build_workspace_path,
     move_workspace_folder,
     delete_workspace_folder,
     looks_like_vianyquist_workspace,   
+    write_project_notes_backup,
+    write_project_workspace_manifest,
 )
 from ui.dialogs import project_details_dialog
 
@@ -37,9 +45,19 @@ class ProjectsUIController:
 
         self.app.projects_info.setText("Select a project to see details.")
         self.app.recent_list.clear()
+        self.app.project_recent_json_rows = []
+        self.app.project_recent_pcap_rows = []
+        self.app.project_activity_rows = []
+        self._refresh_project_launcher_cards()
         self.refresh_case_dashboard(None)
         self.app.refresh_activity_profile_ui()
         self.app.refresh_activity_ui_for_project(None)
+
+    def _short_text(self, value: str, limit: int = 54) -> str:
+        text = (value or "").strip()
+        if len(text) <= limit:
+            return text
+        return text[: max(0, limit - 3)] + "..."
 
     def create_project_dialog(self):
         values, ok = project_details_dialog(
@@ -95,6 +113,7 @@ class ProjectsUIController:
             return
 
         self.set_active_project(pid)
+        self.sync_project_workspace(pid)
         self.refresh_projects()
         self.refresh_recent_datasets(pid)
         self.app.refresh_findings_ui()
@@ -112,13 +131,17 @@ class ProjectsUIController:
         if should_open:
             opened = self.app.dataset_controller.load_dataset_dialog()
             if opened == "json":
-                self.app.go_page(self.app.IDX_EXPLORE, self.app._nav_explore)
+                self.app.go_to_json_tab(0)
 
     def on_project_selected_preview(self):
         item = self.app.projects_list.currentItem()
         if not item:
             self.app.projects_info.setText("Select a project to see details.")
             self.app.recent_list.clear()
+            self.app.project_recent_json_rows = []
+            self.app.project_recent_pcap_rows = []
+            self.app.project_activity_rows = []
+            self._refresh_project_launcher_cards()
             self.refresh_case_dashboard(None)
             return
 
@@ -160,6 +183,13 @@ class ProjectsUIController:
             return
         pid = int(item.data(Qt.UserRole))
         self.set_active_project(pid)
+        self.refresh_projects()
+        for idx in range(self.app.projects_list.count()):
+            refreshed_item = self.app.projects_list.item(idx)
+            if int(refreshed_item.data(Qt.UserRole)) == pid:
+                self.app.projects_list.setCurrentItem(refreshed_item)
+                break
+        self.on_project_selected_preview()
 
     def delete_selected_project(self):
         item = self.app.projects_list.currentItem()
@@ -324,6 +354,7 @@ class ProjectsUIController:
             return
 
         # refresh whole page
+        self.sync_project_workspace(project.id)
         self.refresh_projects()
 
         # reselect updated item
@@ -341,6 +372,7 @@ class ProjectsUIController:
             self.app.refresh_activity_profile_ui()
 
     def set_active_project(self, project_id: int):
+        touch_project(project_id)
         p = get_project(project_id)
         if not p:
             self.app._message_dialog("Project", "Project not found.", width=400)
@@ -350,6 +382,8 @@ class ProjectsUIController:
 
         if project_changed:
             self.app.clear_dataset_context()
+            if hasattr(self.app, "activity_profile_page"):
+                self.app.activity_profile_page.invalidate_project_cache()
 
         self.app.current_project_id = p.id
         self.app.current_project_name = p.name
@@ -362,29 +396,233 @@ class ProjectsUIController:
         self.app.refresh_findings_ui()
         self.app.refresh_notes_ui()
         self.app.refresh_activity_profile_ui()
+        self.sync_project_workspace(p.id)
+
+    def sync_project_workspace(self, project_id: int | None) -> None:
+        if project_id is None:
+            return
+
+        project = get_project(project_id)
+        if not project or not (project.base_folder or "").strip():
+            return
+
+        json_datasets = list_recent_datasets(project_id, limit=500)
+        pcap_sources = []
+        for source in list_pcap_sources(project_id, limit=500):
+            pieces = [source.file_name or Path(source.file_path).name]
+            if source.file_path:
+                pieces.append(source.file_path)
+            if source.file_sha256:
+                pieces.append(f"sha256={source.file_sha256}")
+            pcap_sources.append(" | ".join(piece for piece in pieces if piece))
+
+        profile = build_project_activity_profile(project_id)
+        activity_lines = self._workspace_activity_lines(project_id)
+        finding_lines = self._workspace_finding_lines(project_id)
+        case_snapshot = self._workspace_case_snapshot(
+            project=project,
+            profile=profile,
+            json_count=len(json_datasets),
+            pcap_count=len(pcap_sources),
+            finding_count=len(finding_lines),
+            activity_count=len(activity_lines),
+        )
+
+        write_project_notes_backup(project.base_folder, get_project_notes(project_id))
+        write_project_workspace_manifest(
+            project.base_folder,
+            project_name=project.name,
+            project_id=project.id,
+            subject=subject_display_label(project),
+            identifiers=project_identifiers_text(project),
+            json_datasets=json_datasets,
+            pcap_sources=pcap_sources,
+            findings=finding_lines,
+            activity=activity_lines,
+            profile_report=format_project_activity_profile(profile),
+            case_snapshot=case_snapshot,
+        )
+
+    def _workspace_activity_lines(self, project_id: int) -> list[str]:
+        lines: list[str] = []
+        for row in list_activity(project_id, limit=1000):
+            created_at = str(row["created_at"] or "")
+            event_type = str(row["event_type"] or "")
+            message = str(row["message"] or "")
+            label = self.activity_label(event_type, message)
+            lines.append(f"{created_at} | {event_type or '-'} | {label}")
+        return lines
+
+    def _workspace_finding_lines(self, project_id: int) -> list[str]:
+        lines: list[str] = []
+        for row in list_findings(project_id, limit=1000):
+            title = str(row["title"] or "Untitled finding")
+            status = str(row["status"] or "-")
+            tags = str(row["tags"] or "-")
+            protocol = str(row["protocol"] or "-")
+            app_name = str(row["application_name"] or "-")
+            host = str(row["requested_server_name"] or "-")
+            src = self._endpoint_text(row["src_ip"], row["src_port"])
+            dst = self._endpoint_text(row["dst_ip"], row["dst_port"])
+            volume = human_bytes(row["bidirectional_bytes"], precision=2)
+            packets = row["bidirectional_packets"] if row["bidirectional_packets"] is not None else "-"
+            duration = format_duration_compact_ms(row["bidirectional_duration_ms"]) or "-"
+            note = str(row["note"] or "").strip()
+
+            parts = [
+                f"#{row['id']} | {status} | {title}",
+                f"Tags: {tags}",
+                f"Flow: {src} -> {dst} | {protocol} | {app_name} | Host/SNI: {host}",
+                f"Volume: {volume} | Packets: {packets} | Duration: {duration}",
+            ]
+            if note:
+                parts.extend(["Note:", note])
+            lines.append("\n".join(parts))
+        return lines
+
+    def _workspace_case_snapshot(
+        self,
+        *,
+        project,
+        profile: dict,
+        json_count: int,
+        pcap_count: int,
+        finding_count: int,
+        activity_count: int,
+    ) -> str:
+        lines = [
+            "ViaNyquist beta case snapshot",
+            "",
+            f"Project: {project.name}",
+            f"Project ID: {project.id}",
+            f"Subject: {subject_display_label(project)}",
+            f"Known identifiers: {project_identifiers_text(project)}",
+            "",
+            f"Unique JSON datasets: {json_count}",
+            f"Unique PCAP sources: {pcap_count}",
+            f"Findings: {finding_count}",
+            f"Activity events: {activity_count}",
+        ]
+
+        capture_range = profile.get("capture_range") or {}
+        if capture_range.get("start") or capture_range.get("end"):
+            lines.append(
+                "Observed PCAP capture range: "
+                f"{format_pcap_datetime(capture_range.get('start')) or '-'} to "
+                f"{format_pcap_datetime(capture_range.get('end')) or '-'}"
+            )
+
+        pcap_ips = profile.get("pcap_device_ips") or {}
+        if pcap_ips:
+            ip_text = ", ".join(f"{ip} ({count})" for ip, count in pcap_ips.items())
+            lines.append(f"Observed PCAP device IPs: {ip_text}")
+
+        warnings = self._case_dashboard_warnings(project, profile)
+        if warnings:
+            lines.append("")
+            lines.append("Consistency warnings: " + " | ".join(warnings))
+        return "\n".join(lines)
+
+    def _endpoint_text(self, ip_value, port_value) -> str:
+        ip = str(ip_value or "-")
+        port = str(port_value or "").strip()
+        return f"{ip}:{port}" if port else ip
 
     def refresh_recent_datasets(self, project_id: int):
         self.app.recent_list.clear()
         paths = list_recent_datasets(project_id, limit=15)
+        self.app.project_recent_json_rows = []
 
         if not paths:
-            self.app.recent_list.addItem(QListWidgetItem("(no datasets yet)"))
-            return
+            self.app.recent_list.addItem(QListWidgetItem("(no JSON datasets yet)"))
+        else:
+            for fp in paths:
+                p = Path(str(fp))
 
-        for fp in paths:
-            p = Path(str(fp))
+                if p.is_file():
+                    status = "Available"
+                    kind = "JSON file"
+                    label = f"[FILE] {p.name}"
+                elif p.is_dir():
+                    status = "Available"
+                    kind = "Folder"
+                    label = f"[FOLDER] {p.name}"
+                else:
+                    status = "Missing"
+                    kind = "Path"
+                    label = f"[MISSING] {p.name or str(fp)}"
 
-            if p.is_file():
-                label = f"[FILE] {p.name}"
-            elif p.is_dir():
-                label = f"[FOLDER] {p.name}"
+                item = QListWidgetItem(label)
+                item.setToolTip(str(fp))
+                item.setData(Qt.UserRole, str(fp))
+                self.app.recent_list.addItem(item)
+                self.app.project_recent_json_rows.append({
+                    "status": status,
+                    "name": p.name or str(fp),
+                    "kind": kind,
+                    "path": str(fp),
+                })
+
+        pcap_sources = list_pcap_sources(project_id, limit=500)
+        self.app.project_recent_pcap_rows = []
+        for source in pcap_sources:
+            period = " - ".join(
+                value
+                for value in (
+                    format_pcap_datetime(source.first_seen),
+                    format_pcap_datetime(source.last_seen),
+                )
+                if value
+            )
+            self.app.project_recent_pcap_rows.append({
+                "name": source.file_name or Path(source.file_path).name,
+                "packets": f"{source.packet_count:,}",
+                "volume": human_bytes(source.wire_bytes, precision=2),
+                "device_ip": source.likely_device_ip or "-",
+                "period": period or "-",
+                "path": source.file_path,
+            })
+
+        activity_rows = list_activity(project_id, limit=500)
+        self.app.project_activity_rows = []
+        for row in activity_rows:
+            event = self.activity_label(str(row["event_type"] or ""), str(row["message"] or ""))
+            self.app.project_activity_rows.append({
+                "created_at": str(row["created_at"] or ""),
+                "event": event,
+                "detail": str(row["message"] or ""),
+            })
+
+        self._refresh_project_launcher_cards()
+
+    def _refresh_project_launcher_cards(self) -> None:
+        json_count = len(getattr(self.app, "project_recent_json_rows", []) or [])
+        pcap_count = len(getattr(self.app, "project_recent_pcap_rows", []) or [])
+        activity_count = len(getattr(self.app, "project_activity_rows", []) or [])
+
+        if hasattr(self.app, "lbl_recent_json_count"):
+            self.app.lbl_recent_json_count.setText(f"{json_count:,} JSON datasets")
+            if json_count:
+                newest = self._short_text(self.app.project_recent_json_rows[0].get("name") or "-")
+                self.app.lbl_recent_json_detail.setText(f"Most recent: {newest}")
             else:
-                label = f"[MISSING] {p.name or str(fp)}"
+                self.app.lbl_recent_json_detail.setText("No JSON datasets saved for this project.")
 
-            item = QListWidgetItem(label)
-            item.setToolTip(str(fp))
-            item.setData(Qt.UserRole, str(fp))
-            self.app.recent_list.addItem(item)
+        if hasattr(self.app, "lbl_recent_pcap_count"):
+            self.app.lbl_recent_pcap_count.setText(f"{pcap_count:,} PCAP datasets")
+            if pcap_count:
+                newest = self._short_text(self.app.project_recent_pcap_rows[0].get("name") or "-")
+                self.app.lbl_recent_pcap_detail.setText(f"Most recent: {newest}")
+            else:
+                self.app.lbl_recent_pcap_detail.setText("No PCAP sources saved for this project.")
+
+        if hasattr(self.app, "lbl_recent_activity_count"):
+            self.app.lbl_recent_activity_count.setText(f"{activity_count:,} events")
+            if activity_count:
+                newest = self._short_text(self.app.project_activity_rows[0].get("event") or "-")
+                self.app.lbl_recent_activity_detail.setText(f"Latest: {newest}")
+            else:
+                self.app.lbl_recent_activity_detail.setText("No project activity yet.")
 
     def refresh_case_dashboard(self, project_id: int | None):
         if not hasattr(self.app, "lbl_case_dashboard_title"):
@@ -393,9 +631,8 @@ class ProjectsUIController:
         if project_id is None:
             self.app.lbl_case_dashboard_title.setText("Case Dashboard")
             self.app.lbl_case_dashboard_subject.setText("Select a project to see case context.")
-            for idx, title in enumerate(("Datasets", "PCAP", "Findings", "Device IPs")):
+            for idx, title in enumerate(("JSON Datasets", "PCAP", "Findings", "Device IPs")):
                 self.app.case_metric_cards[idx].setText(f"{title}: 0")
-            self.app.lbl_case_dashboard_warnings.setText("")
             return
 
         project = get_project(project_id)
@@ -412,18 +649,13 @@ class ProjectsUIController:
         )
 
         values = [
-            ("Datasets", profile.get("dataset_count", 0)),
+            ("JSON Datasets", profile.get("dataset_count", 0)),
             ("PCAP", profile.get("pcap_count", 0)),
             ("Findings", profile.get("finding_count", 0)),
             ("Device IPs", len(profile.get("pcap_device_ips") or {})),
         ]
         for idx, (title, value) in enumerate(values):
             self.app.case_metric_cards[idx].setText(f"{title}: {value}")
-
-        warnings = self._case_dashboard_warnings(project, profile)
-        self.app.lbl_case_dashboard_warnings.setText(
-            "Review: " + " | ".join(warnings) if warnings else "Review: no immediate project consistency warnings."
-        )
 
     def _case_dashboard_warnings(self, project, profile: dict) -> list[str]:
         warnings: list[str] = []
@@ -446,7 +678,7 @@ class ProjectsUIController:
 
     def activity_label(self, event_type: str, message: str = "") -> str:
         labels = {
-            "dataset_loaded": "Dataset loaded",
+            "dataset_loaded": "JSON dataset loaded",
             "pcap_saved": "PCAP saved",
             "pcap_notes_added": "PCAP notes added",
             "finding_created": "Finding created",
@@ -478,7 +710,7 @@ class ProjectsUIController:
             self.app._message_dialog("Dataset", "Path not found.", str(p), width=460)
             return
 
-        self.app.go_page(self.app.IDX_EXPLORE, self.app._nav_explore)
+        self.app.go_to_json_tab(0)
 
     def open_new_dataset(self):
         if self.app.current_project_id is None:
@@ -491,9 +723,8 @@ class ProjectsUIController:
 
         opened = self.app.dataset_controller.load_dataset_dialog()
         if opened == "json":
-            self.app.go_page(
-                self.app.IDX_EXPLORE,
-                self.app._nav_explore
-            )
+            self.app.go_to_json_tab(0)
+        elif opened == "pcap":
+            self.app.go_page(self.app.IDX_PCAP, self.app._nav_pcap)
 
     

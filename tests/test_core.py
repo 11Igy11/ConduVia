@@ -25,6 +25,7 @@ from core.db import (
     init_db,
     list_pcap_sources,
     list_project_pcap_device_ips,
+    list_recent_datasets,
     set_app_setting,
     set_project_subject,
     set_project_target,
@@ -35,6 +36,7 @@ from core.formatters import (
     format_flow_date,
     format_flow_datetime,
     format_flow_time,
+    format_pcap_datetime,
     format_short_date,
     human_bytes,
     safe_int,
@@ -47,7 +49,7 @@ from core.loader import list_json_files, load_folder, load_json_file
 from core.parser import extract_dataset_meta
 from core.pcap_analyzer import analyze_pcap, build_communication_rows, build_investigator_view
 from core.project_datasets import load_project_dataset_flows
-from core.project_identity import identifier_values_match, normalize_identifier_value
+from core.project_identity import identifier_values_match, is_valid_oib, normalize_identifier_value
 from core.project_profile import build_project_activity_profile, format_project_activity_profile
 from core.protocols import describe_ip_proto, format_ip_proto_with_description
 from core.timeutils import LOCAL_TZ, parse_timestamp
@@ -56,6 +58,8 @@ from core.workspace import (
     ensure_workspace_structure,
     looks_like_vianyquist_workspace,
     make_safe_project_folder_name,
+    write_project_workspace_manifest,
+    workspace_export_path,
 )
 
 
@@ -120,6 +124,7 @@ class TimeAndFormatterTests(unittest.TestCase):
         self.assertEqual(format_flow_date("2024-05-28 22:01:02"), "28.05.2024")
         self.assertEqual(format_flow_time("2024-05-28 22:01:02"), "22:01:02")
         self.assertEqual(format_flow_datetime("2024-05-28 22:01:02.123456", milliseconds=True), "28.05.2024 22:01:02.123")
+        self.assertEqual(format_pcap_datetime("2024-05-28 22:01:02.123456"), "28/05/2024 22:01:02.123")
 
     def test_short_date_converts_offset_timestamp_to_local_date(self):
         self.assertEqual(format_short_date("2024-05-28T22:00:00.000+00:00"), "29.05.2024.")
@@ -183,18 +188,21 @@ class BehaviorProfileTests(unittest.TestCase):
             project_id = create_project("Case A", db_path=db_path)
             add_dataset_load(project_id, str(one), db_path=db_path)
             add_dataset_load(project_id, str(two), db_path=db_path)
-            add_dataset_load(project_id, str(one), db_path=db_path)
             add_dataset_load(project_id, str(missing), db_path=db_path)
+            add_dataset_load(project_id, str(one), db_path=db_path)
 
             result = load_project_dataset_flows(project_id, db_path=db_path)
+            recent = list_recent_datasets(project_id, db_path=db_path)
 
-        self.assertEqual(result["saved_path_count"], 4)
+        self.assertEqual(result["saved_path_count"], 3)
         self.assertEqual(result["deduped_path_count"], 3)
         self.assertEqual(result["loaded_source_count"], 2)
         self.assertEqual(result["source_count"], 3)
         self.assertEqual(result["flow_count"], 2)
         self.assertEqual([flow["id"] for flow in result["flows"]], ["one", "two"])
         self.assertEqual(len(result["missing_rows"]), 1)
+        self.assertEqual(recent[0], str(one))
+        self.assertEqual(len(recent), 3)
 
     def test_behavior_profile_groups_services_domains_and_hours(self):
         flows = [
@@ -254,8 +262,8 @@ class BehaviorProfileTests(unittest.TestCase):
                 "summary_lines": ["Project Activity Profile", "- Case subject: Ana Horvat"],
                 "recommendation_lines": ["- Compare JSON and PCAP evidence."],
                 "timeline_lines": ["- 2026-01-04 09:00:00: Dataset loaded"],
-                "metrics": [{"label": "Datasets", "value": 1}],
-                "evidence_counts": [{"label": "Datasets", "count": 1}],
+                "metrics": [{"label": "JSON Datasets", "value": 1}],
+                "evidence_counts": [{"label": "JSON Datasets", "count": 1}],
                 "pcap_device_ip_rows": [{"label": "10.0.0.10", "count": 1}],
                 "capture_range": {"label": "04/01/2026 09:00:00.000"},
                 "total_pcap_bytes_label": "86.10 MB",
@@ -269,12 +277,18 @@ class BehaviorProfileTests(unittest.TestCase):
 
             export_activity_profile_html(str(output), profile=profile, project_name="Case A")
             content = output.read_text(encoding="utf-8")
+            hr_output = Path(tmp) / "profile-hr.html"
+            export_activity_profile_html(str(hr_output), profile=profile, project_name="Case A", report_language="hr")
+            hr_content = hr_output.read_text(encoding="utf-8")
 
         self.assertIn("ViaNyquist Activity Profile", content)
         self.assertIn("Case A", content)
         self.assertIn("Behavior Insights", content)
         self.assertIn("WhatsApp", content)
         self.assertIn("Most active hour", content)
+        self.assertIn("ViaNyquist profil aktivnosti", hr_content)
+        self.assertIn("Pregled dokaza", hr_content)
+        self.assertIn("Uvidi u ponasanje", hr_content)
 
 
 class ExportContextTests(unittest.TestCase):
@@ -307,11 +321,27 @@ class ExportContextTests(unittest.TestCase):
                 project=project,
             )
             content = output.read_text(encoding="utf-8")
+            hr_output = root / "listing-hr.html"
+            export_listing_html(
+                file_path=str(hr_output),
+                headers=["Time", "Application"],
+                rows=[["09:00", "WhatsApp"]],
+                dataset=str(root / "dataset.json"),
+                view_mode="All",
+                files_count=1,
+                meta={"target": "385911234567", "targettype": "MSISDN"},
+                project=project,
+                report_language="hr",
+            )
+            hr_content = hr_output.read_text(encoding="utf-8")
 
         self.assertIn("Case Subject", content)
         self.assertIn("Ana Horvat", content)
         self.assertIn("MSISDN: 385911234567", content)
         self.assertIn("Dataset Target", content)
+        self.assertIn("ViaNyquist listing izvjestaj", hr_content)
+        self.assertIn("Valjanost naloga", hr_content)
+        self.assertIn("Listing podaci", hr_content)
 
     def test_registry_html_export_includes_project_case_context(self):
         with temporary_directory() as tmp:
@@ -345,10 +375,29 @@ class ExportContextTests(unittest.TestCase):
             )
             content = output.read_text(encoding="utf-8")
 
+            hr_output = root / "registry-hr.html"
+            export_registry_html(
+                file_path=str(hr_output),
+                folder=root,
+                files=[root / "dataset.json"],
+                flows=[{"src_ip": "10.0.0.5", "dst_ip": "8.8.8.8", "application_name": "DNS", "bidirectional_bytes": 100}],
+                meta={"target": "38598111222", "targettype": "MSISDN"},
+                summary={"total_flows": 1, "total_bytes": 100},
+                analyst={},
+                columns=["src_ip", "dst_ip", "application_name"],
+                tab_defs=[],
+                project=project,
+                report_language="hr",
+            )
+            hr_content = hr_output.read_text(encoding="utf-8")
+
         self.assertIn("Case B", content)
         self.assertIn("Pero Peric", content)
         self.assertIn("MSISDN: 38598111222", content)
         self.assertIn("Known IP", content)
+        self.assertIn("ViaNyquist registry izvjestaj", hr_content)
+        self.assertIn("Valjanost naloga", hr_content)
+        self.assertIn("Analiticki sazetak", hr_content)
 
 
 class CompareTests(unittest.TestCase):
@@ -392,8 +441,57 @@ class WorkspaceTests(unittest.TestCase):
             self.assertTrue((root / WORKSPACE_MARKER).exists())
             self.assertTrue(looks_like_vianyquist_workspace(str(root)))
 
+    def test_workspace_export_path_uses_project_exports_folder(self):
+        with temporary_directory() as tmp:
+            root = Path(tmp) / "case"
+            ensure_workspace_structure(str(root))
+
+            export_path = workspace_export_path(str(root), "report.html")
+            exports_exists = export_path.parent.exists()
+
+        self.assertEqual(export_path.name, "report.html")
+        self.assertEqual(export_path.parent.name, "exports")
+        self.assertTrue(exports_exists)
+
     def test_project_folder_name_is_windows_safe(self):
         self.assertEqual(make_safe_project_folder_name(' Case: A/B? '), "Case_A_B")
+
+    def test_workspace_manifest_tracks_project_references(self):
+        with temporary_directory() as tmp:
+            root = Path(tmp) / "case"
+            write_project_workspace_manifest(
+                str(root),
+                project_name="Case A",
+                project_id=7,
+                subject="Ana Horvat",
+                identifiers="MSISDN: 385911234567",
+                json_datasets=[str(root / "dataset.json")],
+                pcap_sources=["sample.pcap | C:/captures/sample.pcap | sha256=abc"],
+                findings=["#1 | open | Important flow"],
+                activity=["2026-05-07 08:00:00 | dataset_loaded | JSON dataset loaded"],
+                profile_report="Project Activity Profile\n- Dataset loads: 1",
+                case_snapshot="ViaNyquist beta case snapshot\nProject: Case A",
+            )
+
+            manifest = (root / "project_manifest.txt").read_text(encoding="utf-8")
+            json_refs = (root / "datasets" / "json_datasets.txt").read_text(encoding="utf-8")
+            pcap_refs = (root / "datasets" / "pcap_sources.txt").read_text(encoding="utf-8")
+            findings = (root / "findings" / "findings.txt").read_text(encoding="utf-8")
+            activity = (root / "reports" / "activity_log.txt").read_text(encoding="utf-8")
+            profile = (root / "reports" / "activity_profile.txt").read_text(encoding="utf-8")
+            snapshot = (root / "reports" / "case_snapshot.txt").read_text(encoding="utf-8")
+
+        self.assertIn("Project: Case A", manifest)
+        self.assertIn("Subject: Ana Horvat", manifest)
+        self.assertIn("JSON datasets: 1", manifest)
+        self.assertIn("Findings: 1", manifest)
+        self.assertIn("Activity events: 1", manifest)
+        self.assertIn("dataset.json", json_refs)
+        self.assertIn("sample.pcap", pcap_refs)
+        self.assertIn("Important flow", findings)
+        self.assertIn("dataset_loaded", activity)
+        self.assertIn("Project Activity Profile", profile)
+        self.assertIn("beta case snapshot", snapshot)
 
 
 class AppSettingsTests(unittest.TestCase):
@@ -457,6 +555,13 @@ class ProjectTargetTests(unittest.TestCase):
         self.assertEqual(project.subject_imei, "356789012345678")
         self.assertEqual(project.subject_ip, "10.0.0.10")
         self.assertIn("ana@example.test", project.subject_extra_identifiers)
+
+    def test_oib_validation_checks_length_digits_and_control_number(self):
+        self.assertTrue(is_valid_oib("61154777813"))
+        self.assertTrue(is_valid_oib("611 547 77813"))
+        self.assertFalse(is_valid_oib("61154777812"))
+        self.assertFalse(is_valid_oib("6115477781"))
+        self.assertFalse(is_valid_oib("6115477781A"))
 
     def test_identifier_matching_tolerates_phone_formatting_and_dataset_aliases(self):
         self.assertEqual(normalize_identifier_value("+385 91 123-4567", "MSISDN"), "385911234567")
@@ -609,12 +714,29 @@ class PcapAnalyzerTests(unittest.TestCase):
                 summary_text=build_investigator_view(summary)["plain_summary"],
                 db_path=db_path,
             )
+            duplicate_source_id = add_pcap_source(
+                project_id,
+                file_path=str(pcap_path),
+                file_name=pcap_path.name,
+                file_sha256_value=digest,
+                file_size=pcap_path.stat().st_size,
+                format=summary.format,
+                packet_count=summary.packet_count,
+                wire_bytes=summary.wire_bytes,
+                first_seen=summary.first_seen,
+                last_seen=summary.last_seen,
+                duration_seconds=summary.duration_seconds,
+                likely_device_ip=summary.likely_device_ip,
+                summary_text=build_investigator_view(summary)["plain_summary"],
+                db_path=db_path,
+            )
 
             sources = list_pcap_sources(project_id, db_path=db_path)
             device_ips = list_project_pcap_device_ips(project_id, db_path=db_path)
 
         self.assertEqual(len(sources), 1)
         self.assertEqual(sources[0].id, source_id)
+        self.assertEqual(duplicate_source_id, source_id)
         self.assertEqual(sources[0].file_sha256, digest)
         self.assertEqual(sources[0].likely_device_ip, "10.0.0.10")
         self.assertEqual(device_ips, ["10.0.0.10"])
@@ -642,11 +764,21 @@ class PcapAnalyzerTests(unittest.TestCase):
 
             export_pcap_summary_html(str(output), summary, project=project)
             content = output.read_text(encoding="utf-8")
+            hr_output = root / "pcap-hr.html"
+            export_pcap_summary_html(str(hr_output), summary, project=project, report_language="hr")
+            hr_content = hr_output.read_text(encoding="utf-8")
 
         self.assertIn("Case A", content)
         self.assertIn("Ana Horvat", content)
         self.assertIn("MSISDN: 385911234567", content)
-        self.assertIn("Likely Device IP", content)
+        self.assertIn("Device IP", content)
+        self.assertIn("ViaNyquist PCAP Report", content)
+        self.assertIn('href="#summary"', content)
+        self.assertIn('id="evidence"', content)
+        self.assertIn("Communication Highlights", content)
+        self.assertIn("ViaNyquist PCAP izvjestaj", hr_content)
+        self.assertIn("Komunikacijski indikatori", hr_content)
+        self.assertIn("Dokazi", hr_content)
 
     def test_project_activity_profile_summarizes_saved_evidence(self):
         with temporary_directory() as tmp:
@@ -706,12 +838,12 @@ class PcapAnalyzerTests(unittest.TestCase):
         self.assertEqual(profile["finding_count"], 1)
         self.assertEqual(profile["pcap_device_ips"], {"10.0.0.10": 1})
         self.assertEqual(profile["evidence_counts"], [
-            {"label": "Datasets", "count": 1},
+            {"label": "JSON Datasets", "count": 1},
             {"label": "PCAP Sources", "count": 1},
             {"label": "Findings", "count": 1},
         ])
         self.assertEqual(profile["pcap_device_ip_rows"], [{"label": "10.0.0.10", "count": 1}])
-        self.assertTrue(any(row["label"] == "Dataset loaded" for row in profile["activity_type_rows"]))
+        self.assertTrue(any(row["label"] == "JSON dataset loaded" for row in profile["activity_type_rows"]))
         self.assertTrue(any(row["label"] == "PCAP saved" for row in profile["activity_type_rows"]))
         self.assertTrue(profile["capture_range"]["first_seen"])
         self.assertTrue(profile["capture_range"]["last_seen"])
@@ -738,12 +870,15 @@ class AIServiceTests(unittest.TestCase):
             "ai.base_url": "http://saved.local",
             "ai.model": "saved-model",
             "ai.timeout_seconds": "33",
+            "output.language": "en",
         })
 
         self.assertEqual(settings.base_url, "http://saved.local")
         self.assertEqual(settings.model, "saved-model")
         self.assertEqual(settings.timeout_seconds, 33)
+        self.assertEqual(settings.output_language, "en")
         self.assertEqual(settings.to_mapping()["ai.model"], "saved-model")
+        self.assertEqual(settings.to_mapping()["output.language"], "en")
 
     def test_generate_uses_configured_endpoint_model_and_timeout(self):
         class FakeResponse:
@@ -807,7 +942,7 @@ class AIServiceTests(unittest.TestCase):
         self.assertIn("HTTP host", context)
         self.assertIn("no plaintext credentials were observed", prompt)
         self.assertIn("Do not invent malware", prompt)
-        self.assertIn("Prefer Croatian", prompt)
+        self.assertIn("Write the response in Croatian", prompt)
 
     def test_pcap_ai_summary_uses_pcap_prompt(self):
         class FakeResponse:
@@ -821,7 +956,7 @@ class AIServiceTests(unittest.TestCase):
             _write_sample_pcap(path)
             summary = analyze_pcap(path)
 
-        service = AIAssistantService(AISettings(base_url="http://ai.local", model="m", timeout_seconds=7))
+        service = AIAssistantService(AISettings(base_url="http://ai.local", model="m", timeout_seconds=7, output_language="en"))
         with patch.object(service, "_post_generate", return_value=FakeResponse()) as post:
             result = service.generate_pcap_summary(summary, project_name="Case A")
 
@@ -830,12 +965,13 @@ class AIServiceTests(unittest.TestCase):
         self.assertIn("You are analyzing a packet capture summary", prompt)
         self.assertIn("PCAP file: sample.pcap", prompt)
         self.assertIn("Limits Of Interpretation", prompt)
+        self.assertIn("Write the response in English", prompt)
 
     def test_activity_profile_context_and_prompt_are_grounded(self):
         profile = {
             "summary_lines": ["Project Activity Profile", "- Target: MSISDN / 123"],
             "evidence_counts": [
-                {"label": "Datasets", "count": 2},
+                {"label": "JSON Datasets", "count": 2},
                 {"label": "PCAP Sources", "count": 1},
             ],
             "pcap_device_ip_rows": [{"label": "10.0.0.10", "count": 1}],
@@ -862,7 +998,7 @@ class AIServiceTests(unittest.TestCase):
         self.assertIn("Facebook / Meta", context)
         self.assertIn("Do not identify a real person", prompt)
         self.assertIn("Activity Profile Summary", prompt)
-        self.assertIn("Prefer Croatian", prompt)
+        self.assertIn("Write the response in Croatian", prompt)
 
     def test_activity_profile_ai_summary_uses_profile_prompt(self):
         class FakeResponse:
@@ -873,7 +1009,7 @@ class AIServiceTests(unittest.TestCase):
 
         profile = {
             "summary_lines": ["Project Activity Profile"],
-            "evidence_counts": [{"label": "Datasets", "count": 1}],
+            "evidence_counts": [{"label": "JSON Datasets", "count": 1}],
             "recommendation_lines": ["- Review saved findings."],
         }
         service = AIAssistantService(AISettings(base_url="http://ai.local", model="m", timeout_seconds=7))

@@ -52,6 +52,17 @@ def format_flow_datetime(value: Any, *, milliseconds: bool = False) -> str:
     return dt.strftime("%d.%m.%Y %H:%M:%S")
 
 
+def format_pcap_datetime(value: Any, *, milliseconds: bool = True) -> str:
+    dt = parse_timestamp(value)
+    if dt is None:
+        return "" if value is None else str(value)
+
+    if milliseconds:
+        return dt.strftime("%d/%m/%Y %H:%M:%S.%f")[:-3]
+
+    return dt.strftime("%d/%m/%Y %H:%M:%S")
+
+
 def format_short_date(value: Any, *, missing: str = "-") -> str:
     dt = parse_timestamp(value)
     if dt is None:

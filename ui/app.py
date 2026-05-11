@@ -4,13 +4,13 @@ from core.ai.assistant_service import AIAssistantService, AISettings
 import ipaddress
 from ui.registry_page import RegistryPage
 from ui.listing_page import ListingPage
-from ui.pcap_page import PcapPage
+from ui.pcap_page import DictTableModel, PcapPage
 from ui.activity_profile_page import ActivityProfilePage
 from ui.settings_page import SettingsPage
 import html
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 from core.protocols import format_ip_proto
 from core.workspace import write_project_notes_backup
 from ui.controllers.flow_controller import FlowController
@@ -21,7 +21,7 @@ from ui.controllers.dataset_controller import DatasetController
 from ui.controllers.explore_ui_controller import ExploreUIController
 
 from ui.explore_models import FlowTableModel, NumericSortProxy
-from ui.explore_widgets import AITextWorker, FlowTableView
+from ui.explore_widgets import AITextWorker, CopyableTableView, FlowTableView
 from ui.findings_page import FindingsPage
 from ui.controllers.notes_controller import NotesController
 from ui.dialogs import (
@@ -31,7 +31,6 @@ from ui.dialogs import (
     multiline_input_dialog,
     item_choice_dialog,
     confirm_dialog,
-    ai_settings_dialog,
 )
 from PySide6.QtCore import Qt, QTimer, QThread
 from PySide6.QtGui import QGuiApplication, QIcon, QFont, QPixmap
@@ -41,14 +40,14 @@ from PySide6.QtWidgets import (
     QTextEdit, QTabWidget, QLineEdit,
     QSplitter, QGroupBox,
     QListWidget, QListWidgetItem,
-    QComboBox, QFrame, QSizePolicy, QScrollArea, QHeaderView,
+    QAbstractItemView, QComboBox, QDialog, QFrame, QSizePolicy, QScrollArea, QHeaderView,
     QTableView, QMenu
 )
 from core.db import (
     init_db, add_finding, get_finding,
     update_finding, delete_finding,
     add_activity, get_project,
-    get_app_settings, set_app_setting,
+    get_app_settings,
 )
 # ---------- helpers ----------
 def is_private_ip(ip: str) -> bool:
@@ -80,7 +79,211 @@ def normalize_tags(tags: str) -> str:
         seen.add(t.lower())
         parts.append(t)
     return ", ".join(parts)
-    
+
+def normalize_ui_theme(value: str | None) -> str:
+    theme = (value or "dark").strip().lower()
+    return theme if theme in {"dark", "light"} else "dark"
+
+LIGHT_THEME_OVERRIDES = """
+QWidget {
+    background: #f4f7fb;
+    color: #111827;
+}
+
+QLabel {
+    background: transparent;
+    color: #111827;
+}
+
+QFrame#Card,
+QFrame#ProfileHero,
+QFrame#ProfilePanel,
+QFrame#ExploreHeaderCard,
+QFrame#ListingHeaderCard,
+QFrame#CaseDashboardCompact,
+QFrame#PanelCard,
+QFrame#FlowDetailsCard,
+QFrame#PcapInvestigatorCard,
+QGroupBox {
+    background: #ffffff;
+    border-color: #cbd5e1;
+}
+
+QFrame#Card QLabel,
+QFrame#ProfileHero QLabel,
+QFrame#ProfilePanel QLabel,
+QFrame#ExploreHeaderCard QLabel,
+QFrame#ListingHeaderCard QLabel,
+QFrame#CaseDashboardCompact QLabel,
+QFrame#PanelCard QLabel,
+QFrame#PcapInvestigatorCard QLabel,
+QGroupBox QLabel {
+    background: transparent;
+    color: #111827;
+}
+
+QLabel#H1,
+QLabel#SectionTitle,
+QLabel#ProfileTitle,
+QLabel#ProfilePanelTitle,
+QLabel#CaseDashboardTitle,
+QLabel#HeaderProjectLabel {
+    background: transparent;
+    color: #0f172a;
+}
+
+QLabel#Muted,
+QLabel#ProfileSubtitle,
+QLabel#HeaderPathLabel,
+QLabel#HeaderStatLabel,
+QLabel#PcapKeyPoints,
+QLabel#PcapLimitations,
+QLabel#FlowFieldLabel,
+QLabel#MutedLabel {
+    background: transparent;
+    color: #475569;
+}
+
+QLabel#PcapPlainSummary {
+    background: transparent;
+    color: #111827;
+}
+
+QLabel#ProfileMetric,
+QLabel#CaseMetricCompact {
+    background: #f8fafc;
+    border: 1px solid #cbd5e1;
+    color: #0f172a;
+}
+
+QFrame#ProfileCountRow {
+    background: #f8fafc;
+    border-color: #cbd5e1;
+}
+
+QLabel#ProfileCountBadge {
+    background: #3b82f6;
+    color: #ffffff;
+}
+
+QLineEdit,
+QTextEdit,
+QPlainTextEdit,
+QComboBox,
+QListWidget,
+QTableView {
+    background: #ffffff;
+    color: #111827;
+    border-color: #cbd5e1;
+}
+
+QLineEdit:focus,
+QTextEdit:focus,
+QPlainTextEdit:focus,
+QComboBox:focus {
+    border-color: #2563eb;
+}
+
+QComboBox QAbstractItemView {
+    background: #ffffff;
+    color: #111827;
+    selection-background-color: #3b82f6;
+    selection-color: #ffffff;
+}
+
+QTabWidget::pane {
+    background: #ffffff;
+    border-color: #cbd5e1;
+}
+
+QTabBar::tab {
+    background: #e2e8f0;
+    border-color: #cbd5e1;
+    color: #334155;
+}
+
+QTabBar::tab:hover {
+    background: #dbeafe;
+    color: #0f172a;
+}
+
+QTabBar::tab:selected {
+    background: #ffffff;
+    color: #0f172a;
+}
+
+QHeaderView::section {
+    background: #e2e8f0;
+    color: #111827;
+    border-color: #cbd5e1;
+}
+
+QTableView {
+    alternate-background-color: #f1f5f9;
+    gridline-color: #cbd5e1;
+    selection-background-color: #3b82f6;
+    selection-color: #ffffff;
+}
+
+QPushButton {
+    background: #ffffff;
+    color: #111827;
+    border-color: #cbd5e1;
+}
+
+QPushButton:hover {
+    background: #e2e8f0;
+}
+
+QPushButton#NavButton {
+    background: transparent;
+    color: #111827;
+    border: none;
+}
+
+QFrame#SidebarFrame {
+    background: transparent;
+    border-right: 1px solid #cbd5e1;
+}
+
+QPushButton#NavButton:hover {
+    background: #e2e8f0;
+    border: 1px solid #cbd5e1;
+}
+
+QPushButton#NavButton[active="true"] {
+    background: #3b82f6;
+    color: #ffffff;
+}
+
+QPushButton#Primary {
+    background: #3b82f6;
+    border-color: #3b82f6;
+    color: #ffffff;
+}
+
+QProgressBar {
+    background: #e2e8f0;
+    border-color: #cbd5e1;
+}
+
+QProgressBar::chunk {
+    background: #3b82f6;
+}
+"""
+
+def app_stylesheet(theme: str | None = "dark") -> str:
+    qss_path = Path(__file__).resolve().parent / "style.qss"
+    if not qss_path.exists():
+        return ""
+    qss = qss_path.read_text(encoding="utf-8")
+    if normalize_ui_theme(theme) == "light":
+        qss += "\n\n/* light theme overrides */\n" + LIGHT_THEME_OVERRIDES
+    return qss
+
+def apply_app_stylesheet(qapp: QApplication, theme: str | None = "dark") -> None:
+    qapp.setStyleSheet(app_stylesheet(theme))
+
 # ---------- Main App ----------
 class App(QWidget):
     def build_home_page(self) -> QWidget:
@@ -188,62 +391,91 @@ class App(QWidget):
         return page    
 
     def go_to_explore_flows(self):
-        self.go_page(self.IDX_EXPLORE, self._nav_explore)
+        self.go_to_json_tab(0)
         self.tabs.setCurrentIndex(1)
 
-    def _build_sidebar(self) -> QVBoxLayout:
-        sidebar = QVBoxLayout()
+    def go_to_notes(self):
+        self.go_page(self.IDX_NOTES, self._nav_notes)
+
+    def go_to_ai(self):
+        self.go_page(self.IDX_AI, self._nav_ai)
+
+    def go_to_json_tab(self, tab_index: int = 0):
+        self.go_page(self.IDX_JSON, self._nav_json)
+        if hasattr(self, "json_tabs"):
+            self.json_tabs.setCurrentIndex(max(0, tab_index))
+
+    def _build_sidebar(self) -> QFrame:
+        sidebar_frame = QFrame()
+        sidebar_frame.setObjectName("SidebarFrame")
+        sidebar_frame.setFixedWidth(220)
+        sidebar = QVBoxLayout(sidebar_frame)
+        sidebar.setContentsMargins(0, 0, 12, 0)
+        sidebar.setSpacing(8)
 
         self.btn_nav_projects = QPushButton("Projects")
-        self.btn_nav_profile = QPushButton("Profile")
-        self.btn_nav_explore = QPushButton("Explore")
-        self.btn_nav_registry = QPushButton("Registry")
-        self.btn_nav_listing = QPushButton("Listing")
+        self.btn_nav_json = QPushButton("JSON")
         self.btn_nav_pcap = QPushButton("PCAP")
+        self.btn_nav_osint = QPushButton("OSINT")
+        self.btn_nav_ai = QPushButton("AI output")
+        self.btn_nav_notes = QPushButton("Notes")
+        self.btn_nav_profile = QPushButton("Profile")
+        self.btn_global_refresh = QPushButton("Refresh")
         self.btn_nav_settings = QPushButton("Settings")
         self.btn_nav_help = QPushButton("Help")
 
         for b in (
             self.btn_nav_projects,
-            self.btn_nav_profile,
-            self.btn_nav_explore,
-            self.btn_nav_registry,
-            self.btn_nav_listing,
+            self.btn_nav_json,
             self.btn_nav_pcap,
+            self.btn_nav_osint,
+            self.btn_nav_ai,
+            self.btn_nav_notes,
+            self.btn_nav_profile,
+            self.btn_global_refresh,
             self.btn_nav_settings,
             self.btn_nav_help,
         ):
             b.setObjectName("NavButton")
             b.setFixedHeight(40)
+        self.btn_global_refresh.setToolTip("Refresh projects, notes, findings, profile, PCAP view and settings.")
 
         # activ button reference (for highlight)
         self._nav_projects = self.btn_nav_projects
         self._nav_profile = self.btn_nav_profile
-        self._nav_explore = self.btn_nav_explore
-        self._nav_registry = self.btn_nav_registry
-        self._nav_listing = self.btn_nav_listing
+        self._nav_notes = self.btn_nav_notes
+        self._nav_ai = self.btn_nav_ai
+        self._nav_json = self.btn_nav_json
+        self._nav_explore = self.btn_nav_json
+        self._nav_registry = self.btn_nav_json
+        self._nav_listing = self.btn_nav_json
         self._nav_pcap = self.btn_nav_pcap
+        self._nav_osint = self.btn_nav_osint
         self._nav_settings = self.btn_nav_settings
 
         sidebar.addWidget(self.btn_nav_projects)
-        sidebar.addWidget(self.btn_nav_profile)
-        sidebar.addWidget(self.btn_nav_explore)
-        sidebar.addWidget(self.btn_nav_registry)
-        sidebar.addWidget(self.btn_nav_listing)
-        sidebar.addStretch()
+        sidebar.addWidget(self.btn_nav_json)
         sidebar.addWidget(self.btn_nav_pcap)
+        sidebar.addWidget(self.btn_nav_osint)
+        sidebar.addWidget(self.btn_nav_ai)
+        sidebar.addWidget(self.btn_nav_notes)
+        sidebar.addWidget(self.btn_nav_profile)
+        sidebar.addStretch()
+        sidebar.addWidget(self.btn_global_refresh)
         sidebar.addWidget(self.btn_nav_settings)
         sidebar.addWidget(self.btn_nav_help)
 
-        return sidebar
+        return sidebar_frame
 
     def _wire_navigation(self) -> None:
         self.btn_nav_projects.clicked.connect(lambda: self.go_page(self.IDX_PROJECTS, self._nav_projects))
         self.btn_nav_profile.clicked.connect(lambda: self.go_page(self.IDX_PROFILE, self._nav_profile))
-        self.btn_nav_explore.clicked.connect(lambda: self.go_page(self.IDX_EXPLORE, self._nav_explore))
-        self.btn_nav_registry.clicked.connect(lambda: self.go_page(self.IDX_REGISTRY, self._nav_registry))
-        self.btn_nav_listing.clicked.connect(lambda: self.go_page(self.IDX_LISTING, self._nav_listing))
+        self.btn_nav_notes.clicked.connect(self.go_to_notes)
+        self.btn_nav_ai.clicked.connect(self.go_to_ai)
+        self.btn_nav_json.clicked.connect(lambda: self.go_to_json_tab(0))
+        self.btn_global_refresh.clicked.connect(self.refresh_all_views)
         self.btn_nav_pcap.clicked.connect(lambda: self.go_page(self.IDX_PCAP, self._nav_pcap))
+        self.btn_nav_osint.clicked.connect(lambda: self.go_page(self.IDX_OSINT, self._nav_osint))
         self.btn_nav_settings.clicked.connect(lambda: self.go_page(self.IDX_SETTINGS, self._nav_settings))
         self.btn_nav_help.clicked.connect(self.open_user_manual)
 
@@ -268,7 +500,6 @@ class App(QWidget):
         self.btn_load.clicked.connect(self.dataset_controller.load_dataset_dialog)
         self.btn_ai_summary.clicked.connect(self.explore_ui_controller.generate_ai_summary)
         self.btn_add_ai_to_notes.clicked.connect(self.add_ai_summary_to_notes)
-        self.btn_ai_settings.clicked.connect(lambda: self.go_page(self.IDX_SETTINGS, self._nav_settings))
         self.btn_toggle_conv.clicked.connect(self.explore_ui_controller.toggle_conversation)
         self.btn_expand_flows.clicked.connect(self.explore_ui_controller.toggle_flows_expanded)
         self.btn_mark_finding.clicked.connect(self.mark_as_finding)
@@ -345,7 +576,7 @@ class App(QWidget):
         self._init_state()
 
         self.ai_service = AIAssistantService(
-            AISettings.from_mapping(get_app_settings("ai."))
+            AISettings.from_mapping(get_app_settings())
         )
         self.notes_controller = NotesController()
         self.flow_controller = FlowController()
@@ -511,6 +742,53 @@ class App(QWidget):
         self._ai_thread: QThread | None = None
         self._ai_worker: AITextWorker | None = None
         self._ai_mode: str | None = None
+        self._last_ai_title = "No AI output yet"
+        self._last_ai_source = ""
+        self._last_ai_text = ""
+
+    def _build_osint_page(self) -> QWidget:
+        page = QWidget()
+        root = QVBoxLayout(page)
+        root.setContentsMargins(10, 10, 10, 10)
+        root.setSpacing(14)
+
+        header = QFrame()
+        header.setObjectName("ProfileHero")
+        header_layout = QVBoxLayout(header)
+        header_layout.setContentsMargins(18, 16, 18, 16)
+        header_layout.setSpacing(8)
+
+        title = QLabel("OSINT")
+        title.setObjectName("ProfileTitle")
+        subtitle = QLabel("Under construction. This module will later collect open-source profile signals for the active case.")
+        subtitle.setObjectName("ProfileSubtitle")
+        subtitle.setWordWrap(True)
+
+        header_layout.addWidget(title)
+        header_layout.addWidget(subtitle)
+        root.addWidget(header)
+
+        panel = QFrame()
+        panel.setObjectName("ProfilePanel")
+        panel_layout = QVBoxLayout(panel)
+        panel_layout.setContentsMargins(18, 16, 18, 16)
+        panel_layout.setSpacing(10)
+
+        panel_title = QLabel("Planned module")
+        panel_title.setObjectName("ProfilePanelTitle")
+        body = QLabel(
+            "OSINT will be a separate workspace for social network, messaging-app and public-source indicators. "
+            "For beta, this page is only a navigation placeholder so the final module has a reserved place in the application."
+        )
+        body.setObjectName("Muted")
+        body.setWordWrap(True)
+        body.setTextInteractionFlags(Qt.TextSelectableByMouse)
+
+        panel_layout.addWidget(panel_title)
+        panel_layout.addWidget(body)
+        root.addWidget(panel)
+        root.addStretch()
+        return page
 
     def _build_ui(self) -> None:
         outer = QVBoxLayout(self)
@@ -526,11 +804,15 @@ class App(QWidget):
         self.pages = QStackedWidget()
         self.IDX_PROJECTS = 0
         self.IDX_PROFILE = 1
-        self.IDX_EXPLORE = 2
-        self.IDX_REGISTRY = 3
-        self.IDX_LISTING = 4
+        self.IDX_NOTES = 2
+        self.IDX_AI = 3
+        self.IDX_JSON = 4
+        self.IDX_EXPLORE = self.IDX_JSON
+        self.IDX_REGISTRY = self.IDX_JSON
+        self.IDX_LISTING = self.IDX_JSON
         self.IDX_PCAP = 5
-        self.IDX_SETTINGS = 6
+        self.IDX_OSINT = 6
+        self.IDX_SETTINGS = 7
 
         # -------- Projects page --------
         projects_page = QWidget()
@@ -542,12 +824,14 @@ class App(QWidget):
 
         self.btn_new_project = QPushButton("New project")
         self.btn_open_project = QPushButton("Open project")
+        self.btn_open_new_dataset = QPushButton("Open dataset")
         self.btn_edit_project = QPushButton("Edit project")
         self.btn_refresh_projects = QPushButton("Refresh")
         self.btn_delete_project = QPushButton("Delete selected")
 
         btn_row.addWidget(self.btn_new_project)
         btn_row.addWidget(self.btn_open_project)
+        btn_row.addWidget(self.btn_open_new_dataset)
         btn_row.addWidget(self.btn_edit_project)
         btn_row.addWidget(self.btn_refresh_projects)
         btn_row.addWidget(self.btn_delete_project)
@@ -557,20 +841,61 @@ class App(QWidget):
         self.projects_info.setReadOnly(True)
         self.projects_info.setPlaceholderText("Select a project to see details.")
 
-        self.lbl_recent = QLabel("Recent datasets:")
         self.recent_list = QListWidget()
-
-        recent_btn_row = QHBoxLayout()
+        self.recent_list.hide()
+        self.project_recent_json_rows: list[dict[str, Any]] = []
+        self.project_recent_pcap_rows: list[dict[str, Any]] = []
+        self.project_activity_rows: list[dict[str, Any]] = []
 
         self.btn_open_dataset = QPushButton("Open selected")
-        self.btn_open_new_dataset = QPushButton("Open new dataset")
+        self.btn_open_dataset.hide()
+        self.btn_expand_json_datasets = QPushButton("Open JSON list")
+        self.btn_expand_pcap_datasets = QPushButton("Open PCAP list")
+        self.btn_expand_project_activity = QPushButton("Open activity log")
+        for button in (self.btn_open_new_dataset, self.btn_expand_json_datasets, self.btn_expand_pcap_datasets, self.btn_expand_project_activity):
+            button.setFixedHeight(38)
 
-        recent_btn_row.addWidget(self.btn_open_dataset)
-        recent_btn_row.addWidget(self.btn_open_new_dataset)
-        recent_btn_row.addStretch()
+        self.btn_expand_json_datasets.clicked.connect(
+            lambda: self._open_project_rows_dialog(
+                "Recent JSON datasets",
+                [
+                    ("status", "Status"),
+                    ("name", "Name"),
+                    ("kind", "Kind"),
+                    ("path", "Path"),
+                ],
+                self.project_recent_json_rows,
+                on_double_click=self._open_json_dataset_row,
+            )
+        )
+        self.btn_expand_pcap_datasets.clicked.connect(
+            lambda: self._open_project_rows_dialog(
+                "Recent PCAP datasets",
+                [
+                    ("name", "Name"),
+                    ("packets", "Packets"),
+                    ("volume", "Volume"),
+                    ("device_ip", "Device IP"),
+                    ("period", "Period"),
+                    ("path", "Path"),
+                ],
+                self.project_recent_pcap_rows,
+                on_double_click=self._open_pcap_dataset_row,
+            )
+        )
+        self.btn_expand_project_activity.clicked.connect(
+            lambda: self._open_project_rows_dialog(
+                "Recent activity",
+                [
+                    ("event", "Event"),
+                    ("created_at", "Time"),
+                    ("detail", "Detail"),
+                ],
+                self.project_activity_rows,
+            )
+        )
 
         projects_layout.addWidget(self.lbl_active_project)
-        projects_layout.addLayout(btn_row)
 
         self.case_dashboard = QFrame()
         self.case_dashboard.setObjectName("CaseDashboardCompact")
@@ -587,6 +912,22 @@ class App(QWidget):
 
         dashboard_header = QHBoxLayout()
         dashboard_header.setSpacing(14)
+
+        self.lbl_case_dashboard_logo = QLabel()
+        self.lbl_case_dashboard_logo.setObjectName("CaseDashboardLogo")
+        self.lbl_case_dashboard_logo.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        self.lbl_case_dashboard_logo.setFixedSize(58, 44)
+        logo_path = Path(__file__).resolve().parent.parent / "assets" / "ViaNyquist.png"
+        logo_pixmap = QPixmap(str(logo_path))
+        if not logo_pixmap.isNull():
+            self.lbl_case_dashboard_logo.setPixmap(
+                logo_pixmap.scaled(
+                    self.lbl_case_dashboard_logo.size(),
+                    Qt.KeepAspectRatio,
+                    Qt.SmoothTransformation,
+                )
+            )
+        dashboard_header.addWidget(self.lbl_case_dashboard_logo)
         dashboard_header.addWidget(self.lbl_case_dashboard_title)
         dashboard_header.addWidget(self.lbl_case_dashboard_subject, 1)
         dashboard_layout.addLayout(dashboard_header)
@@ -594,7 +935,7 @@ class App(QWidget):
         self.case_metric_cards = []
         case_metrics = QHBoxLayout()
         case_metrics.setSpacing(8)
-        for title in ("Datasets", "PCAP", "Findings", "Device IPs"):
+        for title in ("JSON Datasets", "PCAP", "Findings", "Device IPs"):
             card = QLabel(f"{title}: 0")
             card.setObjectName("CaseMetricCompact")
             card.setAlignment(Qt.AlignCenter)
@@ -603,17 +944,13 @@ class App(QWidget):
             self.case_metric_cards.append(card)
             case_metrics.addWidget(card, 1)
 
-        self.lbl_case_dashboard_warnings = QLabel("")
-        self.lbl_case_dashboard_warnings.setWordWrap(True)
-        self.lbl_case_dashboard_warnings.setObjectName("Muted")
-
         dashboard_metrics_row = QHBoxLayout()
-        dashboard_metrics_row.setSpacing(12)
-        dashboard_metrics_row.addLayout(case_metrics, 3)
-        dashboard_metrics_row.addWidget(self.lbl_case_dashboard_warnings, 2)
+        dashboard_metrics_row.setSpacing(8)
+        dashboard_metrics_row.addLayout(case_metrics, 1)
         dashboard_layout.addLayout(dashboard_metrics_row)
 
         projects_layout.addWidget(self.case_dashboard)
+        projects_layout.addLayout(btn_row)
 
         middle_row = QHBoxLayout()
 
@@ -630,31 +967,67 @@ class App(QWidget):
 
         projects_layout.addLayout(middle_row, 1)
 
-        bottom_row = QHBoxLayout()
-
-        # --- Left: Recent datasets ---
-        recent_col = QVBoxLayout()
-        recent_col.addWidget(self.lbl_recent)
-        recent_col.addWidget(self.recent_list, 1)
-        recent_col.addLayout(recent_btn_row)
-
-        # --- Right: Activity log ---
-        activity_col = QVBoxLayout()
-        activity_col.addWidget(QLabel("Recent activity"))
-
         self.lst_activity = QListWidget()
-        activity_col.addWidget(self.lst_activity, 1)
+        self.lst_activity.hide()
 
-        activity_footer = QWidget()
-        activity_footer.setFixedHeight(self.btn_open_dataset.sizeHint().height())
+        self.lbl_recent_json_count = QLabel("0 JSON datasets")
+        self.lbl_recent_json_count.setObjectName("ProfileMetric")
+        self.lbl_recent_json_detail = QLabel("No JSON datasets saved for this project.")
+        self.lbl_recent_json_detail.setObjectName("Muted")
+        self.lbl_recent_json_detail.setWordWrap(True)
 
-        activity_col.addWidget(activity_footer) 
-       
+        self.lbl_recent_pcap_count = QLabel("0 PCAP datasets")
+        self.lbl_recent_pcap_count.setObjectName("ProfileMetric")
+        self.lbl_recent_pcap_detail = QLabel("No PCAP sources saved for this project.")
+        self.lbl_recent_pcap_detail.setObjectName("Muted")
+        self.lbl_recent_pcap_detail.setWordWrap(True)
 
-        bottom_row.addLayout(recent_col, 3)
-        bottom_row.addLayout(activity_col, 2)
+        self.lbl_recent_activity_count = QLabel("0 events")
+        self.lbl_recent_activity_count.setObjectName("ProfileMetric")
+        self.lbl_recent_activity_detail = QLabel("No project activity yet.")
+        self.lbl_recent_activity_detail.setObjectName("Muted")
+        self.lbl_recent_activity_detail.setWordWrap(True)
 
-        projects_layout.addLayout(bottom_row, 1)
+        bottom_grid = QGridLayout()
+        bottom_grid.setSpacing(14)
+        bottom_grid.addWidget(
+            self._project_launcher_card(
+                "Recent JSON datasets",
+                "Unique JSON files or folders saved to the active project.",
+                self.lbl_recent_json_count,
+                self.lbl_recent_json_detail,
+                [self.btn_expand_json_datasets],
+            ),
+            0,
+            0,
+        )
+        bottom_grid.addWidget(
+            self._project_launcher_card(
+                "Recent PCAP datasets",
+                "Unique PCAP captures saved to the active project.",
+                self.lbl_recent_pcap_count,
+                self.lbl_recent_pcap_detail,
+                [self.btn_expand_pcap_datasets],
+            ),
+            0,
+            1,
+        )
+        bottom_grid.addWidget(
+            self._project_launcher_card(
+                "Recent activity",
+                "Central project activity log for datasets, PCAP sources, findings and notes.",
+                self.lbl_recent_activity_count,
+                self.lbl_recent_activity_detail,
+                [self.btn_expand_project_activity],
+            ),
+            0,
+            2,
+        )
+        bottom_grid.setColumnStretch(0, 1)
+        bottom_grid.setColumnStretch(1, 1)
+        bottom_grid.setColumnStretch(2, 1)
+
+        projects_layout.addLayout(bottom_grid, 1)
 
         # -------- Explore page --------
         explore_container = QWidget()
@@ -704,6 +1077,7 @@ class App(QWidget):
 
         header_top.addWidget(self.lbl_project_banner)
         header_top.addStretch()
+        header_top.addWidget(self.btn_load)
         header_top.addWidget(QLabel("Page size:"))
         header_top.addWidget(self.cmb_page_size)
         header_top.addWidget(self.btn_load_more)
@@ -727,6 +1101,7 @@ class App(QWidget):
 
         self.search = QLineEdit()
         self.search.setPlaceholderText("Search IP / SNI / app...")
+        self.search.setMinimumHeight(40)
 
         self.tabs = QTabWidget()
 
@@ -737,14 +1112,12 @@ class App(QWidget):
 
         self.btn_ai_summary = QPushButton("Generate AI Summary")
         self.btn_add_ai_to_notes = QPushButton("Add AI to Notes")
-        self.btn_ai_settings = QPushButton("AI Settings")
         self.btn_add_ai_to_notes.setEnabled(True)
 
         summary_btn_row = QHBoxLayout()
         summary_btn_row.setSpacing(8)
         summary_btn_row.addWidget(self.btn_ai_summary)
         summary_btn_row.addWidget(self.btn_add_ai_to_notes)
-        summary_btn_row.addWidget(self.btn_ai_settings)
         summary_btn_row.addStretch()
 
         summary_layout.addLayout(summary_btn_row)
@@ -962,7 +1335,6 @@ class App(QWidget):
             b.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
         
         left_actions.addSpacing(6)
-        left_actions.addWidget(self.btn_load)
         left_actions.addWidget(self.btn_filter_src)
         left_actions.addWidget(self.btn_filter_dst)
         left_actions.addWidget(self.btn_filter_sni)
@@ -976,6 +1348,7 @@ class App(QWidget):
         toolbar.addStretch()
         toolbar.addLayout(right_actions)
 
+        flows_tab_layout.addWidget(self.search)
         flows_tab_layout.addWidget(toolbar_wrap)
         self.splitter = QSplitter(Qt.Horizontal)
 
@@ -1140,12 +1513,46 @@ class App(QWidget):
         notes_root.addWidget(self.txt_notes, 1)
 
         self.tabs.addTab(notes_tab, "Notes")
+        self.tabs.removeTab(3)
+
+        ai_page = QWidget()
+        ai_root = QVBoxLayout(ai_page)
+        ai_root.setContentsMargins(10, 10, 10, 10)
+        ai_root.setSpacing(10)
+
+        ai_header = QFrame()
+        ai_header.setObjectName("ExploreHeaderCard")
+        ai_header_layout = QVBoxLayout(ai_header)
+        ai_header_layout.setContentsMargins(14, 14, 14, 14)
+        ai_header_layout.setSpacing(8)
+
+        ai_title_row = QHBoxLayout()
+        self.lbl_ai_hub_title = QLabel("AI Summary")
+        self.lbl_ai_hub_title.setObjectName("HeaderProjectLabel")
+        self.btn_ai_hub_add_notes = QPushButton("Add to Notes")
+        self.btn_ai_hub_add_notes.setEnabled(False)
+        ai_title_row.addWidget(self.lbl_ai_hub_title)
+        ai_title_row.addStretch()
+        ai_title_row.addWidget(self.btn_ai_hub_add_notes)
+
+        self.lbl_ai_hub_context = QLabel("Generate an AI result from JSON, PCAP or Profile to see it here.")
+        self.lbl_ai_hub_context.setObjectName("Muted")
+        self.lbl_ai_hub_context.setWordWrap(True)
+
+        ai_header_layout.addLayout(ai_title_row)
+        ai_header_layout.addWidget(self.lbl_ai_hub_context)
+        ai_root.addWidget(ai_header)
+
+        self.txt_ai_hub = QTextEdit()
+        self.txt_ai_hub.setReadOnly(True)
+        self.txt_ai_hub.setPlaceholderText("The latest AI-generated explanation or summary will appear here.")
+        ai_root.addWidget(self.txt_ai_hub, 1)
+
+        self.btn_ai_hub_add_notes.clicked.connect(self.add_ai_hub_to_notes)
 
         # Explore layout
-        explore_layout.addWidget(header_card)
         explore_layout.addWidget(self.lbl_mode)
         explore_layout.addWidget(self.lbl_conv_summary)
-        explore_layout.addWidget(self.search)
         explore_layout.addWidget(self.tabs, 1)
 
         # Pages
@@ -1154,16 +1561,32 @@ class App(QWidget):
         self.activity_profile_page = ActivityProfilePage(self)
         self.pages.addWidget(self.activity_profile_page)
 
-        self.pages.addWidget(explore_container)
+        self.pages.addWidget(notes_tab)
+        self.pages.addWidget(ai_page)
+
+        json_page = QWidget()
+        json_layout = QVBoxLayout(json_page)
+        json_layout.setContentsMargins(0, 0, 0, 0)
+        json_layout.setSpacing(0)
+        self.json_tabs = QTabWidget()
+        self.json_tabs.setDocumentMode(True)
+        self.json_tabs.addTab(explore_container, "Explore")
 
         self.registry_page = RegistryPage(self)
-        self.pages.addWidget(self.registry_page)
+        self.json_tabs.addTab(self.registry_page, "Registry")
 
         self.listing_page = ListingPage(self)
-        self.pages.addWidget(self.listing_page)
+        self.json_tabs.addTab(self.listing_page, "Listing")
+
+        json_layout.addWidget(header_card)
+        json_layout.addWidget(self.json_tabs, 1)
+        self.pages.addWidget(json_page)
 
         self.pcap_page = PcapPage(self)
         self.pages.addWidget(self.pcap_page)
+
+        self.osint_page = self._build_osint_page()
+        self.pages.addWidget(self.osint_page)
 
         self.settings_page = SettingsPage(self)
         self.pages.addWidget(self.settings_page)
@@ -1171,8 +1594,8 @@ class App(QWidget):
         self.pages.setCurrentIndex(self.IDX_PROJECTS)
         self._set_active_nav(self._nav_projects)
 
-        root.addLayout(sidebar, 1)
-        root.addWidget(self.pages, 8)
+        root.addWidget(sidebar)
+        root.addWidget(self.pages, 1)
         outer.addLayout(root, 1)
 
         # footer
@@ -1187,10 +1610,11 @@ class App(QWidget):
         for b in (
             self._nav_projects,
             self._nav_profile,
-            self._nav_explore,
-            self._nav_registry,
-            self._nav_listing,
+            self._nav_notes,
+            self._nav_ai,
+            self._nav_json,
             self._nav_pcap,
+            self._nav_osint,
             self._nav_settings,
         ):
             b.setProperty("active", b is active)
@@ -1206,9 +1630,191 @@ class App(QWidget):
         self.pages.setCurrentIndex(idx)
         self._set_active_nav(active_btn)
 
+    def _project_launcher_card(
+        self,
+        title: str,
+        description: str,
+        count_label: QLabel,
+        detail_label: QLabel,
+        buttons: list[QPushButton],
+    ) -> QFrame:
+        card = QFrame()
+        card.setObjectName("Card")
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(10)
+
+        lbl_title = QLabel(title)
+        lbl_title.setObjectName("SectionTitle")
+        lbl_title.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        lbl_description = QLabel(description)
+        lbl_description.setObjectName("Muted")
+        lbl_description.setWordWrap(False)
+        lbl_description.setMaximumHeight(24)
+        lbl_description.setTextInteractionFlags(Qt.TextSelectableByMouse)
+
+        layout.addWidget(lbl_title)
+        layout.addWidget(lbl_description)
+        layout.addWidget(count_label)
+        detail_label.setWordWrap(False)
+        detail_label.setMaximumHeight(24)
+        layout.addWidget(detail_label)
+        layout.addStretch()
+
+        button_row = QHBoxLayout()
+        button_row.addStretch()
+        for button in buttons:
+            button_row.addWidget(button)
+        layout.addLayout(button_row)
+        return card
+
+    def _open_project_rows_dialog(
+        self,
+        title: str,
+        columns: list[tuple[str, str]],
+        rows: list[dict[str, Any]],
+        on_double_click: Callable[[dict[str, Any], QDialog], None] | None = None,
+    ) -> None:
+        if not rows:
+            self._message_dialog(title, "No rows are loaded.", width=380)
+            return
+
+        dlg = QDialog(self)
+        dlg.setWindowTitle(title)
+        screen = QGuiApplication.primaryScreen()
+        if screen is not None:
+            available = screen.availableGeometry()
+            dlg.resize(min(1180, available.width() - 120), min(680, available.height() - 120))
+        else:
+            dlg.resize(1080, 640)
+
+        layout = QVBoxLayout(dlg)
+        layout.setContentsMargins(14, 14, 14, 14)
+        layout.setSpacing(10)
+
+        hint = QLabel("Expanded project view. Sort columns or right-click to copy values.")
+        hint.setObjectName("Muted")
+        hint.setWordWrap(True)
+        layout.addWidget(hint)
+
+        table = CopyableTableView(self)
+        table.setModel(DictTableModel(columns, rows))
+        table.setSortingEnabled(True)
+        table.setAlternatingRowColors(True)
+        table.setSelectionBehavior(QTableView.SelectRows)
+        table.setSelectionMode(QAbstractItemView.SingleSelection)
+        table.setEditTriggers(QTableView.NoEditTriggers)
+        table.verticalHeader().setVisible(False)
+        table.setHorizontalScrollMode(QAbstractItemView.ScrollPerPixel)
+        table.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
+        table.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        table.setMinimumHeight(480)
+        table.horizontalHeader().setSectionResizeMode(QHeaderView.Interactive)
+
+        if on_double_click is not None:
+            def handle_double_click(index):
+                model = table.model()
+                if not isinstance(model, DictTableModel) or not index.isValid():
+                    return
+                row_idx = index.row()
+                if 0 <= row_idx < len(model.rows):
+                    on_double_click(model.rows[row_idx], dlg)
+
+            table.doubleClicked.connect(handle_double_click)
+
+        for idx, (key, label) in enumerate(columns):
+            name = f"{key} {label}".lower()
+            width = 140
+            if "detail" in name:
+                width = 620
+            elif "path" in name:
+                width = 520
+            elif "event" in name:
+                width = 320
+            elif "period" in name:
+                width = 300
+            elif "time" in name or "created" in name:
+                width = 220
+            elif "name" in name:
+                width = 260
+            table.setColumnWidth(idx, width)
+
+        layout.addWidget(table, 1)
+
+        footer = QHBoxLayout()
+        footer.addStretch()
+        btn_close = QPushButton("Close")
+        btn_close.setFixedHeight(34)
+        btn_close.clicked.connect(dlg.accept)
+        footer.addWidget(btn_close)
+        layout.addLayout(footer)
+        dlg.exec()
+
+    def _open_json_dataset_row(self, row: dict[str, Any], dialog: QDialog) -> None:
+        path_text = str(row.get("path") or "")
+        path = Path(path_text)
+        if not path_text or not path.exists():
+            self._message_dialog("JSON dataset", "Path not found.", path_text or "-", width=460)
+            return
+        dialog.accept()
+        if path.is_file():
+            self.dataset_controller.load_dataset_file(str(path))
+        elif path.is_dir():
+            self.dataset_controller.load_dataset_path(str(path))
+        self.go_to_json_tab(0)
+
+    def _open_pcap_dataset_row(self, row: dict[str, Any], dialog: QDialog) -> None:
+        path_text = str(row.get("path") or "")
+        path = Path(path_text)
+        if not path_text or not path.is_file():
+            self._message_dialog("PCAP dataset", "PCAP file not found.", path_text or "-", width=460)
+            return
+        dialog.accept()
+        self.go_page(self.IDX_PCAP, self._nav_pcap)
+        if hasattr(self, "pcap_page"):
+            self.pcap_page.load_pcap(str(path))
+
     def refresh_activity_profile_ui(self):
         if hasattr(self, "activity_profile_page"):
             self.activity_profile_page.refresh(self.current_project_id, self.current_project_name)
+
+    def refresh_all_views(self):
+        if hasattr(self, "_flush_notes"):
+            self._flush_notes()
+
+        active_project_id = self.current_project_id
+        self.projects_ui_controller.refresh_projects()
+
+        if active_project_id is not None and get_project(active_project_id):
+            self.projects_ui_controller.set_active_project(active_project_id)
+            for i in range(self.projects_list.count()):
+                item = self.projects_list.item(i)
+                if int(item.data(Qt.UserRole)) == active_project_id:
+                    self.projects_list.setCurrentItem(item)
+                    break
+            self.projects_ui_controller.refresh_recent_datasets(active_project_id)
+            self.projects_ui_controller.refresh_case_dashboard(active_project_id)
+
+        self.refresh_findings_ui()
+        self.refresh_notes_ui()
+        self.refresh_activity_profile_ui()
+        if hasattr(self, "pcap_page"):
+            self.pcap_page.refresh_current_view()
+
+        if hasattr(self, "settings_page"):
+            self.settings_page.refresh()
+
+        self._message_dialog(
+            "Refresh All",
+            "Application views refreshed.",
+            "Refreshed projects, project dashboard, recent datasets, notes, findings, activity profile, PCAP view and settings.",
+            width=460,
+        )
+
+    def apply_theme(self, theme: str | None) -> None:
+        qapp = QApplication.instance()
+        if qapp is not None:
+            apply_app_stylesheet(qapp, normalize_ui_theme(theme))
 
     def _open_from_registry(self, src: str, dst: str):
         self.go_to_explore_flows()
@@ -1256,6 +1862,12 @@ class App(QWidget):
           
     def on_ai_task_finished(self, result: str):
         self.txt_ai_summary.setPlainText(result)
+        title = {
+            "summary": "JSON Dataset Summary",
+            "flow": "Flow Explanation",
+            "finding": "Finding Explanation",
+        }.get(self._ai_mode or "", "AI Summary")
+        self.publish_ai_output("JSON", title, result)
 
         if self._ai_mode == "summary":
             self.btn_ai_summary.setEnabled(True)
@@ -1318,8 +1930,13 @@ class App(QWidget):
         if not ok2:
             note = ""
 
+        tags, ok3 = self._text_input_dialog("New finding", "Tags (comma-separated, optional):", width=440)
+        if not ok3:
+            tags = ""
+        tags = normalize_tags(tags)
+
         try:
-            add_finding(self.current_project_id, self._current_flow, title=title, note=note)
+            add_finding(self.current_project_id, self._current_flow, title=title, note=note, tags=tags)
         except Exception as e:
             self._message_dialog("Findings", "Failed to create finding.", str(e), width=460)
             return
@@ -1608,19 +2225,37 @@ class App(QWidget):
             f"{'-' * 60}\n"
         )
 
-    def add_ai_summary_to_notes(self):
-        if self.current_project_id is None:
-            self._message_dialog("Notes", "Open an active project first.", width=420)
-            return
+    def publish_ai_output(self, source: str, title: str, text: str) -> None:
+        self._last_ai_source = (source or "AI").strip()
+        self._last_ai_title = (title or "AI Summary").strip()
+        self._last_ai_text = text or ""
+        if hasattr(self, "lbl_ai_hub_title"):
+            self.lbl_ai_hub_title.setText(self._last_ai_title)
+        if hasattr(self, "lbl_ai_hub_context"):
+            context = f"Source: {self._last_ai_source}"
+            if self.current_project_name:
+                context += f" | Project: {self.current_project_name}"
+            self.lbl_ai_hub_context.setText(context)
+        if hasattr(self, "txt_ai_hub"):
+            self.txt_ai_hub.setPlainText(self._last_ai_text)
+        if hasattr(self, "btn_ai_hub_add_notes"):
+            self.btn_ai_hub_add_notes.setEnabled(bool(self._last_ai_text.strip()))
 
-        text = (self.txt_ai_summary.toPlainText() or "").strip()
+    def add_ai_hub_to_notes(self):
+        text = (self._last_ai_text or "").strip()
         if not text:
             self._message_dialog("Notes", "There is no AI-generated text to add.", width=440)
             return
+        self.add_ai_text_to_notes(text)
+
+    def add_ai_text_to_notes(self, text: str) -> bool:
+        if self.current_project_id is None:
+            self._message_dialog("Notes", "Open an active project first.", width=420)
+            return False
 
         block = self._make_ai_note_block(text)
         if not block:
-            return
+            return False
 
         existing = self.txt_notes.toPlainText() or ""
 
@@ -1634,32 +2269,16 @@ class App(QWidget):
         self.txt_notes.setPlainText(new_text)
         self._notes_dirty = True
         self._flush_notes()
+        self.go_to_notes()
+        return True
 
-        self.tabs.setCurrentIndex(3)  # Notes tab
-
-    def configure_ai_settings(self):
-        current = self.ai_service.settings
-        values, ok = ai_settings_dialog(
-            self,
-            base_url=current.base_url,
-            model=current.model,
-            timeout_seconds=current.timeout_seconds,
-            width=480,
-        )
-
-        if not ok or not values:
+    def add_ai_summary_to_notes(self):
+        text = (self.txt_ai_summary.toPlainText() or "").strip()
+        if not text:
+            self._message_dialog("Notes", "There is no AI-generated text to add.", width=440)
             return
 
-        self.ai_service.update_settings(AISettings(**values))
-        for key, value in self.ai_service.settings.to_mapping().items():
-            set_app_setting(key, value)
-
-        self._message_dialog(
-            "AI Settings",
-            "AI settings updated.",
-            f"Base URL: {values['base_url']}\nModel: {values['model']}\nTimeout: {values['timeout_seconds']} seconds",
-            width=520,
-        )
+        self.add_ai_text_to_notes(text)
 
     # ---------- Notes ----------
     def refresh_notes_ui(self):
@@ -1684,14 +2303,19 @@ class App(QWidget):
 
     def refresh_activity_ui_for_project(self, project_id: int | None):
         self.lst_activity.clear()
+        self.project_activity_rows = []
 
         if project_id is None:
             self.lst_activity.addItem(QListWidgetItem("(no project selected)"))
+            if hasattr(self, "projects_ui_controller"):
+                self.projects_ui_controller._refresh_project_launcher_cards()
             return
 
         rows = self.notes_controller.load_activity(project_id)
         if not rows:
             self.lst_activity.addItem(QListWidgetItem("(no activity yet)"))
+            if hasattr(self, "projects_ui_controller"):
+                self.projects_ui_controller._refresh_project_launcher_cards()
             return
 
         for r in rows:
@@ -1705,6 +2329,13 @@ class App(QWidget):
             item = QListWidgetItem(f"{ts}\n{label}")
             item.setToolTip(str(msg or ""))
             self.lst_activity.addItem(item)
+            self.project_activity_rows.append({
+                "created_at": str(ts or ""),
+                "event": label,
+                "detail": str(msg or ""),
+            })
+        if hasattr(self, "projects_ui_controller"):
+            self.projects_ui_controller._refresh_project_launcher_cards()
 
     def refresh_activity_ui(self):
         self.refresh_activity_ui_for_project(self.current_project_id)
@@ -1825,10 +2456,8 @@ class App(QWidget):
 def main():
     app = QApplication(sys.argv)
 
-    # load global stylesheet
-    qss_path = Path(__file__).resolve().parent / "style.qss"
-    if qss_path.exists():
-        app.setStyleSheet(qss_path.read_text(encoding="utf-8"))
+    init_db()
+    apply_app_stylesheet(app, get_app_settings().get("ui.theme", "dark"))
 
     base_dir = Path(__file__).resolve().parent          
     project_dir = base_dir.parent                       

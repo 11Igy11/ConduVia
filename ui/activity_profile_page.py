@@ -11,8 +11,6 @@ from PySide6.QtWidgets import (
     QGridLayout,
     QHBoxLayout,
     QLabel,
-    QListWidget,
-    QListWidgetItem,
     QProgressBar,
     QPushButton,
     QScrollArea,
@@ -23,11 +21,12 @@ from PySide6.QtWidgets import (
 )
 
 from core.behavior_profile import build_flow_behavior_profile
-from core.db import get_project
+from core.db import get_app_settings, get_project
 from core.exporters.profile_exporter import export_activity_profile_html
 from core.project_datasets import load_project_dataset_flows
 from core.project_profile import build_project_activity_profile
 from core.timeutils import parse_timestamp
+from core.workspace import workspace_export_path
 from ui.explore_widgets import AITextWorker
 
 
@@ -79,6 +78,11 @@ class ActivityProfilePage(QWidget):
         self._build_ui()
         self.clear()
 
+    def invalidate_project_cache(self) -> None:
+        self._behavior_cache_key = ""
+        self._behavior_cache_flows = []
+        self._project_dataset_info = {}
+
     def _build_ui(self):
         root = QVBoxLayout(self)
         root.setContentsMargins(10, 10, 10, 10)
@@ -93,18 +97,22 @@ class ActivityProfilePage(QWidget):
         title_row = QHBoxLayout()
         self.lbl_title = QLabel("Activity Profile")
         self.lbl_title.setObjectName("HeaderProjectLabel")
-        self.btn_ai_summary = QPushButton("AI Case Summary")
+        self.btn_ai_summary = QPushButton("AI Profile Summary")
         self.btn_ai_summary.setEnabled(False)
         self.btn_ai_summary.clicked.connect(self.generate_ai_summary)
+        self.btn_add_ai_to_notes = QPushButton("Add to Notes")
+        self.btn_add_ai_to_notes.setEnabled(False)
+        self.btn_add_ai_to_notes.clicked.connect(self.add_ai_summary_to_notes)
         self.btn_export = QPushButton("Export Profile")
         self.btn_export.setEnabled(False)
         self.btn_export.clicked.connect(self.export_profile)
         title_row.addWidget(self.lbl_title)
         title_row.addStretch()
         title_row.addWidget(self.btn_ai_summary)
+        title_row.addWidget(self.btn_add_ai_to_notes)
         title_row.addWidget(self.btn_export)
 
-        self.lbl_subtitle = QLabel("Open a project to build a device/user activity profile from datasets, PCAP sources, findings and notes.")
+        self.lbl_subtitle = QLabel("Open a project to build a device/user activity profile from JSON datasets, PCAP sources, findings and notes.")
         self.lbl_subtitle.setWordWrap(True)
         self.lbl_subtitle.setObjectName("Muted")
 
@@ -126,7 +134,7 @@ class ActivityProfilePage(QWidget):
         self.metric_cards: list[QLabel] = []
         metric_grid = QGridLayout()
         metric_grid.setSpacing(10)
-        for title in ("Datasets", "PCAP Sources", "Findings", "Device IPs", "PCAP Volume", "Capture Range"):
+        for title in ("JSON Datasets", "PCAP Sources", "Findings", "Device IPs", "PCAP Volume", "Capture Range"):
             card = QLabel(f"{title}\n0")
             card.setObjectName("ProfileMetric")
             card.setAlignment(Qt.AlignCenter)
@@ -137,15 +145,14 @@ class ActivityProfilePage(QWidget):
             metric_grid.addWidget(card, idx // 3, idx % 3)
         scroll_layout.addLayout(metric_grid)
 
-        self.evidence_chart = BarChartWidget("Evidence sources", compact_single_counts=True)
-        self.device_ip_chart = BarChartWidget("PCAP device IP distribution", compact_single_counts=True)
-        self.activity_chart = BarChartWidget("Activity event types", compact_single_counts=True)
+        self.evidence_chart = BarChartWidget("Evidence sources", count_list=True)
+        self.device_ip_chart = BarChartWidget("PCAP device IP distribution", count_list=True)
+        self.activity_chart = BarChartWidget("Activity event types", count_list=True, max_rows=6)
 
         chart_grid = QGridLayout()
         chart_grid.setSpacing(12)
-        chart_grid.addWidget(self.evidence_chart, 0, 0)
-        chart_grid.addWidget(self.device_ip_chart, 0, 1)
-        chart_grid.addWidget(self.activity_chart, 1, 0, 1, 2)
+        chart_grid.addWidget(self.device_ip_chart, 0, 0)
+        chart_grid.addWidget(self.activity_chart, 0, 1)
         chart_grid.setColumnStretch(0, 1)
         chart_grid.setColumnStretch(1, 1)
         scroll_layout.addLayout(chart_grid)
@@ -182,8 +189,14 @@ class ActivityProfilePage(QWidget):
         self.txt_ai_summary = QTextEdit()
         self.txt_ai_summary.setReadOnly(True)
         self.txt_ai_summary.setMinimumHeight(220)
-        self.txt_ai_summary.setPlaceholderText("Generate an AI case summary grounded in the current activity profile.")
-        scroll_layout.addWidget(self._section("AI Case Summary", self.txt_ai_summary))
+        self.txt_ai_summary.setPlaceholderText("Generate an AI profile summary grounded in the current activity profile.")
+        ai_section = QWidget()
+        ai_layout = QVBoxLayout(ai_section)
+        ai_layout.setContentsMargins(0, 0, 0, 0)
+        ai_layout.setSpacing(8)
+
+        ai_layout.addWidget(self.txt_ai_summary, 1)
+        scroll_layout.addWidget(self._section("AI Profile Summary", ai_section))
 
         self.txt_summary = QTextEdit()
         self.txt_summary.setReadOnly(True)
@@ -201,15 +214,7 @@ class ActivityProfilePage(QWidget):
         top.setStretchFactor(0, 1)
         top.setStretchFactor(1, 1)
 
-        self.lst_timeline = QListWidget()
-        self.lst_timeline.setMinimumHeight(260)
-
-        body = QSplitter(Qt.Vertical)
-        body.addWidget(top)
-        body.addWidget(self._section("Timeline", self.lst_timeline))
-        body.setStretchFactor(0, 2)
-        body.setStretchFactor(1, 1)
-        scroll_layout.addWidget(body)
+        scroll_layout.addWidget(top)
         scroll_layout.addStretch()
         scroll.setWidget(content)
         root.addWidget(scroll, 1)
@@ -219,14 +224,17 @@ class ActivityProfilePage(QWidget):
             self.clear()
             return
 
+        if project_id != getattr(self, "_profile_project_id", None):
+            self.invalidate_project_cache()
+        self._profile_project_id = project_id
         profile = build_project_activity_profile(project_id)
         self.profile = profile
         self.project_name = project_name or ""
         self.btn_ai_summary.setEnabled(True)
         self.btn_export.setEnabled(True)
-        self.btn_ai_summary.setText("AI Case Summary")
+        self.btn_ai_summary.setText("AI Profile Summary")
         self.lbl_title.setText(f"Activity Profile: {project_name or 'Project'}")
-        self.lbl_subtitle.setText("Profile built from saved datasets, PCAP sources, findings and project activity.")
+        self.lbl_subtitle.setText("Profile built from saved JSON datasets, PCAP sources, findings and project activity.")
         self._set_metrics(profile.get("metrics") or [])
         self._set_overview(profile)
         self.evidence_chart.set_rows(profile.get("evidence_counts") or [])
@@ -240,38 +248,30 @@ class ActivityProfilePage(QWidget):
         recommendation_lines = list(profile.get("recommendation_lines") or [])
         self.txt_next.setPlainText("\n".join(recommendation_lines))
 
-        self.lst_timeline.clear()
-        timeline = list(profile.get("timeline_lines") or [])
-        if not timeline:
-            self.lst_timeline.addItem(QListWidgetItem("(no project activity yet)"))
-        else:
-            for line in timeline:
-                self.lst_timeline.addItem(QListWidgetItem(line.removeprefix("- ")))
-
     def clear(self):
         self.lbl_title.setText("Activity Profile")
-        self.lbl_subtitle.setText("Open a project to build a device/user activity profile from datasets, PCAP sources, findings and notes.")
+        self.lbl_subtitle.setText("Open a project to build a device/user activity profile from JSON datasets, PCAP sources, findings and notes.")
         self.profile = None
         self.project_name = ""
+        self._profile_project_id = None
         self._behavior_cache_key = ""
         self._behavior_cache_flows = []
         self._project_dataset_info = {}
         self.btn_ai_summary.setEnabled(False)
+        self.btn_add_ai_to_notes.setEnabled(False)
         self.btn_export.setEnabled(False)
-        self.btn_ai_summary.setText("AI Case Summary")
+        self.btn_ai_summary.setText("AI Profile Summary")
         self._set_metrics([])
         self.evidence_chart.set_rows([])
         self.device_ip_chart.set_rows([], empty_text="No saved PCAP device IPs yet.")
         self.activity_chart.set_rows([], empty_text="No activity events yet.")
-        self.service_chart.set_rows([], empty_text="Load a dataset to show service groups.")
-        self.domain_chart.set_rows([], empty_text="Load a dataset to show observed domains.")
-        self.hour_chart.set_rows([], empty_text="Load a dataset to show hourly activity.")
+        self.service_chart.set_rows([], empty_text="No saved project dataset is available for service groups.")
+        self.domain_chart.set_rows([], empty_text="No saved project dataset is available for observed domains.")
+        self.hour_chart.set_rows([], empty_text="No saved project dataset is available for hourly activity.")
         self.txt_routine.clear()
         self.txt_summary.clear()
         self.txt_next.clear()
         self.txt_ai_summary.clear()
-        self.lst_timeline.clear()
-        self.lst_timeline.addItem(QListWidgetItem("(no active project)"))
 
     def generate_ai_summary(self):
         if not self.profile:
@@ -307,10 +307,16 @@ class ActivityProfilePage(QWidget):
             return
 
         default_name = f"{self.project_name or 'activity-profile'}-activity-profile.html"
+        project = self._current_project()
+        default_path = (
+            str(workspace_export_path(project.base_folder, default_name))
+            if project and project.base_folder
+            else default_name
+        )
         file_path, _ = QFileDialog.getSaveFileName(
             self,
             "Export activity profile",
-            default_name,
+            default_path,
             "HTML files (*.html)",
         )
         if not file_path:
@@ -323,7 +329,8 @@ class ActivityProfilePage(QWidget):
                 file_path,
                 profile=self.profile,
                 project_name=self.project_name,
-                project=self._current_project(),
+                project=project,
+                report_language=get_app_settings().get("output_language", "hr"),
             )
             webbrowser.open(Path(file_path).resolve().as_uri())
         except Exception as exc:
@@ -337,8 +344,11 @@ class ActivityProfilePage(QWidget):
 
     def _on_ai_finished(self, result: str):
         self.txt_ai_summary.setPlainText(result)
+        self.btn_add_ai_to_notes.setEnabled(bool((result or "").strip()))
+        if self.app and hasattr(self.app, "publish_ai_output"):
+            self.app.publish_ai_output("Profile", "AI Profile Summary", result)
         self.btn_ai_summary.setEnabled(True)
-        self.btn_ai_summary.setText("AI Case Summary")
+        self.btn_ai_summary.setText("AI Profile Summary")
 
     def _current_project(self):
         project_id = getattr(self.app, "current_project_id", None) if self.app else None
@@ -348,8 +358,16 @@ class ActivityProfilePage(QWidget):
 
     def _on_ai_error(self, message: str):
         self.txt_ai_summary.setPlainText(f"AI error: {message}")
+        self.btn_add_ai_to_notes.setEnabled(False)
         self.btn_ai_summary.setEnabled(True)
-        self.btn_ai_summary.setText("AI Case Summary")
+        self.btn_ai_summary.setText("AI Profile Summary")
+
+    def add_ai_summary_to_notes(self):
+        text = (self.txt_ai_summary.toPlainText() or "").strip()
+        if not text:
+            return
+        if self.app and hasattr(self.app, "add_ai_text_to_notes"):
+            self.app.add_ai_text_to_notes(text)
 
     def _cleanup_ai_thread(self):
         if self._ai_worker is not None:
@@ -361,7 +379,7 @@ class ActivityProfilePage(QWidget):
 
     def _set_metrics(self, metrics: list[dict[str, Any]]):
         defaults = [
-            {"label": "Datasets", "value": 0, "detail": "loaded"},
+            {"label": "JSON Datasets", "value": 0, "detail": "loaded"},
             {"label": "PCAP Sources", "value": 0, "detail": "saved"},
             {"label": "Findings", "value": 0, "detail": "saved"},
             {"label": "Device IPs", "value": 0, "detail": "from PCAP"},
@@ -397,9 +415,9 @@ class ActivityProfilePage(QWidget):
         if self.profile is not None:
             self.profile["behavior_profile"] = behavior
         if not behavior.get("flow_count"):
-            self.service_chart.set_rows([], empty_text="Load a dataset to show service groups.")
-            self.domain_chart.set_rows([], empty_text="Load a dataset to show observed domains.")
-            self.hour_chart.set_rows([], empty_text="Load a dataset to show hourly activity.")
+            self.service_chart.set_rows([], empty_text="No saved project dataset is available for service groups.")
+            self.domain_chart.set_rows([], empty_text="No saved project dataset is available for observed domains.")
+            self.hour_chart.set_rows([], empty_text="No saved project dataset is available for hourly activity.")
             self._set_behavior_routine_text(behavior)
             return
 
@@ -498,6 +516,7 @@ class BarChartWidget(QFrame):
         max_rows: int = 8,
         stacked_labels: bool = False,
         compact_single_counts: bool = False,
+        count_list: bool = False,
     ):
         super().__init__(parent)
         self.setObjectName("Card")
@@ -509,16 +528,20 @@ class BarChartWidget(QFrame):
         self.max_rows = max_rows
         self.stacked_labels = stacked_labels
         self.compact_single_counts = compact_single_counts
+        self.count_list = count_list
         self.layout = QVBoxLayout(self)
         self.layout.setContentsMargins(12, 10, 12, 12)
         self.layout.setSpacing(8)
+        self.layout.setAlignment(Qt.AlignTop)
 
         title_label = QLabel(title)
         title_label.setObjectName("SectionTitle")
+        title_label.setAlignment(Qt.AlignLeft | Qt.AlignTop)
         self.layout.addWidget(title_label)
 
         self.rows = QVBoxLayout()
         self.rows.setSpacing(6)
+        self.rows.setAlignment(Qt.AlignTop)
         self.layout.addLayout(self.rows, 1)
         self.setMinimumHeight(180)
 
@@ -528,8 +551,9 @@ class BarChartWidget(QFrame):
             empty = QLabel(empty_text)
             empty.setObjectName("Muted")
             empty.setWordWrap(True)
+            empty.setAlignment(Qt.AlignLeft | Qt.AlignTop)
             self.rows.addWidget(empty)
-            self.rows.addStretch()
+            self.rows.addStretch(1)
             return
 
         max_count = max(int(row.get(self.value_key) or 0) for row in rows) or 1
@@ -539,6 +563,10 @@ class BarChartWidget(QFrame):
             count = int(row.get(self.value_key) or 0)
             display_value = str(row.get(self.value_label_key) or count) if self.value_label_key else str(count)
             pct = int(round((count / max_count) * 100)) if max_count else 0
+
+            if self.count_list:
+                self._add_count_row(label, display_value)
+                continue
 
             if self.stacked_labels:
                 self._add_stacked_row(label, display_value, pct)
@@ -566,6 +594,25 @@ class BarChartWidget(QFrame):
             self.rows.addLayout(line)
 
         self.rows.addStretch()
+
+    def _add_count_row(self, label: str, display_value: str) -> None:
+        row = QFrame()
+        row.setObjectName("ProfileCountRow")
+        row_layout = QHBoxLayout(row)
+        row_layout.setContentsMargins(10, 7, 10, 7)
+        row_layout.setSpacing(8)
+
+        name = QLabel(label)
+        name.setWordWrap(True)
+        name.setToolTip(label)
+        value = QLabel(display_value)
+        value.setObjectName("ProfileCountBadge")
+        value.setAlignment(Qt.AlignCenter)
+        value.setMinimumWidth(44)
+
+        row_layout.addWidget(name, 1)
+        row_layout.addWidget(value)
+        self.rows.addWidget(row)
 
     def _add_stacked_row(self, label: str, display_value: str, pct: int) -> None:
         label_row = QHBoxLayout()

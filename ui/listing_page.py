@@ -10,9 +10,11 @@ from core.formatters import (
 )
 from core.protocols import format_ip_proto
 from core.exporters.listing_exporter import export_listing_csv, export_listing_excel, export_listing_html
-from core.db import get_project
+from core.db import get_app_settings, get_project
 from core.parser import extract_dataset_meta
 from core.timeutils import parse_timestamp
+from core.workspace import workspace_export_path
+from ui.explore_widgets import CopyableTableView
 
 
 class ListingTableModel(QAbstractTableModel):
@@ -462,7 +464,7 @@ class ListingPage(QWidget):
         layout.addWidget(self.card)
 
         # ---------- TABLE ----------
-        self.table = QTableView()
+        self.table = CopyableTableView(self.app)
 
         self.model = ListingTableModel()
         self.table.setModel(self.model)
@@ -655,10 +657,11 @@ class ListingPage(QWidget):
         return headers, rows
     
     def _export_csv(self, headers, rows):
+        default_path = self._default_export_path("listing_export.csv")
         file_path, _ = QFileDialog.getSaveFileName(
             self,
             "Export CSV",
-            "listing_export.csv",
+            default_path,
             "CSV files (*.csv)"
         )
 
@@ -681,10 +684,11 @@ class ListingPage(QWidget):
             )
 
     def _export_excel(self, headers, rows):
+        default_path = self._default_export_path("listing_export.xlsx")
         file_path, _ = QFileDialog.getSaveFileName(
             self,
             "Export Excel",
-            "listing_export.xlsx",
+            default_path,
             "Excel files (*.xlsx)"
         )
 
@@ -707,10 +711,11 @@ class ListingPage(QWidget):
             )
 
     def _export_html(self, headers, rows):
+        default_path = self._default_export_path("listing_export.html")
         file_path, _ = QFileDialog.getSaveFileName(
             self,
             "Export HTML",
-            "listing_export.html",
+            default_path,
             "HTML files (*.html)"
         )
 
@@ -738,6 +743,7 @@ class ListingPage(QWidget):
                 meta=meta,
                 project=self._current_project(),
                 project_name=getattr(self.app, "current_project_name", "") or "",
+                report_language=get_app_settings().get("output_language", "hr"),
             )
 
             QMessageBox.information(
@@ -757,3 +763,9 @@ class ListingPage(QWidget):
         if project_id is None:
             return None
         return get_project(project_id)
+
+    def _default_export_path(self, default_name: str) -> str:
+        project = self._current_project()
+        if project and project.base_folder:
+            return str(workspace_export_path(project.base_folder, default_name))
+        return default_name

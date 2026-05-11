@@ -1,3 +1,6 @@
+from core.output_language import ai_language_instruction
+
+
 SYSTEM_PROMPT = """You are a network behavior analyst for ViaNyquist.
 
 Your job is to explain network flow metadata in practical, human terms: what communication pattern is visible, how concentrated or broad it is, how active the device appears to be, and what an analyst should verify next.
@@ -20,7 +23,7 @@ Safety and accuracy rules:
 """
 
 
-def build_dataset_summary_prompt(context: str) -> str:
+def build_dataset_summary_prompt(context: str, *, language: str = "hr") -> str:
     return f"""
 You are analyzing a summarized network flow dataset.
 
@@ -71,11 +74,11 @@ STYLE:
 - Practical, analytical, and readable.
 - No filler.
 - Do not repeat the full raw context.
-- Prefer Croatian if the user interface/user language appears Croatian; otherwise English is acceptable.
+- {ai_language_instruction(language)}
 """.strip()
 
 
-def build_flow_explanation_prompt(flow_context: str) -> str:
+def build_flow_explanation_prompt(flow_context: str, *, language: str = "hr") -> str:
     return f"""
 You are analyzing one network flow record.
 
@@ -108,10 +111,13 @@ What To Check Next
 
 Forbidden unless explicitly supported:
 - Malware, C2, exfiltration, compromise, attack, victim, malicious, suspicious.
+
+Language:
+- {ai_language_instruction(language)}
 """.strip()
 
 
-def build_finding_explanation_prompt(finding_context: str) -> str:
+def build_finding_explanation_prompt(finding_context: str, *, language: str = "hr") -> str:
     return f"""
 You are explaining a saved analyst finding from network flow review.
 
@@ -146,10 +152,13 @@ Recommended Follow-up
 
 Forbidden unless explicitly supported:
 - Malware, C2, exfiltration, compromise, attack, victim, malicious, suspicious.
+
+Language:
+- {ai_language_instruction(language)}
 """.strip()
 
 
-def build_pcap_summary_prompt(context: str) -> str:
+def build_pcap_summary_prompt(context: str, *, language: str = "hr") -> str:
     return f"""
 You are analyzing a packet capture summary for an investigator.
 
@@ -171,7 +180,7 @@ OUTPUT FORMAT:
 PCAP Summary
 - 3 to 5 bullets.
 - Explain the overall communication profile in plain language.
-- Include concrete numbers: packets, period, likely device IP, main service groups, and visibility limits.
+- Include concrete numbers: packets, period, device IP, main service groups, and visibility limits.
 
 What Is Visible
 - 4 to 7 bullets.
@@ -198,14 +207,14 @@ Recommended Next Steps
 - Give practical checks tied to this capture and ViaNyquist workflow: compare with project datasets, save to project, add notes, review artifacts/evidence/connections, enrich hostnames/IPs externally if needed.
 
 STYLE:
-- Prefer Croatian.
+- {ai_language_instruction(language)}
 - Practical, concise, investigator-friendly.
 - No generic cybersecurity lecture.
 - Do not repeat the full raw context.
 """.strip()
 
 
-def build_activity_profile_summary_prompt(context: str) -> str:
+def build_activity_profile_summary_prompt(context: str, *, language: str = "hr") -> str:
     return f"""
 You are analyzing a ViaNyquist Activity Profile for an investigator.
 
@@ -244,7 +253,7 @@ Limits Of Interpretation
 - State what cannot be concluded from this project profile alone.
 
 STYLE:
-- Prefer Croatian.
+- {ai_language_instruction(language)}
 - Practical, concise, investigator-friendly.
 - No generic cybersecurity lecture.
 - Do not repeat the full raw context.

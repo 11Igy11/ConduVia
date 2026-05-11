@@ -596,19 +596,54 @@ def list_activity(project_id: int, limit: int = 200, db_path: Path = DEFAULT_DB_
     return rows
 
 # ---------------- Datasets ----------------
+def _dataset_path_key(path_text: str) -> str:
+    text = (path_text or "").strip()
+    if not text:
+        return ""
+    try:
+        return str(Path(text).resolve()).casefold()
+    except Exception:
+        return text.casefold()
+
+
 def add_dataset_load(project_id: int, folder_path: str, db_path: Path = DEFAULT_DB_PATH) -> None:
     folder_path = (folder_path or "").strip()
     if not folder_path:
         return
 
     with _connect(db_path) as con:
-        con.execute(
+        rows = con.execute(
             """
-            INSERT INTO datasets (project_id, folder_path)
-            VALUES (?, ?);
+            SELECT id, folder_path
+            FROM datasets
+            WHERE project_id = ?;
             """,
-            (project_id, folder_path),
-        )
+            (project_id,),
+        ).fetchall()
+        path_key = _dataset_path_key(folder_path)
+        existing_id = None
+        for row in rows:
+            if _dataset_path_key(str(row["folder_path"] or "")) == path_key:
+                existing_id = int(row["id"])
+                break
+
+        if existing_id is not None:
+            con.execute(
+                """
+                UPDATE datasets
+                SET folder_path = ?, loaded_at = strftime('%Y-%m-%d %H:%M:%f', 'now')
+                WHERE id = ?;
+                """,
+                (folder_path, existing_id),
+            )
+        else:
+            con.execute(
+                """
+                INSERT INTO datasets (project_id, folder_path, loaded_at)
+                VALUES (?, ?, strftime('%Y-%m-%d %H:%M:%f', 'now'));
+                """,
+                (project_id, folder_path),
+            )
 
     touch_project(project_id, db_path=db_path)
     add_activity(project_id, "dataset_loaded", folder_path, db_path=db_path)
@@ -621,11 +656,21 @@ def list_recent_datasets(project_id: int, limit: int = 10, db_path: Path = DEFAU
             FROM datasets
             WHERE project_id = ?
             ORDER BY loaded_at DESC, id DESC
-            LIMIT ?;
             """,
-            (project_id, limit),
+            (project_id,),
         ).fetchall()
-    return [str(r["folder_path"]) for r in rows]
+    recent: list[str] = []
+    seen: set[str] = set()
+    for row in rows:
+        path = str(row["folder_path"] or "")
+        key = _dataset_path_key(path)
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        recent.append(path)
+        if len(recent) >= limit:
+            break
+    return recent
 
 # ---------------- PCAP sources ----------------
 def file_sha256(file_path: str | Path, *, chunk_size: int = 1024 * 1024) -> str:
@@ -684,7 +729,7 @@ def add_pcap_source(
                     file_path = ?,
                     file_name = ?,
                     file_size = ?,
-                    analyzed_at = datetime('now'),
+                    analyzed_at = strftime('%Y-%m-%d %H:%M:%f', 'now'),
                     format = ?,
                     packet_count = ?,
                     wire_bytes = ?,
@@ -693,7 +738,7 @@ def add_pcap_source(
                     duration_seconds = ?,
                     likely_device_ip = ?,
                     summary_text = ?,
-                    updated_at = datetime('now')
+                    updated_at = strftime('%Y-%m-%d %H:%M:%f', 'now')
                 WHERE id = ?;
                 """,
                 (
@@ -761,7 +806,7 @@ def list_pcap_sources(project_id: int, limit: int = 50, db_path: Path = DEFAULT_
             SELECT *
             FROM pcap_sources
             WHERE project_id = ?
-            ORDER BY created_at DESC, id DESC
+            ORDER BY updated_at DESC, created_at DESC, id DESC
             LIMIT ?;
             """,
             (project_id, limit),
