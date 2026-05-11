@@ -241,6 +241,11 @@ QPushButton#NavButton {
     border: none;
 }
 
+QFrame#SidebarFrame {
+    background: transparent;
+    border-right: 1px solid #cbd5e1;
+}
+
 QPushButton#NavButton:hover {
     background: #e2e8f0;
     border: 1px solid #cbd5e1;
@@ -400,8 +405,13 @@ class App(QWidget):
         if hasattr(self, "json_tabs"):
             self.json_tabs.setCurrentIndex(max(0, tab_index))
 
-    def _build_sidebar(self) -> QVBoxLayout:
-        sidebar = QVBoxLayout()
+    def _build_sidebar(self) -> QFrame:
+        sidebar_frame = QFrame()
+        sidebar_frame.setObjectName("SidebarFrame")
+        sidebar_frame.setFixedWidth(220)
+        sidebar = QVBoxLayout(sidebar_frame)
+        sidebar.setContentsMargins(0, 0, 12, 0)
+        sidebar.setSpacing(8)
 
         self.btn_nav_projects = QPushButton("Projects")
         self.btn_nav_json = QPushButton("JSON")
@@ -451,7 +461,7 @@ class App(QWidget):
         sidebar.addWidget(self.btn_nav_settings)
         sidebar.addWidget(self.btn_nav_help)
 
-        return sidebar
+        return sidebar_frame
 
     def _wire_navigation(self) -> None:
         self.btn_nav_projects.clicked.connect(lambda: self.go_page(self.IDX_PROJECTS, self._nav_projects))
@@ -836,7 +846,6 @@ class App(QWidget):
         )
 
         projects_layout.addWidget(self.lbl_active_project)
-        projects_layout.addLayout(btn_row)
 
         self.case_dashboard = QFrame()
         self.case_dashboard.setObjectName("CaseDashboardCompact")
@@ -891,6 +900,7 @@ class App(QWidget):
         dashboard_layout.addLayout(dashboard_metrics_row)
 
         projects_layout.addWidget(self.case_dashboard)
+        projects_layout.addLayout(btn_row)
 
         middle_row = QHBoxLayout()
 
@@ -1530,8 +1540,8 @@ class App(QWidget):
         self.pages.setCurrentIndex(self.IDX_PROJECTS)
         self._set_active_nav(self._nav_projects)
 
-        root.addLayout(sidebar, 1)
-        root.addWidget(self.pages, 8)
+        root.addWidget(sidebar)
+        root.addWidget(self.pages, 1)
         outer.addLayout(root, 1)
 
         # footer

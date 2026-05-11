@@ -334,12 +334,22 @@ class DatasetController(QObject):
 
     def _ensure_active_project(self) -> bool:
         if self.app.current_project_id is not None:
-            return True
+            project = get_project(self.app.current_project_id)
+            if project and (project.base_folder or "").strip():
+                return True
+
+            self.app._message_dialog(
+                "Dataset",
+                "Set a Workspace folder for the active project first.",
+                "Datasets are stored, exported and checked through the project Workspace folder.",
+                width=500,
+            )
+            return False
 
         self.app._message_dialog(
             "Dataset",
             "Open an active project first.",
-            "Datasets are stored and checked against the active project target.",
+            "Datasets are stored in the active project Workspace and checked against the active project target.",
             width=480,
         )
         return False

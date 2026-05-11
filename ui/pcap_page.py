@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import html as html_lib
 import webbrowser
 from datetime import datetime
 from pathlib import Path
@@ -29,6 +30,7 @@ from PySide6.QtWidgets import (
     QHeaderView,
 )
 
+from core.exporters.listing_exporter import export_listing_csv, export_listing_excel
 from core.exporters.pcap_exporter import export_pcap_summary_html
 from core.formatters import format_duration_compact_ms, format_pcap_datetime, human_bytes
 from core.pcap_analyzer import PcapSummary, analyze_pcap, build_investigator_view
@@ -843,6 +845,9 @@ class PcapPage(QWidget):
         layout.addWidget(table, 1)
 
         footer = QHBoxLayout()
+        footer.addWidget(self._export_button("Export CSV", title, table, "csv"))
+        footer.addWidget(self._export_button("Export Excel", title, table, "xlsx"))
+        footer.addWidget(self._export_button("Export HTML", title, table, "html"))
         footer.addStretch()
         btn_close = QPushButton("Close")
         btn_close.setFixedHeight(34)
@@ -851,6 +856,103 @@ class PcapPage(QWidget):
         layout.addLayout(footer)
 
         dlg.exec()
+
+    def _export_button(self, text: str, title: str, table: QTableView, export_format: str) -> QPushButton:
+        button = QPushButton(text)
+        button.setFixedHeight(34)
+        button.clicked.connect(lambda: self._export_table_dialog(title, table, export_format))
+        return button
+
+    def _table_export_data(self, table: QTableView) -> tuple[list[str], list[list[str]]]:
+        model = table.model()
+        if not isinstance(model, DictTableModel):
+            return [], []
+
+        headers = [title for _, title in model.columns]
+        rows = [
+            ["" if row.get(key) is None else str(row.get(key)) for key, _ in model.columns]
+            for row in model.rows
+        ]
+        return headers, rows
+
+    def _table_export_default_path(self, title: str, suffix: str) -> str:
+        safe_title = "".join(ch if ch.isalnum() else "_" for ch in (title or "pcap_table").lower())
+        safe_title = "_".join(part for part in safe_title.split("_") if part) or "pcap_table"
+        base_name = f"{safe_title}.{suffix}"
+        project = get_project(self._current_project_id()) if self._current_project_id() is not None else None
+        if project and project.base_folder:
+            return str(workspace_export_path(project.base_folder, base_name))
+        return base_name
+
+    def _export_table_dialog(self, title: str, table: QTableView, export_format: str) -> None:
+        headers, rows = self._table_export_data(table)
+        if not headers or not rows:
+            QMessageBox.information(self, "Export table", "No rows are loaded.")
+            return
+
+        filters = {
+            "csv": "CSV files (*.csv)",
+            "xlsx": "Excel files (*.xlsx)",
+            "html": "HTML files (*.html)",
+        }
+        suffix = "xlsx" if export_format == "xlsx" else export_format
+        file_path, _ = QFileDialog.getSaveFileName(
+            self,
+            f"Export {title}",
+            self._table_export_default_path(title, suffix),
+            filters.get(export_format, "All files (*.*)"),
+        )
+        if not file_path:
+            return
+
+        try:
+            if export_format == "csv":
+                export_listing_csv(file_path, headers, rows)
+            elif export_format == "xlsx":
+                export_listing_excel(file_path, headers, rows)
+            elif export_format == "html":
+                self._write_table_html(file_path, title, headers, rows)
+            else:
+                raise ValueError(f"Unsupported export format: {export_format}")
+        except Exception as exc:
+            QMessageBox.critical(self, "Export table failed", str(exc))
+            return
+
+        QMessageBox.information(self, "Export table", f"Exported:\n{file_path}")
+
+    def _write_table_html(self, file_path: str, title: str, headers: list[str], rows: list[list[str]]) -> None:
+        head = "".join(f"<th>{html_lib.escape(str(header))}</th>" for header in headers)
+        body = "\n".join(
+            "<tr>" + "".join(f"<td>{html_lib.escape(str(value))}</td>" for value in row) + "</tr>"
+            for row in rows
+        )
+        html = f"""<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>{html_lib.escape(title)}</title>
+<style>
+body {{ font-family: Arial, sans-serif; margin: 24px; color: #111827; }}
+h1 {{ font-size: 22px; }}
+table {{ border-collapse: collapse; width: 100%; font-size: 13px; }}
+th, td {{ border: 1px solid #d1d5db; padding: 7px 9px; text-align: left; vertical-align: top; }}
+th {{ background: #1f2937; color: white; position: sticky; top: 0; }}
+tr:nth-child(even) {{ background: #f3f4f6; }}
+</style>
+</head>
+<body>
+<h1>{html_lib.escape(title)}</h1>
+<p>Rows: {len(rows)}</p>
+<table>
+<thead><tr>{head}</tr></thead>
+<tbody>
+{body}
+</tbody>
+</table>
+</body>
+</html>
+"""
+        Path(file_path).write_text(html, encoding="utf-8")
 
     def _expanded_column_width(self, column: tuple[str, str], current_width: int) -> int:
         key, title = column
@@ -876,6 +978,9 @@ class PcapPage(QWidget):
         return f"{self._format_pcap_time(start)} - {self._format_pcap_time(end)}"
 
     def open_pcap_dialog(self):
+        if not self._ensure_project_workspace():
+            return
+
         file_path, _ = QFileDialog.getOpenFileName(
             self,
             "Open PCAP file",
@@ -886,6 +991,9 @@ class PcapPage(QWidget):
             self.load_pcap(file_path)
 
     def load_pcap(self, file_path: str):
+        if not self._ensure_project_workspace():
+            return
+
         if self._thread is not None:
             QMessageBox.information(self, "PCAP", "PCAP analysis is already running.")
             return
@@ -1217,6 +1325,9 @@ class PcapPage(QWidget):
         table.selectRow(0)
 
         footer = QHBoxLayout()
+        footer.addWidget(self._export_button("Export CSV", "Communication indicators", table, "csv"))
+        footer.addWidget(self._export_button("Export Excel", "Communication indicators", table, "xlsx"))
+        footer.addWidget(self._export_button("Export HTML", "Communication indicators", table, "html"))
         footer.addStretch()
         btn_close = QPushButton("Close")
         btn_close.setFixedHeight(34)
@@ -1448,6 +1559,8 @@ class PcapPage(QWidget):
                 "PCAP analyses must be tied to a project before they can be used in notes or future activity profiles.",
             )
             return
+        if not self._ensure_project_workspace():
+            return
 
         if not self._confirm_project_device_match(project_id):
             return
@@ -1647,6 +1760,27 @@ class PcapPage(QWidget):
 
     def _current_project_id(self) -> int | None:
         return getattr(self.app, "current_project_id", None)
+
+    def _ensure_project_workspace(self) -> bool:
+        project_id = self._current_project_id()
+        if project_id is None:
+            self._info(
+                "PCAP",
+                "Open an active project first.",
+                "PCAP files must be tied to a project Workspace before analysis.",
+            )
+            return False
+
+        project = get_project(project_id)
+        if project and (project.base_folder or "").strip():
+            return True
+
+        self._info(
+            "PCAP",
+            "Set a Workspace folder for the active project first.",
+            "PCAP files, exports and project references are managed through the Workspace folder.",
+        )
+        return False
 
     def _info(self, title: str, message: str, details: str = "") -> None:
         if hasattr(self.app, "_message_dialog"):

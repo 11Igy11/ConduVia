@@ -158,6 +158,11 @@ QPushButton#Primary:pressed {
 }
 
 /* Sidebar nav */
+QFrame#SidebarFrame {
+    background: transparent;
+    border-right: 1px solid #334155;
+}
+
 QPushButton#NavButton {
     text-align: left;
     padding: 10px 12px;

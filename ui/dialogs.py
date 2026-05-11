@@ -299,7 +299,7 @@ def project_details_dialog(
     workspace_row = QHBoxLayout()
     edit_parent = QLineEdit()
     edit_parent.setText(parent_folder or "")
-    edit_parent.setPlaceholderText("Optional parent folder for ViaNyquist workspace")
+    edit_parent.setPlaceholderText("Required parent folder for ViaNyquist workspace")
     edit_parent.setMinimumHeight(36)
     btn_browse = QPushButton("Browse...")
     btn_browse.setMinimumWidth(110)
@@ -360,6 +360,13 @@ def project_details_dialog(
     btn_cancel.setMinimumWidth(110)
 
     def accept_project_details() -> None:
+        if not edit_parent.text().strip():
+            QMessageBox.warning(
+                dlg,
+                "Workspace required",
+                "Select a Workspace parent folder before saving the project.",
+            )
+            return
         oib = fields["oib"].text().strip()
         if oib and not is_valid_oib(oib):
             QMessageBox.warning(
