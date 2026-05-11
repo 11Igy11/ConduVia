@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="{{LANG}}">
+<head>
+<meta charset="UTF-8">
+<title>{{TITLE}}</title>
+<style>
+body { margin:0; padding:28px; font-family:"Segoe UI", Arial, sans-serif; color:#111827; background:#f3f4f6; }
+.report { max-width:1500px; margin:0 auto; }
+.hero { background:#111827; color:white; border-radius:14px; padding:24px 26px; margin-bottom:18px; }
+h1 { margin:0 0 8px; font-size:30px; }
+h2 { margin:24px 0 10px; font-size:18px; }
+.muted { color:#9ca3af; }
+.grid { display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:10px; margin-top:18px; }
+.card { background:white; border:1px solid #e5e7eb; border-radius:10px; padding:14px; }
+.hero .card { background:rgba(255,255,255,.08); border-color:rgba(255,255,255,.16); color:white; }
+.label { font-size:11px; text-transform:uppercase; color:#6b7280; font-weight:700; letter-spacing:.08em; margin-bottom:5px; }
+.hero .label { color:#bfdbfe; }
+.value { font-size:18px; font-weight:700; word-break:break-word; }
+.plain { background:white; border:1px solid #e5e7eb; border-radius:12px; padding:18px 20px; font-size:14px; line-height:1.55; white-space:pre-wrap; }
+.note { border-left:4px solid #2563eb; padding:10px 12px; background:#eff6ff; margin:8px 0; }
+.two { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:14px; }
+.barcell { min-width:220px; }
+.bar { height:12px; background:#e5e7eb; border-radius:999px; overflow:hidden; }
+.bar span { display:block; height:100%; background:#2563eb; }
+table { width:100%; border-collapse:collapse; background:white; border:1px solid #e5e7eb; }
+th { text-align:left; background:#1f2937; color:white; font-size:12px; padding:9px; }
+td { border-top:1px solid #e5e7eb; padding:8px 9px; font-size:12px; vertical-align:top; }
+tr:nth-child(even) td { background:#f9fafb; }
+</style>
+</head>
+<body>
+<div class="report">
+  <div class="hero">
+    <h1>{{TITLE}}</h1>
+    <div class="muted">{{PROJECT_LABEL}}: {{PROJECT_NAME}} | {{EXPORTED_LABEL}}: {{EXPORTED_AT}}</div>
+    <div class="grid">
+      {{HERO_CARDS}}
+    </div>
+  </div>
+
+  <div class="section">
+    <h2>{{CASE_SNAPSHOT_LABEL}}</h2>
+    <div class="plain">{{CASE_SNAPSHOT}}</div>
+  </div>
+
+  <div class="section">
+    <h2>{{EVIDENCE_OVERVIEW_LABEL}}</h2>
+    <div class="two">
+      <div>{{EVIDENCE_SOURCES_TABLE}}</div>
+      <div>{{PCAP_DEVICE_IP_TABLE}}</div>
+    </div>
+  </div>
+
+  <div class="section">
+    <h2>{{BEHAVIOR_INSIGHTS_LABEL}}</h2>
+    <div class="note">{{BEHAVIOR_NOTE}}</div>
+    <div class="two">
+      <div>{{SERVICE_GROUPS_TABLE}}</div>
+      <div>{{OBSERVED_DOMAINS_TABLE}}</div>
+    </div>
+    <h2>{{ACTIVITY_BY_HOUR_LABEL}}</h2>
+    {{HOURLY_ACTIVITY_TABLE}}
+    <h2>{{ACTIVITY_RHYTHM_LABEL}}</h2>
+    <div class="plain">{{ACTIVITY_RHYTHM}}</div>
+  </div>
+
+  <div class="section">
+    <h2>{{NEXT_REVIEW_LABEL}}</h2>
+    <div class="plain">{{NEXT_REVIEW}}</div>
+  </div>
+
+  <div class="section">
+    <h2>{{RECENT_PROJECT_TIMELINE_LABEL}}</h2>
+    <div class="plain">{{RECENT_PROJECT_TIMELINE}}</div>
+  </div>
+</div>
+</body>
+</html>

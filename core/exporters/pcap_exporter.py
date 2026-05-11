@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import html
 from datetime import datetime
@@ -7,6 +7,7 @@ from typing import Any
 
 from core.db import Project
 from core.exporters.case_context import build_case_context, context_cards_html
+from core.exporters.template_utils import load_template, render_template
 from core.formatters import format_flow_datetime, human_bytes
 from core.output_language import normalize_output_language
 from core.pcap_analyzer import PcapSummary, build_investigator_view
@@ -69,174 +70,68 @@ def export_pcap_summary_html(
     period = f"{first_seen or '-'} - {last_seen or '-'}"
     case_context = build_case_context(project, project_name=project_name)
 
-    html_doc = f"""<!DOCTYPE html>
-<html lang="{html.escape(lang)}">
-<head>
-<meta charset="UTF-8">
-<title>{html.escape(text['title'])}</title>
-<style>
-body {{ margin:0; padding:28px; font-family:"Segoe UI", Arial, sans-serif; color:#111827; background:#f3f4f6; }}
-.report {{ max-width:1500px; margin:0 auto; }}
-.hero {{ background:#111827; color:white; border-radius:14px; padding:24px 26px; margin-bottom:18px; }}
-h1 {{ margin:0 0 8px; font-size:30px; }}
-h2 {{ margin:24px 0 10px; font-size:18px; }}
-h3 {{ margin:18px 0 8px; font-size:15px; color:#1f2937; }}
-.muted {{ color:#9ca3af; }}
-.nav {{ display:flex; gap:8px; flex-wrap:wrap; margin:16px 0 0; }}
-.nav a {{ color:white; text-decoration:none; border:1px solid rgba(255,255,255,.28); border-radius:999px; padding:7px 11px; font-size:12px; font-weight:700; }}
-.nav a:hover {{ background:rgba(255,255,255,.12); }}
-.grid {{ display:grid; grid-template-columns:repeat(4, minmax(0, 1fr)); gap:10px; margin-top:18px; }}
-.card {{ background:white; border:1px solid #e5e7eb; border-radius:10px; padding:14px; }}
-.hero .card {{ background:rgba(255,255,255,.08); border-color:rgba(255,255,255,.16); color:white; }}
-.label {{ font-size:11px; text-transform:uppercase; color:#6b7280; font-weight:700; letter-spacing:.08em; margin-bottom:5px; }}
-.hero .label {{ color:#bfdbfe; }}
-.value {{ font-size:17px; font-weight:700; word-break:break-word; }}
-.note {{ border-left:4px solid #2563eb; padding:10px 12px; background:#eff6ff; margin:8px 0; }}
-.plain {{ background:white; border:1px solid #e5e7eb; border-radius:12px; padding:18px 20px; font-size:15px; line-height:1.55; }}
-.points {{ display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:8px; margin-top:12px; }}
-.point {{ background:#f9fafb; border:1px solid #e5e7eb; border-radius:8px; padding:10px 12px; }}
-.briefgrid {{ display:grid; grid-template-columns:repeat(4, minmax(0, 1fr)); gap:10px; margin:10px 0 12px; }}
-.briefcard {{ background:white; border:1px solid #dbeafe; border-radius:10px; padding:12px 14px; }}
-.briefcard .value {{ font-size:20px; color:#1d4ed8; }}
-.tag {{ display:inline-block; border-radius:999px; padding:3px 8px; font-size:11px; font-weight:700; background:#e5e7eb; color:#111827; }}
-.tag.high {{ background:#dcfce7; color:#166534; }}
-.tag.medium {{ background:#dbeafe; color:#1e40af; }}
-.tag.low {{ background:#f3f4f6; color:#4b5563; }}
-.evidence-grid {{ display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:10px; margin-top:10px; }}
-.evidence-card {{ background:white; border:1px solid #e5e7eb; border-radius:10px; padding:12px 14px; }}
-.evidence-title {{ font-weight:700; margin-bottom:6px; }}
-.evidence-meta {{ color:#4b5563; font-size:12px; margin-bottom:8px; }}
-.evidence-text {{ font-size:12px; line-height:1.45; }}
-.barcell {{ min-width:190px; }}
-.bar {{ height:12px; background:#e5e7eb; border-radius:999px; overflow:hidden; }}
-.bar span {{ display:block; height:100%; background:#2563eb; }}
-table {{ width:100%; border-collapse:collapse; background:white; border:1px solid #e5e7eb; }}
-th {{ text-align:left; background:#1f2937; color:white; font-size:12px; padding:9px; position:sticky; top:0; }}
-td {{ border-top:1px solid #e5e7eb; padding:8px 9px; font-size:12px; vertical-align:top; }}
-tr:nth-child(even) td {{ background:#f9fafb; }}
-.section {{ margin-bottom:18px; }}
-.section-shell {{ background:#ffffff; border:1px solid #e5e7eb; border-radius:14px; padding:18px 20px; margin-bottom:18px; }}
-.section-shell h2:first-child {{ margin-top:0; }}
-.subsection {{ margin-top:16px; }}
-.two-col {{ display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:14px; }}
-.report-note {{ background:#f8fafc; border:1px solid #e5e7eb; border-radius:10px; padding:12px 14px; color:#374151; line-height:1.5; }}
-@media (max-width: 980px) {{
-  .grid, .briefgrid, .points, .two-col, .evidence-grid {{ grid-template-columns:1fr; }}
-}}
-</style>
-</head>
-<body>
-<div class="report">
-  <div class="hero">
-    <h1>{html.escape(text['title'])}</h1>
-    <div class="muted">{html.escape(summary.file_name)} | {html.escape(text['exported'])}: {html.escape(generated_at)}</div>
-    <div class="nav">
-      <a href="#summary">{html.escape(text['summary'])}</a>
-      <a href="#investigator">{html.escape(text['investigator'])}</a>
-      <a href="#communications">{html.escape(text['communication_highlights'])}</a>
-      <a href="#evidence">{html.escape(text['evidence'])}</a>
-      <a href="#artifacts">{html.escape(text['artifacts'])}</a>
-      <a href="#connections">{html.escape(text['connections'])}</a>
-    </div>
-    <div class="grid">
-      {context_cards_html(case_context, card_class="card", include_dataset_target=False)}
-      <div class="card"><div class="label">{html.escape(text['format'])}</div><div class="value">{html.escape(summary.format)}</div></div>
-      <div class="card"><div class="label">{html.escape(text['packets'])}</div><div class="value">{summary.packet_count:,}</div></div>
-      <div class="card"><div class="label">{html.escape(text['traffic_volume'])}</div><div class="value">{html.escape(human_bytes(summary.wire_bytes, precision=2))}</div></div>
-      <div class="card"><div class="label">{html.escape(text['likely_device_ip'])}</div><div class="value">{html.escape(summary.likely_device_ip or '-')}</div></div>
-      <div class="card"><div class="label">{html.escape(text['capture_period'])}</div><div class="value">{html.escape(period)}</div></div>
-      <div class="card"><div class="label">{html.escape(text['dns_queries'])}</div><div class="value">{len(summary.dns_queries)}</div></div>
-      <div class="card"><div class="label">{html.escape(text['tls_sni_hosts'])}</div><div class="value">{len(summary.tls_sni)}</div></div>
-      <div class="card"><div class="label">{html.escape(text['readable_samples'])}</div><div class="value">{len(summary.readable_samples)}</div></div>
-    </div>
-  </div>
+    hero_cards = "\n".join([
+        context_cards_html(case_context, card_class="card", include_dataset_target=False),
+        _metric_card(text["format"], summary.format),
+        _metric_card(text["packets"], f"{summary.packet_count:,}"),
+        _metric_card(text["traffic_volume"], human_bytes(summary.wire_bytes, precision=2)),
+        _metric_card(text["likely_device_ip"], summary.likely_device_ip or "-"),
+        _metric_card(text["capture_period"], period),
+        _metric_card(text["dns_queries"], len(summary.dns_queries)),
+        _metric_card(text["tls_sni_hosts"], len(summary.tls_sni)),
+        _metric_card(text["readable_samples"], len(summary.readable_samples)),
+    ])
 
-  <div class="section-shell" id="summary">
-    <h2>{html.escape(text['summary'])}</h2>
-    <div class="report-note">
-      {html.escape(text['structure_note'])}
-    </div>
-    <div class="two-col">
-      <div>
-        <h3>{html.escape(text['visible_service_groups'])}</h3>
-        <table><thead><tr>{headers([('service', text['service_group']), ('count', text['signals']), ('share', text['share']), ('bar_html', text['chart']), ('example', text['example'])])}</tr></thead><tbody>{_chart_rows(investigator.get("service_rows", []), [('service', text['service_group']), ('count', text['signals']), ('share', text['share']), ('bar_html', text['chart']), ('example', text['example'])], text=text)}</tbody></table>
-      </div>
-      <div>
-        <h3>{html.escape(text['visible_vs_encrypted'])}</h3>
-        <table><thead><tr>{headers([('label', text['visibility']), ('count', text['signals']), ('share', text['share']), ('bar_html', text['chart'])])}</tr></thead><tbody>{_chart_rows(investigator.get("visibility_rows", []), [('label', text['visibility']), ('count', text['signals']), ('share', text['share']), ('bar_html', text['chart'])], text=text)}</tbody></table>
-      </div>
-    </div>
-    <div class="subsection">
-      <h3>{html.escape(text['activity_timeline'])}</h3>
-      <table><thead><tr>{headers([('hour', text['hour']), ('packets', text['packets']), ('share', text['share']), ('bar_html', text['chart'])])}</tr></thead><tbody>{_chart_rows(investigator.get("activity_rows", []), [('hour', text['hour']), ('packets', text['packets']), ('share', text['share']), ('bar_html', text['chart'])], text=text)}</tbody></table>
-    </div>
-  </div>
+    service_columns = [("service", text["service_group"]), ("count", text["signals"]), ("share", text["share"]), ("bar_html", text["chart"]), ("example", text["example"])]
+    visibility_columns = [("label", text["visibility"]), ("count", text["signals"]), ("share", text["share"]), ("bar_html", text["chart"])]
+    activity_columns = [("hour", text["hour"]), ("packets", text["packets"]), ("share", text["share"]), ("bar_html", text["chart"])]
+    communication_columns = [("service", text["service"]), ("activity_type", text["indicator"]), ("confidence_html", text["confidence"]), ("host", text["host_signal"]), ("protocol", text["protocol"]), ("bytes", text["volume"]), ("packets", text["packets"]), ("duration", text["duration"]), ("first_seen", text["first_seen"])]
+    dns_columns = [("query", text["dns_query"]), ("count", text["count"])]
+    tls_columns = [("host", text["host"]), ("count", text["count"])]
+    readable_columns = [("time", text["time"]), ("type", text["type"]), ("source", text["source"]), ("destination", text["destination"]), ("value", text["visible_value"])]
+    artifact_columns = [("category", text["category"]), ("type", text["type"]), ("value", text["value"]), ("visibility", text["visibility"]), ("source", text["source"]), ("destination", text["destination"]), ("count", text["count"]), ("explanation", text["explanation"])]
+    connection_columns = [("source", text["source"]), ("destination", text["destination"]), ("protocol", text["protocol"]), ("application", text["application"]), ("host", text["host_query"]), ("bytes", text["bytes"]), ("packets", text["packets"]), ("first", text["first_seen"]), ("last", text["last_seen"]), ("visible", text["visible_preview"])]
 
-  <div class="section-shell" id="investigator">
-    <h2>{html.escape(text['investigator'])}</h2>
-    <div class="plain">
-      {html.escape(str(investigator.get("plain_summary") or ""))}
-      <div class="points">
-        {''.join(f'<div class="point">{html.escape(str(point))}</div>' for point in investigator.get("key_points", []))}
-      </div>
-    </div>
-  </div>
-
-  <div class="section-shell" id="communications">
-    <h2>{html.escape(text['communication_highlights'])}</h2>
-    <div class="note">{html.escape(text['communication_note'])}</div>
-    <div class="briefgrid">
-      <div class="briefcard"><div class="label">{html.escape(text['classified_indicators'])}</div><div class="value">{communication_brief['total']}</div></div>
-      <div class="briefcard"><div class="label">{html.escape(text['messaging_push'])}</div><div class="value">{communication_brief['messaging']}</div></div>
-      <div class="briefcard"><div class="label">{html.escape(text['call_media_candidates'])}</div><div class="value">{communication_brief['media']}</div></div>
-      <div class="briefcard"><div class="label">{html.escape(text['visible_services'])}</div><div class="value">{html.escape(communication_brief['services'])}</div></div>
-    </div>
-    <table><thead><tr>{headers([('service', text['service']), ('activity_type', text['indicator']), ('confidence_html', text['confidence']), ('host', text['host_signal']), ('protocol', text['protocol']), ('bytes', text['volume']), ('packets', text['packets']), ('duration', text['duration']), ('first_seen', text['first_seen'])])}</tr></thead><tbody>{_communication_rows(communications, text=text)}</tbody></table>
-    <h2>{html.escape(text['communication_evidence_details'])}</h2>
-    <div class="evidence-grid">
-      {_communication_evidence_cards(communications[:12], text=text)}
-    </div>
-  </div>
-
-  <div class="section-shell">
-    <h2>{html.escape(text['interpretation_notes'])}</h2>
-    {''.join(f'<div class="note">{html.escape(note)}</div>' for note in investigator.get("limitations", summary.notes))}
-  </div>
-
-  <div class="section-shell" id="evidence">
-    <h2>{html.escape(text['evidence'])}</h2>
-    <div class="report-note">
-      {html.escape(text['evidence_note'])}
-    </div>
-    <div class="two-col">
-      <div>
-    <h2>{html.escape(text['top_dns_queries'])}</h2>
-    <table><thead><tr>{headers([('query', text['dns_query']), ('count', text['count'])])}</tr></thead><tbody>{rows(summary.dns_queries[:50], [('query', text['dns_query']), ('count', text['count'])])}</tbody></table>
-      </div>
-      <div>
-    <h2>{html.escape(text['top_tls_sni_hosts'])}</h2>
-    <table><thead><tr>{headers([('host', text['host']), ('count', text['count'])])}</tr></thead><tbody>{rows(summary.tls_sni[:50], [('host', text['host']), ('count', text['count'])])}</tbody></table>
-      </div>
-    </div>
-
-  <div class="subsection">
-    <h2>{html.escape(text['readable_evidence'])}</h2>
-    <table><thead><tr>{headers([('time', text['time']), ('type', text['type']), ('source', text['source']), ('destination', text['destination']), ('value', text['visible_value'])])}</tr></thead><tbody>{rows(readable, [('time', text['time']), ('type', text['type']), ('source', text['source']), ('destination', text['destination']), ('value', text['visible_value'])])}</tbody></table>
-  </div>
-  </div>
-
-  <div class="section-shell" id="artifacts">
-    <h2>{html.escape(text['artifacts'])}</h2>
-    <table><thead><tr>{headers([('category', text['category']), ('type', text['type']), ('value', text['value']), ('visibility', text['visibility']), ('source', text['source']), ('destination', text['destination']), ('count', text['count']), ('explanation', text['explanation'])])}</tr></thead><tbody>{rows(artifacts, [('category', text['category']), ('type', text['type']), ('value', text['value']), ('visibility', text['visibility']), ('source', text['source']), ('destination', text['destination']), ('count', text['count']), ('explanation', text['explanation'])])}</tbody></table>
-  </div>
-
-  <div class="section-shell" id="connections">
-    <h2>{html.escape(text['connections'])}</h2>
-    <table><thead><tr>{headers([('source', text['source']), ('destination', text['destination']), ('protocol', text['protocol']), ('application', text['application']), ('host', text['host_query']), ('bytes', text['bytes']), ('packets', text['packets']), ('first', text['first_seen']), ('last', text['last_seen']), ('visible', text['visible_preview'])])}</tr></thead><tbody>{rows(connections, [('source', text['source']), ('destination', text['destination']), ('protocol', text['protocol']), ('application', text['application']), ('host', text['host_query']), ('bytes', text['bytes']), ('packets', text['packets']), ('first', text['first_seen']), ('last', text['last_seen']), ('visible', text['visible_preview'])])}</tbody></table>
-  </div>
-</div>
-</body>
-</html>"""
+    template = load_template("pcap_export.html")
+    html_doc = render_template(template, {
+        "LANG": lang,
+        "TITLE": text["title"],
+        "FILE_NAME": html.escape(summary.file_name),
+        "EXPORTED_LABEL": text["exported"],
+        "EXPORTED_AT": generated_at,
+        "SUMMARY_LABEL": text["summary"],
+        "INVESTIGATOR_LABEL": text["investigator"],
+        "COMMUNICATION_HIGHLIGHTS_LABEL": text["communication_highlights"],
+        "EVIDENCE_LABEL": text["evidence"],
+        "ARTIFACTS_LABEL": text["artifacts"],
+        "CONNECTIONS_LABEL": text["connections"],
+        "HERO_CARDS": hero_cards,
+        "STRUCTURE_NOTE": text["structure_note"],
+        "VISIBLE_SERVICE_GROUPS_LABEL": text["visible_service_groups"],
+        "VISIBLE_VS_ENCRYPTED_LABEL": text["visible_vs_encrypted"],
+        "ACTIVITY_TIMELINE_LABEL": text["activity_timeline"],
+        "SERVICE_GROUPS_TABLE": _table_html(headers(service_columns), _chart_rows(investigator.get("service_rows", []), service_columns, text=text)),
+        "VISIBILITY_TABLE": _table_html(headers(visibility_columns), _chart_rows(investigator.get("visibility_rows", []), visibility_columns, text=text)),
+        "ACTIVITY_TABLE": _table_html(headers(activity_columns), _chart_rows(investigator.get("activity_rows", []), activity_columns, text=text)),
+        "PLAIN_SUMMARY": html.escape(str(investigator.get("plain_summary") or "")),
+        "KEY_POINTS": "".join(f'<div class="point">{html.escape(str(point))}</div>' for point in investigator.get("key_points", [])),
+        "COMMUNICATION_NOTE": text["communication_note"],
+        "COMMUNICATION_BRIEF_CARDS": _brief_cards(communication_brief, text),
+        "COMMUNICATION_TABLE": _table_html(headers(communication_columns), _communication_rows(communications, text=text)),
+        "COMMUNICATION_EVIDENCE_DETAILS_LABEL": text["communication_evidence_details"],
+        "COMMUNICATION_EVIDENCE_CARDS": _communication_evidence_cards(communications[:12], text=text),
+        "INTERPRETATION_NOTES_LABEL": text["interpretation_notes"],
+        "LIMITATION_NOTES": "".join(f'<div class="note">{html.escape(note)}</div>' for note in investigator.get("limitations", summary.notes)),
+        "EVIDENCE_NOTE": text["evidence_note"],
+        "TOP_DNS_QUERIES_LABEL": text["top_dns_queries"],
+        "TOP_TLS_SNI_HOSTS_LABEL": text["top_tls_sni_hosts"],
+        "DNS_TABLE": _table_html(headers(dns_columns), rows(summary.dns_queries[:50], dns_columns)),
+        "TLS_TABLE": _table_html(headers(tls_columns), rows(summary.tls_sni[:50], tls_columns)),
+        "READABLE_EVIDENCE_LABEL": text["readable_evidence"],
+        "READABLE_TABLE": _table_html(headers(readable_columns), rows(readable, readable_columns)),
+        "ARTIFACTS_TABLE": _table_html(headers(artifact_columns), rows(artifacts, artifact_columns)),
+        "CONNECTIONS_TABLE": _table_html(headers(connection_columns), rows(connections, connection_columns)),
+    }, escape_values=False)
 
     path.write_text(html_doc, encoding="utf-8")
 
@@ -247,6 +142,30 @@ def _endpoint(ip: Any, port: Any) -> str:
     if port_s:
         return f"{ip_s}:{port_s}"
     return ip_s
+
+
+def _metric_card(label: Any, value: Any) -> str:
+    return (
+        '<div class="card">'
+        f'<div class="label">{html.escape(str(label))}</div>'
+        f'<div class="value">{html.escape(str(value))}</div>'
+        "</div>"
+    )
+
+
+def _brief_cards(communication_brief: dict[str, Any], text: dict[str, str]) -> str:
+    return "\n".join(
+        [
+            _metric_card(text["classified_indicators"], communication_brief["total"]).replace('class="card"', 'class="briefcard"'),
+            _metric_card(text["messaging_push"], communication_brief["messaging"]).replace('class="card"', 'class="briefcard"'),
+            _metric_card(text["call_media_candidates"], communication_brief["media"]).replace('class="card"', 'class="briefcard"'),
+            _metric_card(text["visible_services"], communication_brief["services"]).replace('class="card"', 'class="briefcard"'),
+        ]
+    )
+
+
+def _table_html(headers_html: str, body_html: str) -> str:
+    return f"<table><thead><tr>{headers_html}</tr></thead><tbody>{body_html}</tbody></table>"
 
 
 def _chart_rows(items: list[dict[str, Any]], columns: list[tuple[str, str]], *, text: dict[str, str] | None = None) -> str:
@@ -507,3 +426,4 @@ def _report_text(language: str) -> dict[str, str]:
         "no_communication_indicators": "No communication indicators.",
         "no_communication_evidence": "No communication evidence details.",
     }
+

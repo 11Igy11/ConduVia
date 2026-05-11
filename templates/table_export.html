@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="{{LANG}}">
+<head>
+<meta charset="utf-8">
+<title>{{TITLE}}</title>
+<style>
+body { font-family: Arial, sans-serif; margin: 24px; color: #111827; }
+h1 { font-size: 22px; }
+table { border-collapse: collapse; width: 100%; font-size: 13px; }
+th, td { border: 1px solid #d1d5db; padding: 7px 9px; text-align: left; vertical-align: top; }
+th { background: #1f2937; color: white; position: sticky; top: 0; }
+tr:nth-child(even) { background: #f3f4f6; }
+</style>
+</head>
+<body>
+<h1>{{TITLE}}</h1>
+<p>Rows: {{ROW_COUNT}}</p>
+<table>
+<thead><tr>{{TABLE_HEADERS}}</tr></thead>
+<tbody>
+{{TABLE_ROWS}}
+</tbody>
+</table>
+</body>
+</html>
