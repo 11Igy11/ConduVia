@@ -408,6 +408,9 @@ class PcapPage(QWidget):
             count_list=True,
             max_rows=6,
         )
+        self.chart_services.set_rows([], empty_text="Open a PCAP file to show visible service groups.")
+        self.chart_activity.set_rows([], empty_text="Open a PCAP file to show hourly packet activity.")
+        self.chart_visibility.set_rows([], empty_text="Open a PCAP file to show readable vs encrypted indicators.")
 
         top = QHBoxLayout()
         top.setSpacing(10)

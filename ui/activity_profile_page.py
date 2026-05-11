@@ -532,13 +532,16 @@ class BarChartWidget(QFrame):
         self.layout = QVBoxLayout(self)
         self.layout.setContentsMargins(12, 10, 12, 12)
         self.layout.setSpacing(8)
+        self.layout.setAlignment(Qt.AlignTop)
 
         title_label = QLabel(title)
         title_label.setObjectName("SectionTitle")
+        title_label.setAlignment(Qt.AlignLeft | Qt.AlignTop)
         self.layout.addWidget(title_label)
 
         self.rows = QVBoxLayout()
         self.rows.setSpacing(6)
+        self.rows.setAlignment(Qt.AlignTop)
         self.layout.addLayout(self.rows, 1)
         self.setMinimumHeight(180)
 
@@ -548,8 +551,9 @@ class BarChartWidget(QFrame):
             empty = QLabel(empty_text)
             empty.setObjectName("Muted")
             empty.setWordWrap(True)
+            empty.setAlignment(Qt.AlignLeft | Qt.AlignTop)
             self.rows.addWidget(empty)
-            self.rows.addStretch()
+            self.rows.addStretch(1)
             return
 
         max_count = max(int(row.get(self.value_key) or 0) for row in rows) or 1
