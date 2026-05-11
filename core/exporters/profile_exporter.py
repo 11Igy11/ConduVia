@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import html
 from datetime import datetime
@@ -7,6 +7,7 @@ from typing import Any
 
 from core.db import Project
 from core.exporters.case_context import build_case_context, context_cards_html
+from core.exporters.template_utils import load_template, render_template
 from core.output_language import normalize_output_language
 
 
@@ -25,85 +26,36 @@ def export_activity_profile_html(
     behavior = dict(profile.get("behavior_profile") or {})
     case_context = build_case_context(project, project_name=project_name)
 
-    html_doc = f"""<!DOCTYPE html>
-<html lang="{html.escape(lang)}">
-<head>
-<meta charset="UTF-8">
-<title>{html.escape(text['title'])}</title>
-<style>
-body {{ margin:0; padding:28px; font-family:"Segoe UI", Arial, sans-serif; color:#111827; background:#f3f4f6; }}
-.report {{ max-width:1500px; margin:0 auto; }}
-.hero {{ background:#111827; color:white; border-radius:14px; padding:24px 26px; margin-bottom:18px; }}
-h1 {{ margin:0 0 8px; font-size:30px; }}
-h2 {{ margin:24px 0 10px; font-size:18px; }}
-.muted {{ color:#9ca3af; }}
-.grid {{ display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:10px; margin-top:18px; }}
-.card {{ background:white; border:1px solid #e5e7eb; border-radius:10px; padding:14px; }}
-.hero .card {{ background:rgba(255,255,255,.08); border-color:rgba(255,255,255,.16); color:white; }}
-.label {{ font-size:11px; text-transform:uppercase; color:#6b7280; font-weight:700; letter-spacing:.08em; margin-bottom:5px; }}
-.hero .label {{ color:#bfdbfe; }}
-.value {{ font-size:18px; font-weight:700; word-break:break-word; }}
-.plain {{ background:white; border:1px solid #e5e7eb; border-radius:12px; padding:18px 20px; font-size:14px; line-height:1.55; white-space:pre-wrap; }}
-.note {{ border-left:4px solid #2563eb; padding:10px 12px; background:#eff6ff; margin:8px 0; }}
-.two {{ display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:14px; }}
-.barcell {{ min-width:220px; }}
-.bar {{ height:12px; background:#e5e7eb; border-radius:999px; overflow:hidden; }}
-.bar span {{ display:block; height:100%; background:#2563eb; }}
-table {{ width:100%; border-collapse:collapse; background:white; border:1px solid #e5e7eb; }}
-th {{ text-align:left; background:#1f2937; color:white; font-size:12px; padding:9px; }}
-td {{ border-top:1px solid #e5e7eb; padding:8px 9px; font-size:12px; vertical-align:top; }}
-tr:nth-child(even) td {{ background:#f9fafb; }}
-</style>
-</head>
-<body>
-<div class="report">
-  <div class="hero">
-    <h1>{html.escape(text['title'])}</h1>
-    <div class="muted">{html.escape(text['project'])}: {html.escape(project_name or text['project_fallback'])} | {html.escape(text['exported'])}: {html.escape(generated_at)}</div>
-    <div class="grid">
-      {context_cards_html(case_context, card_class="card", include_dataset_target=False)}
-      {_metric_cards(profile, text)}
-    </div>
-  </div>
-
-  <div class="section">
-    <h2>{html.escape(text['case_snapshot'])}</h2>
-    <div class="plain">{html.escape(_lines(profile.get("summary_lines")))}</div>
-  </div>
-
-  <div class="section">
-    <h2>{html.escape(text['evidence_overview'])}</h2>
-    <div class="two">
-      <div>{_bar_table(text['evidence_sources'], profile.get("evidence_counts") or [], "count", text=text)}</div>
-      <div>{_bar_table(text['pcap_device_ip_distribution'], profile.get("pcap_device_ip_rows") or [], "count", text=text)}</div>
-    </div>
-  </div>
-
-  <div class="section">
-    <h2>{html.escape(text['behavior_insights'])}</h2>
-    <div class="note">{html.escape(text['behavior_note'])}</div>
-    <div class="two">
-      <div>{_bar_table(text['service_groups_by_volume'], behavior.get("service_rows") or [], "bytes", "bytes_label", text=text)}</div>
-      <div>{_bar_table(text['observed_domains_by_volume'], behavior.get("domain_rows") or [], "bytes", "bytes_label", text=text)}</div>
-    </div>
-    <h2>{html.escape(text['activity_by_hour'])}</h2>
-    {_bar_table(text['hourly_activity'], behavior.get("hour_rows") or [], "count", text=text)}
-    <h2>{html.escape(text['activity_rhythm'])}</h2>
-    <div class="plain">{html.escape(_lines(behavior.get("routine_lines")))}</div>
-  </div>
-
-  <div class="section">
-    <h2>{html.escape(text['next_review'])}</h2>
-    <div class="plain">{html.escape(_lines(profile.get("recommendation_lines")))}</div>
-  </div>
-
-  <div class="section">
-    <h2>{html.escape(text['recent_project_timeline'])}</h2>
-    <div class="plain">{html.escape(_lines(profile.get("timeline_lines")))}</div>
-  </div>
-</div>
-</body>
-</html>"""
+    template = load_template("profile_export.html")
+    html_doc = render_template(template, {
+        "LANG": lang,
+        "TITLE": text["title"],
+        "PROJECT_LABEL": text["project"],
+        "PROJECT_NAME": html.escape(project_name or text["project_fallback"]),
+        "EXPORTED_LABEL": text["exported"],
+        "EXPORTED_AT": generated_at,
+        "HERO_CARDS": "\n".join([
+            context_cards_html(case_context, card_class="card", include_dataset_target=False),
+            _metric_cards(profile, text),
+        ]),
+        "CASE_SNAPSHOT_LABEL": text["case_snapshot"],
+        "CASE_SNAPSHOT": html.escape(_lines(profile.get("summary_lines"))),
+        "EVIDENCE_OVERVIEW_LABEL": text["evidence_overview"],
+        "EVIDENCE_SOURCES_TABLE": _bar_table(text["evidence_sources"], profile.get("evidence_counts") or [], "count", text=text),
+        "PCAP_DEVICE_IP_TABLE": _bar_table(text["pcap_device_ip_distribution"], profile.get("pcap_device_ip_rows") or [], "count", text=text),
+        "BEHAVIOR_INSIGHTS_LABEL": text["behavior_insights"],
+        "BEHAVIOR_NOTE": text["behavior_note"],
+        "SERVICE_GROUPS_TABLE": _bar_table(text["service_groups_by_volume"], behavior.get("service_rows") or [], "bytes", "bytes_label", text=text),
+        "OBSERVED_DOMAINS_TABLE": _bar_table(text["observed_domains_by_volume"], behavior.get("domain_rows") or [], "bytes", "bytes_label", text=text),
+        "ACTIVITY_BY_HOUR_LABEL": text["activity_by_hour"],
+        "HOURLY_ACTIVITY_TABLE": _bar_table(text["hourly_activity"], behavior.get("hour_rows") or [], "count", text=text),
+        "ACTIVITY_RHYTHM_LABEL": text["activity_rhythm"],
+        "ACTIVITY_RHYTHM": html.escape(_lines(behavior.get("routine_lines"))),
+        "NEXT_REVIEW_LABEL": text["next_review"],
+        "NEXT_REVIEW": html.escape(_lines(profile.get("recommendation_lines"))),
+        "RECENT_PROJECT_TIMELINE_LABEL": text["recent_project_timeline"],
+        "RECENT_PROJECT_TIMELINE": html.escape(_lines(profile.get("timeline_lines"))),
+    }, escape_values=False)
 
     path.write_text(html_doc, encoding="utf-8")
 
@@ -234,3 +186,4 @@ def _report_text(language: str) -> dict[str, str]:
         "value": "Value",
         "no_records": "No records.",
     }
+

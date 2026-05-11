@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import html as html_lib
 import webbrowser
 from datetime import datetime
 from pathlib import Path
@@ -32,6 +31,7 @@ from PySide6.QtWidgets import (
 
 from core.exporters.listing_exporter import export_listing_csv, export_listing_excel
 from core.exporters.pcap_exporter import export_pcap_summary_html
+from core.exporters.table_exporter import export_table_html
 from core.formatters import format_duration_compact_ms, format_pcap_datetime, human_bytes
 from core.pcap_analyzer import PcapSummary, analyze_pcap, build_investigator_view
 from core.protocols import format_ip_proto
@@ -924,38 +924,7 @@ class PcapPage(QWidget):
         QMessageBox.information(self, "Export table", f"Exported:\n{file_path}")
 
     def _write_table_html(self, file_path: str, title: str, headers: list[str], rows: list[list[str]]) -> None:
-        head = "".join(f"<th>{html_lib.escape(str(header))}</th>" for header in headers)
-        body = "\n".join(
-            "<tr>" + "".join(f"<td>{html_lib.escape(str(value))}</td>" for value in row) + "</tr>"
-            for row in rows
-        )
-        html = f"""<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<title>{html_lib.escape(title)}</title>
-<style>
-body {{ font-family: Arial, sans-serif; margin: 24px; color: #111827; }}
-h1 {{ font-size: 22px; }}
-table {{ border-collapse: collapse; width: 100%; font-size: 13px; }}
-th, td {{ border: 1px solid #d1d5db; padding: 7px 9px; text-align: left; vertical-align: top; }}
-th {{ background: #1f2937; color: white; position: sticky; top: 0; }}
-tr:nth-child(even) {{ background: #f3f4f6; }}
-</style>
-</head>
-<body>
-<h1>{html_lib.escape(title)}</h1>
-<p>Rows: {len(rows)}</p>
-<table>
-<thead><tr>{head}</tr></thead>
-<tbody>
-{body}
-</tbody>
-</table>
-</body>
-</html>
-"""
-        Path(file_path).write_text(html, encoding="utf-8")
+        export_table_html(file_path, title, headers, rows)
 
     def _expanded_column_width(self, column: tuple[str, str], current_width: int) -> int:
         key, title = column
