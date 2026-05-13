@@ -8,10 +8,8 @@ from ui.pcap_page import DictTableModel, PcapPage
 from ui.activity_profile_page import ActivityProfilePage
 from ui.settings_page import SettingsPage
 import html
-from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable
-from core.workspace import workspace_export_path
 from ui.controllers.flow_controller import FlowController
 from ui.controllers.findings_controller import FindingsController
 from ui.controllers.search_controller import SearchController
@@ -22,14 +20,16 @@ from ui.controllers.explore_ui_controller import ExploreUIController
 from ui.explore_models import FlowTableModel, NumericSortProxy
 from ui.explore_widgets import AITextWorker, CopyableTableView, FlowTableView
 from ui.ai_output import AIOutputState, build_ai_output_state, make_ai_note_block, render_ai_output_hub
+from ui.findings_format import format_finding_detail, update_finding_status
 from ui.findings_page import FindingsPage
 from ui.notes_actions import (
     export_notes_word as export_notes_word_action,
+    insert_notes_chart as insert_notes_chart_action,
     load_project_notes,
     save_project_notes,
 )
-from ui.notes_charts import available_notes_charts, render_notes_chart
 from ui.notes_page import NotesPage
+from ui.navigation import set_active_nav_button, switch_page
 from ui.controllers.notes_controller import NotesController
 from ui.dialogs import (
     message_dialog,
@@ -51,9 +51,9 @@ from PySide6.QtWidgets import (
     QTableView, QMenu
 )
 from core.db import (
-    init_db, add_finding, get_finding,
+    init_db, add_finding,
     update_finding, delete_finding,
-    add_activity, get_project,
+    get_project,
     get_app_settings,
 )
 # ---------- helpers ----------
@@ -131,7 +131,9 @@ QLabel#SectionTitle,
 QLabel#ProfileTitle,
 QLabel#ProfilePanelTitle,
 QLabel#CaseDashboardTitle,
-QLabel#HeaderProjectLabel {
+QLabel#HeaderProjectLabel,
+QLabel#DialogMessageLabel,
+QLabel#DialogSectionLabel {
     background: transparent;
     color: #0f172a;
 }
@@ -143,7 +145,8 @@ QLabel#HeaderStatLabel,
 QLabel#PcapKeyPoints,
 QLabel#PcapLimitations,
 QLabel#FlowFieldLabel,
-QLabel#MutedLabel {
+QLabel#MutedLabel,
+QLabel#DialogDetailsLabel {
     background: transparent;
     color: #475569;
 }
@@ -465,7 +468,9 @@ def app_stylesheet(theme: str | None = "dark") -> str:
     return qss
 
 def apply_app_stylesheet(qapp: QApplication, theme: str | None = "dark") -> None:
-    qapp.setStyleSheet(app_stylesheet(theme))
+    normalized_theme = normalize_ui_theme(theme)
+    qapp.setProperty("ui_theme", normalized_theme)
+    qapp.setStyleSheet(app_stylesheet(normalized_theme))
 
 # ---------- Main App ----------
 class App(QWidget):
@@ -531,6 +536,16 @@ class App(QWidget):
         self._nav_pcap = self.btn_nav_pcap
         self._nav_osint = self.btn_nav_osint
         self._nav_settings = self.btn_nav_settings
+        self._nav_buttons = (
+            self._nav_projects,
+            self._nav_json,
+            self._nav_pcap,
+            self._nav_osint,
+            self._nav_ai,
+            self._nav_notes,
+            self._nav_profile,
+            self._nav_settings,
+        )
 
         sidebar.addWidget(self.btn_nav_projects)
         sidebar.addWidget(self.btn_nav_json)
@@ -1650,7 +1665,7 @@ class App(QWidget):
         self.pages.addWidget(self.settings_page)
 
         self.pages.setCurrentIndex(self.IDX_PROJECTS)
-        self._set_active_nav(self._nav_projects)
+        set_active_nav_button(self._nav_buttons, self._nav_projects)
 
         root.addWidget(sidebar)
         root.addWidget(self.pages, 1)
@@ -1665,28 +1680,22 @@ class App(QWidget):
         outer.addLayout(footer)
           
     def _set_active_nav(self, active: QPushButton):
-        for b in (
-            self._nav_projects,
-            self._nav_profile,
-            self._nav_notes,
-            self._nav_ai,
-            self._nav_json,
-            self._nav_pcap,
-            self._nav_osint,
-            self._nav_settings,
-        ):
-            b.setProperty("active", b is active)
-            b.style().unpolish(b)
-            b.style().polish(b)
-            b.update()
+        set_active_nav_button(self._nav_buttons, active)
 
     def go_page(self, idx: int, active_btn: QPushButton):
+        switch_page(
+            pages=self.pages,
+            index=idx,
+            active_button=active_btn,
+            nav_buttons=self._nav_buttons,
+            before_switch=self._before_page_switch,
+        )
+
+    def _before_page_switch(self, idx: int) -> None:
         if idx == self.IDX_PROFILE:
             self.refresh_activity_profile_ui()
         if idx == self.IDX_SETTINGS and hasattr(self, "settings_page"):
             self.settings_page.refresh()
-        self.pages.setCurrentIndex(idx)
-        self._set_active_nav(active_btn)
 
     def _project_launcher_card(
         self,
@@ -2060,27 +2069,7 @@ class App(QWidget):
 
         self.set_findings_actions_enabled(True)
 
-        lines = []
-        lines.append(f"Title: {row['title']}")
-        lines.append("")
-        lines.append(f"Status: {status_emoji(row['status'])} {row['status']}")
-        lines.append(f"Created: {row['created_at']}")
-        lines.append(f"Tags: {row['tags'] or '-'}")
-        lines.append("")
-        lines.append("Flow")
-        lines.append(f"Source: {row['src_ip']}:{row['src_port'] or ''}")
-        lines.append(f"Destination: {row['dst_ip']}:{row['dst_port'] or ''}")
-        lines.append(f"Protocol: {row['protocol']}")
-        lines.append(f"Application: {row['application_name'] or '-'}")
-        lines.append(f"SNI: {row['requested_server_name'] or '-'}")
-        lines.append(f"Bytes: {row['bidirectional_bytes']}")
-        lines.append(f"Packets: {row['bidirectional_packets']}")
-        lines.append(f"Duration (ms): {row['bidirectional_duration_ms']}")
-        lines.append("")
-        lines.append("Note")
-        lines.append(row["note"] or "-")
-
-        self.findings_page.show_detail("\n".join(lines))
+        self.findings_page.show_detail(format_finding_detail(row, status_emoji))
 
     def explain_selected_finding(self):
         fid, row = self._get_selected_finding_row()
@@ -2241,10 +2230,6 @@ class App(QWidget):
             return
 
         if chosen in (act_new, act_inv, act_conf, act_fp):
-            row = get_finding(fid)
-            if row is None:
-                return
-
             status_map = {
                 act_new: "New",
                 act_inv: "Investigating",
@@ -2254,17 +2239,11 @@ class App(QWidget):
             new_status = status_map[chosen]
 
             try:
-                update_finding(
-                    fid,
-                    title=row["title"] or "",
-                    note=row["note"] or "",
-                    status=new_status,
-                    tags=row["tags"] or "",
-                )
-                if self.current_project_id:
-                    add_activity(self.current_project_id, "finding_status", f"#{fid} -> {new_status}")
+                updated = update_finding_status(fid, new_status, self.current_project_id)
             except Exception as e:
                 self._message_dialog("Findings", "Failed to update finding status.", str(e), width=460)
+                return
+            if not updated:
                 return
 
             self.refresh_findings_ui()
@@ -2346,50 +2325,35 @@ class App(QWidget):
 
         self.refresh_activity_profile_ui()
         profile = getattr(self.activity_profile_page, "profile", None) if hasattr(self, "activity_profile_page") else None
-        behavior = (profile or {}).get("behavior_profile") or {}
-
         pcap_summary = getattr(getattr(self, "pcap_page", None), "summary", None)
-        charts = available_notes_charts(profile or {}, behavior, pcap_summary)
-        choices = [chart["name"] for chart in charts]
-        choice, ok = self._item_choice_dialog(
-            "Insert chart",
-            "Choose a chart to insert into Notes:",
-            choices,
-            width=460,
-        )
-        if not ok:
-            return
 
-        chart = next((item for item in charts if item["name"] == choice), None)
-        if not chart:
-            return
-        rows = list(chart.get("rows") or [])
-
-        if not rows:
-            self._message_dialog(
-                "Notes chart",
-                "No chart data is available yet.",
-                str(chart.get("empty_text") or "Save datasets/PCAP captures to the active project, then try again."),
-                width=520,
+        def choose_chart(choices: list[str]) -> tuple[str, bool]:
+            return self._item_choice_dialog(
+                "Insert chart",
+                "Choose a chart to insert into Notes:",
+                choices,
+                width=460,
             )
+
+        result = insert_notes_chart_action(
+            parent=self,
+            project_id=self.current_project_id,
+            notes_page=self.notes_page,
+            profile=profile,
+            pcap_summary=pcap_summary,
+            choose_chart=choose_chart,
+        )
+        if result.cancelled:
+            return
+        if result.no_data:
+            self._message_dialog("Notes chart", result.error, result.details, width=520)
+            return
+        if not result.inserted:
+            self._message_dialog("Notes chart", result.error, result.details, width=520)
             return
 
-        project = get_project(self.current_project_id)
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        default_name = f"{chart['filename']}-{timestamp}.png"
-        chart_path = (
-            workspace_export_path(project.base_folder, default_name, category="notes")
-            if project and project.base_folder
-            else Path(default_name)
-        )
-
-        try:
-            render_notes_chart(chart_path, chart, rows)
-            self.notes_page.insert_image_file(str(chart_path))
-            self._notes_dirty = True
-            self._flush_notes()
-        except Exception as exc:
-            self._message_dialog("Notes chart", "Failed to insert chart.", str(exc), width=520)
+        self._notes_dirty = True
+        self._flush_notes()
 
     def export_notes_word(self):
         result = export_notes_word_action(

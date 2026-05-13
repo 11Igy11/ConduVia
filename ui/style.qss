@@ -56,6 +56,23 @@ QLabel#SectionTitle {
     padding: 2px 0 4px 0;
 }
 
+QLabel#DialogMessageLabel {
+    font-size: 15px;
+    font-weight: 600;
+    color: #f3f4f6;
+}
+
+QLabel#DialogDetailsLabel {
+    font-size: 13px;
+    color: #d1d5db;
+}
+
+QLabel#DialogSectionLabel {
+    font-size: 15px;
+    font-weight: 700;
+    color: #f3f4f6;
+}
+
 QLabel#ProfileMetric {
     background: #273549;
     border: 1px solid #475569;

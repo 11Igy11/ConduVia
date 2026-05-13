@@ -38,14 +38,14 @@ def message_dialog(
     lbl_message = QLabel(message)
     lbl_message.setWordWrap(True)
     lbl_message.setTextFormat(Qt.PlainText)
-    lbl_message.setStyleSheet("font-size: 15px; font-weight: 600; color: #f3f4f6;")
+    lbl_message.setObjectName("DialogMessageLabel")
     layout.addWidget(lbl_message)
 
     if details:
         lbl_details = QLabel(details)
         lbl_details.setWordWrap(True)
         lbl_details.setTextFormat(Qt.PlainText)
-        lbl_details.setStyleSheet("font-size: 13px; color: #d1d5db;")
+        lbl_details.setObjectName("DialogDetailsLabel")
         layout.addWidget(lbl_details)
 
     buttons = QDialogButtonBox()
@@ -78,7 +78,7 @@ def choice_dialog(
     lbl = QLabel(message)
     lbl.setWordWrap(True)
     lbl.setTextFormat(Qt.PlainText)
-    lbl.setStyleSheet("font-size: 15px; font-weight: 600; color: #f3f4f6;")
+    lbl.setObjectName("DialogMessageLabel")
     layout.addWidget(lbl)
 
     result = {"value": None}
@@ -309,7 +309,7 @@ def project_details_dialog(
     form.addRow("Workspace parent:", workspace_row)
 
     section = QLabel("Case subject / identifiers")
-    section.setStyleSheet("font-size: 15px; font-weight: 700; color: #f3f4f6;")
+    section.setObjectName("DialogSectionLabel")
     form.addRow("", section)
 
     fields: dict[str, QLineEdit | QPlainTextEdit] = {}
@@ -420,14 +420,14 @@ def confirm_dialog(
 
     lbl_message = QLabel(message)
     lbl_message.setWordWrap(True)
-    lbl_message.setStyleSheet("font-size: 15px; font-weight: 600; color: #f3f4f6;")
+    lbl_message.setObjectName("DialogMessageLabel")
     layout.addWidget(lbl_message)
 
     if details:
         lbl_details = QLabel(details)
         lbl_details.setWordWrap(True)
         lbl_details.setTextFormat(Qt.PlainText)
-        lbl_details.setStyleSheet("font-size: 13px; color: #d1d5db;")
+        lbl_details.setObjectName("DialogDetailsLabel")
         layout.addWidget(lbl_details)
 
     buttons = QDialogButtonBox()
