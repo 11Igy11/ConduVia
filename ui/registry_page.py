@@ -14,7 +14,7 @@ from PySide6.QtGui import QPainter, QColor, QPen, QFontMetrics
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QLineEdit,
     QTableView, QFileDialog, QMessageBox, QFrame, QGridLayout, QTabWidget,
-    QSizePolicy, QCheckBox, QScrollArea, QProgressBar, QToolTip
+    QSizePolicy, QCheckBox, QScrollArea, QProgressBar, QToolTip, QApplication
 )
 
 from core.parser import extract_dataset_meta, build_registry_columns, compute_registry_summary
@@ -33,6 +33,31 @@ def _esc(x: Any) -> str:
 
 def _fmt_dt_short(x: Any) -> str:
     return format_short_date(x, missing="—")
+
+def _is_light_theme() -> bool:
+    app = QApplication.instance()
+    return bool(app and app.property("ui_theme") == "light")
+
+def _registry_chart_palette() -> dict[str, str]:
+    if _is_light_theme():
+        return {
+            "border": "#cbd5e1",
+            "background": "#e2e8f0",
+            "primary": "#3b82f6",
+            "secondary": "#94a3b8",
+            "muted_text": "#64748b",
+            "peak": "#2563eb",
+            "quiet": "#f59e0b",
+        }
+    return {
+        "border": "#475569",
+        "background": "#1f2937",
+        "primary": "#3b82f6",
+        "secondary": "#64748b",
+        "muted_text": "#94a3b8",
+        "peak": "#2563eb",
+        "quiet": "#f59e0b",
+    }
 
 def _fmt_days_short(x: Any) -> str:
     try:
@@ -163,6 +188,7 @@ def _mini_hist_24_html(vals: list[int], *, height_px: int = 14) -> str:
     """
     if not isinstance(vals, list) or len(vals) != 24:
         return ""
+    colors = _registry_chart_palette()
 
     # if already 0..100, keep; else normalize to 0..100
     mx = max(vals) if vals else 0
@@ -185,12 +211,12 @@ def _mini_hist_24_html(vals: list[int], *, height_px: int = 14) -> str:
         tds.append(
             "<td style='width:4.16%;padding:0 1px;vertical-align:bottom;'>"
             f"<div title='{h:02d}:00 — {vals[h]}' "
-            f"style='height:{height_px}px;border:1px solid #475569;"
-            "background:#1f2937;border-radius:4px;overflow:hidden;'>"
+            f"style='height:{height_px}px;border:1px solid {colors['border']};"
+            f"background:{colors['background']};border-radius:4px;overflow:hidden;'>"
             # empty spacer
             f"<div style='height:{empty_h}px;'></div>"
             # bar
-            f"<div style='height:{bar_h}px;background:#3b82f6;'></div>"
+            f"<div style='height:{bar_h}px;background:{colors['primary']};'></div>"
             "</div>"
             "</td>"
         )
@@ -240,12 +266,13 @@ def _direction_bar_html(out_pct: float, in_pct: float, *, width_px: int = 220, h
 
     o = 0.0 if o < 0 else 100.0 if o > 100 else o
     i = 0.0 if i < 0 else 100.0 if i > 100 else i
+    colors = _registry_chart_palette()
 
     return (
         f"<div style='display:inline-block;width:{width_px}px;height:{height_px}px;"
-        "border:1px solid #475569;border-radius:999px;overflow:hidden;background:#1f2937;'>"
-        f"<span style='display:inline-block;height:{height_px}px;width:{o:.1f}%;background:#3b82f6;'></span>"
-        f"<span style='display:inline-block;height:{height_px}px;width:{i:.1f}%;background:#64748b;'></span>"
+        f"border:1px solid {colors['border']};border-radius:999px;overflow:hidden;background:{colors['background']};'>"
+        f"<span style='display:inline-block;height:{height_px}px;width:{o:.1f}%;background:{colors['primary']};'></span>"
+        f"<span style='display:inline-block;height:{height_px}px;width:{i:.1f}%;background:{colors['secondary']};'></span>"
         "</div>"
     )
 
@@ -290,10 +317,11 @@ class DirectionBarWidget(QWidget):
             w = self.width()
             h = self.height()
 
-            border = QColor("#475569")
-            bg = QColor("#1f2937")
-            out_c = QColor("#3b82f6")
-            in_c = QColor("#64748b")
+            colors = _registry_chart_palette()
+            border = QColor(colors["border"])
+            bg = QColor(colors["background"])
+            out_c = QColor(colors["primary"])
+            in_c = QColor(colors["secondary"])
             r = 7.0
 
             p.setPen(QPen(border, 1))
@@ -419,9 +447,10 @@ class MiniHistogram24Widget(QWidget):
             w = self.width()
             h = self.height()
 
-            bar_fg = QColor("#3b82f6")
-            base_c = QColor("#475569")
-            text_c = QColor("#94a3b8")
+            colors = _registry_chart_palette()
+            bar_fg = QColor(colors["primary"])
+            base_c = QColor(colors["border"])
+            text_c = QColor(colors["muted_text"])
 
             label_h = 16 if self._show_labels else 0
             top_pad = 2
@@ -465,9 +494,9 @@ class MiniHistogram24Widget(QWidget):
 
                 # peak / quiet highlight
                 if i == self._peak_hour:
-                    p.setBrush(QColor("#2563eb"))  # peak
+                    p.setBrush(QColor(colors["peak"]))  # peak
                 elif i in self._quiet_hours:
-                    p.setBrush(QColor("#f59e0b"))  # quiet
+                    p.setBrush(QColor(colors["quiet"]))  # quiet
                 else:
                     p.setBrush(bar_fg)
 
