@@ -111,12 +111,15 @@ class ListingTableModel(QAbstractTableModel):
         return len(self._columns)
 
     def headerData(self, section, orientation, role=Qt.DisplayRole):
-        if section < 0 or section >= len(self._columns):
+        if section < 0:
             return None
 
-        key = self._columns[section]
-
         if orientation == Qt.Horizontal:
+            if section >= len(self._columns):
+                return None
+
+            key = self._columns[section]
+
             if role == Qt.DisplayRole:
                 return self._friendly_label(key)
 
@@ -137,7 +140,7 @@ class ListingTableModel(QAbstractTableModel):
                 }
                 return tooltips.get(key, key)
 
-        if role == Qt.DisplayRole:
+        if role == Qt.DisplayRole and section < len(self._flows):
             return str(section + 1)
 
         return None
@@ -242,8 +245,8 @@ class ColumnPickerDialog(QDialog):
     def __init__(self, current_columns=None, all_columns=None, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Customize View")
-        self.setMinimumWidth(700)
-        self.setMinimumHeight(400)
+        self.setMinimumWidth(860)
+        self.setMinimumHeight(560)
 
         self.current_columns = list(current_columns or [])
         self.all_columns = list(all_columns or [])
@@ -254,7 +257,7 @@ class ColumnPickerDialog(QDialog):
 
         self.lbl_title = QLabel("Customize visible columns")
         self.lbl_hint = QLabel("Move columns between lists and reorder them.")
-        self.lbl_hint.setStyleSheet("color: #9ca3af;")
+        self.lbl_hint.setObjectName("Muted")
 
         layout.addWidget(self.lbl_title)
         layout.addWidget(self.lbl_hint)
@@ -513,8 +516,7 @@ class ListingPage(QWidget):
         self.lbl_flows.setText(f"Flows: {len(self.flows)}")
 
         # limit za performance (kasnije ću napraviti paging)
-        preview = self.flows[:1000]
-        self.model.set_data(preview)
+        self.model.set_data(self.flows)
 
         # reset na default kad se učita novi dataset
         self.cmb_view_mode.setCurrentText("Default")
@@ -597,7 +599,7 @@ class ListingPage(QWidget):
         dlg = QDialog(self)
         dlg.setWindowTitle("Export")
         dlg.setModal(True)
-        dlg.setMinimumWidth(360)
+        dlg.setMinimumSize(420, 260)
 
         layout = QVBoxLayout(dlg)
         layout.setContentsMargins(16, 16, 16, 16)
@@ -767,5 +769,5 @@ class ListingPage(QWidget):
     def _default_export_path(self, default_name: str) -> str:
         project = self._current_project()
         if project and project.base_folder:
-            return str(workspace_export_path(project.base_folder, default_name))
+            return str(workspace_export_path(project.base_folder, default_name, category="json"))
         return default_name

@@ -5,6 +5,7 @@ import os
 import struct
 import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 from unittest.mock import patch
 
@@ -42,13 +43,14 @@ from core.formatters import (
     safe_int,
 )
 from core.exporters.listing_exporter import export_listing_html
+from core.exporters.notes_exporter import export_notes_docx
 from core.exporters.profile_exporter import export_activity_profile_html
 from core.exporters.pcap_exporter import export_pcap_summary_html
 from core.exporters.registry_exporter import export_registry_html
 from core.loader import list_json_files, load_folder, load_json_file
 from core.parser import extract_dataset_meta
 from core.pcap_analyzer import analyze_pcap, build_communication_rows, build_investigator_view
-from core.project_datasets import load_project_dataset_flows
+from core.project_datasets import list_project_json_dataset_files, load_project_dataset_flows
 from core.project_identity import identifier_values_match, is_valid_oib, normalize_identifier_value
 from core.project_profile import build_project_activity_profile, format_project_activity_profile
 from core.protocols import describe_ip_proto, format_ip_proto_with_description
@@ -175,6 +177,28 @@ class FlowStatsTests(unittest.TestCase):
 
 
 class BehaviorProfileTests(unittest.TestCase):
+    def test_listing_row_headers_follow_all_loaded_rows(self):
+        from PySide6.QtCore import Qt
+        from ui.listing_page import ListingTableModel
+
+        model = ListingTableModel([{"id": idx, "bidirectional_first_seen_ms": ""} for idx in range(20)])
+
+        self.assertEqual(model.headerData(0, Qt.Vertical, Qt.DisplayRole), "1")
+        self.assertEqual(model.headerData(12, Qt.Vertical, Qt.DisplayRole), "13")
+        self.assertEqual(model.headerData(19, Qt.Vertical, Qt.DisplayRole), "20")
+
+    def test_pcap_page_queue_loads_first_and_keeps_remaining_paths(self):
+        from ui.pcap_page import PcapPage
+
+        page = PcapPage.__new__(PcapPage)
+        loaded: list[str] = []
+        page._load_pcap_file = lambda path: loaded.append(path)
+
+        PcapPage.load_pcap_queue(page, ["one.pcap", "two.pcap", "three.pcap"])
+
+        self.assertEqual(loaded, ["one.pcap"])
+        self.assertEqual(page._pcap_queue, ["two.pcap", "three.pcap"])
+
     def test_project_dataset_loader_aggregates_saved_project_sources(self):
         with temporary_directory() as tmp:
             root = Path(tmp)
@@ -198,11 +222,38 @@ class BehaviorProfileTests(unittest.TestCase):
         self.assertEqual(result["deduped_path_count"], 3)
         self.assertEqual(result["loaded_source_count"], 2)
         self.assertEqual(result["source_count"], 3)
+        self.assertEqual(result["loaded_json_file_count"], 2)
+        self.assertEqual(result["json_file_count"], 2)
         self.assertEqual(result["flow_count"], 2)
         self.assertEqual([flow["id"] for flow in result["flows"]], ["one", "two"])
         self.assertEqual(len(result["missing_rows"]), 1)
         self.assertEqual(recent[0], str(one))
         self.assertEqual(len(recent), 3)
+
+    def test_project_json_dataset_files_expands_saved_folder_sources(self):
+        with temporary_directory() as tmp:
+            root = Path(tmp)
+            db_path = root / "project-json-files.db"
+            folder = root / "json-folder"
+            folder.mkdir()
+            one = folder / "one.json"
+            two = folder / "two.json"
+            one.write_text(json.dumps([{"id": "one"}]), encoding="utf-8")
+            two.write_text(json.dumps([{"id": "two"}]), encoding="utf-8")
+            init_db(db_path)
+            project_id = create_project("Case A", db_path=db_path)
+            add_dataset_load(project_id, str(folder), db_path=db_path)
+
+            rows = list_project_json_dataset_files(project_id, db_path=db_path)
+            result = load_project_dataset_flows(project_id, db_path=db_path)
+            profile = build_project_activity_profile(project_id, db_path=db_path)
+
+        self.assertEqual([row["name"] for row in rows], ["one.json", "two.json"])
+        self.assertEqual(result["loaded_source_count"], 1)
+        self.assertEqual(result["source_count"], 1)
+        self.assertEqual(result["loaded_json_file_count"], 2)
+        self.assertEqual(result["json_file_count"], 2)
+        self.assertEqual(profile["dataset_count"], 2)
 
     def test_behavior_profile_groups_services_domains_and_hours(self):
         flows = [
@@ -292,6 +343,52 @@ class BehaviorProfileTests(unittest.TestCase):
 
 
 class ExportContextTests(unittest.TestCase):
+    def test_notes_docx_export_writes_word_document(self):
+        with temporary_directory() as tmp:
+            output = Path(tmp) / "notes.docx"
+            export_notes_docx(output, title="Case notes", notes_text="Line one\n**Important**")
+
+            with zipfile.ZipFile(output) as docx:
+                document_xml = docx.read("word/document.xml").decode("utf-8")
+            exists = output.exists()
+
+        self.assertTrue(exists)
+        self.assertIn("Case notes", document_xml)
+        self.assertIn("Line one", document_xml)
+        self.assertIn("Important", document_xml)
+        self.assertIn("<w:b/>", document_xml)
+
+    def test_notes_docx_export_embeds_html_images(self):
+        with temporary_directory() as tmp:
+            root = Path(tmp)
+            image_path = root / "chart.png"
+            image_path.write_bytes(
+                b"\x89PNG\r\n\x1a\n"
+                b"\x00\x00\x00\rIHDR"
+                b"\x00\x00\x00\x02\x00\x00\x00\x01"
+                b"\x08\x02\x00\x00\x00"
+                b"\xf4\x22\x7f\x8a"
+                b"\x00\x00\x00\x00IEND\xaeB`\x82"
+            )
+            output = root / "notes-with-image.docx"
+            export_notes_docx(
+                output,
+                title="Case notes",
+                notes_text="fallback",
+                notes_html=f"<html><body><p>Before image</p><p><img src=\"{image_path}\" /></p><p>After image</p></body></html>",
+            )
+
+            with zipfile.ZipFile(output) as docx:
+                names = set(docx.namelist())
+                document_xml = docx.read("word/document.xml").decode("utf-8")
+                rels_xml = docx.read("word/_rels/document.xml.rels").decode("utf-8")
+
+        self.assertIn("word/media/image1.png", names)
+        self.assertIn("Before image", document_xml)
+        self.assertIn("After image", document_xml)
+        self.assertIn("r:embed=\"rId1\"", document_xml)
+        self.assertIn("Target=\"media/image1.png\"", rels_xml)
+
     def test_listing_html_export_includes_project_case_context(self):
         with temporary_directory() as tmp:
             root = Path(tmp)
@@ -367,10 +464,14 @@ class ExportContextTests(unittest.TestCase):
                 files=[root / "dataset.json"],
                 flows=[{"src_ip": "10.0.0.5", "dst_ip": "8.8.8.8", "application_name": "DNS", "bidirectional_bytes": 100}],
                 meta={"target": "38598111222", "targettype": "MSISDN"},
-                summary={"total_flows": 1, "total_bytes": 100},
+                summary={
+                    "total_flows": 1,
+                    "total_bytes": 100,
+                    "top_bytes_src": [("10.0.0.5", 500), ("10.0.0.6", 2 * 1024 * 1024)],
+                },
                 analyst={},
                 columns=["src_ip", "dst_ip", "application_name"],
-                tab_defs=[],
+                tab_defs=[("Bytes Src", "top_bytes_src", ("Source", "Bytes"))],
                 project=project,
             )
             content = output.read_text(encoding="utf-8")
@@ -395,6 +496,8 @@ class ExportContextTests(unittest.TestCase):
         self.assertIn("Pero Peric", content)
         self.assertIn("MSISDN: 38598111222", content)
         self.assertIn("Known IP", content)
+        self.assertIn("500 B", content)
+        self.assertIn("2.00 MB", content)
         self.assertIn("ViaNyquist registry izvjestaj", hr_content)
         self.assertIn("Valjanost naloga", hr_content)
         self.assertIn("Analiticki sazetak", hr_content)
@@ -452,6 +555,18 @@ class WorkspaceTests(unittest.TestCase):
         self.assertEqual(export_path.name, "report.html")
         self.assertEqual(export_path.parent.name, "exports")
         self.assertTrue(exports_exists)
+
+    def test_workspace_export_path_supports_export_categories(self):
+        with temporary_directory() as tmp:
+            root = Path(tmp) / "case"
+            ensure_workspace_structure(str(root))
+
+            export_path = workspace_export_path(str(root), "report.html", category="pcap")
+            export_dir_exists = export_path.parent.exists()
+
+        self.assertEqual(export_path.parent.name, "pcap")
+        self.assertEqual(export_path.parent.parent.name, "exports")
+        self.assertTrue(export_dir_exists)
 
     def test_project_folder_name_is_windows_safe(self):
         self.assertEqual(make_safe_project_folder_name(' Case: A/B? '), "Case_A_B")
@@ -797,7 +912,9 @@ class PcapAnalyzerTests(unittest.TestCase):
                 db_path=db_path,
             )
             empty_project_id = create_project("Empty Case", db_path=db_path)
-            add_dataset_load(project_id, str(root / "dataset"), db_path=db_path)
+            dataset_path = root / "dataset.json"
+            dataset_path.write_text(json.dumps([{"id": "flow-1"}]), encoding="utf-8")
+            add_dataset_load(project_id, str(dataset_path), db_path=db_path)
 
             summary = analyze_pcap(pcap_path)
             add_pcap_source(

@@ -50,7 +50,7 @@ def message_dialog(
 
     buttons = QDialogButtonBox()
     btn_ok = buttons.addButton("OK", QDialogButtonBox.AcceptRole)
-    btn_ok.setFixedHeight(36)
+    btn_ok.setFixedHeight(40)
     btn_ok.setMinimumWidth(110)
 
     buttons.accepted.connect(dlg.accept)
@@ -88,7 +88,7 @@ def choice_dialog(
 
     for choice in choices:
         btn = QPushButton(choice)
-        btn.setFixedHeight(36)
+        btn.setFixedHeight(40)
         btn.setMinimumWidth(110)
 
         def _make_handler(c=choice):
@@ -101,7 +101,7 @@ def choice_dialog(
         btn_row.addWidget(btn)
 
     cancel_btn = QPushButton("Cancel")
-    cancel_btn.setFixedHeight(36)
+    cancel_btn.setFixedHeight(40)
     cancel_btn.setMinimumWidth(110)
     cancel_btn.clicked.connect(dlg.reject)
     btn_row.addWidget(cancel_btn)
@@ -136,15 +136,15 @@ def text_input_dialog(
     edit = QLineEdit()
     edit.setText(text)
     edit.selectAll()
-    edit.setMinimumHeight(38)
+    edit.setMinimumHeight(40)
     layout.addWidget(edit)
 
     buttons = QDialogButtonBox()
     btn_ok = buttons.addButton("OK", QDialogButtonBox.AcceptRole)
     btn_cancel = buttons.addButton("Cancel", QDialogButtonBox.RejectRole)
 
-    btn_ok.setFixedHeight(36)
-    btn_cancel.setFixedHeight(36)
+    btn_ok.setFixedHeight(40)
+    btn_cancel.setFixedHeight(40)
     btn_ok.setMinimumWidth(110)
     btn_cancel.setMinimumWidth(110)
 
@@ -188,8 +188,8 @@ def multiline_input_dialog(
     btn_ok = buttons.addButton("OK", QDialogButtonBox.AcceptRole)
     btn_cancel = buttons.addButton("Cancel", QDialogButtonBox.RejectRole)
 
-    btn_ok.setFixedHeight(36)
-    btn_cancel.setFixedHeight(36)
+    btn_ok.setFixedHeight(40)
+    btn_cancel.setFixedHeight(40)
     btn_ok.setMinimumWidth(110)
     btn_cancel.setMinimumWidth(110)
 
@@ -226,15 +226,15 @@ def item_choice_dialog(
     combo = QComboBox()
     combo.addItems(items)
     combo.setCurrentIndex(max(0, min(current_index, len(items) - 1)))
-    combo.setMinimumHeight(38)
+    combo.setMinimumHeight(40)
     layout.addWidget(combo)
 
     buttons = QDialogButtonBox()
     btn_ok = buttons.addButton("OK", QDialogButtonBox.AcceptRole)
     btn_cancel = buttons.addButton("Cancel", QDialogButtonBox.RejectRole)
 
-    btn_ok.setFixedHeight(36)
-    btn_cancel.setFixedHeight(36)
+    btn_ok.setFixedHeight(40)
+    btn_cancel.setFixedHeight(40)
     btn_ok.setMinimumWidth(110)
     btn_cancel.setMinimumWidth(110)
 
@@ -288,7 +288,7 @@ def project_details_dialog(
 
     edit_name = QLineEdit()
     edit_name.setText(getattr(project, "name", "") or "")
-    edit_name.setMinimumHeight(36)
+    edit_name.setMinimumHeight(40)
     form.addRow("Project name:", edit_name)
 
     edit_desc = QPlainTextEdit()
@@ -300,10 +300,10 @@ def project_details_dialog(
     edit_parent = QLineEdit()
     edit_parent.setText(parent_folder or "")
     edit_parent.setPlaceholderText("Required parent folder for ViaNyquist workspace")
-    edit_parent.setMinimumHeight(36)
+    edit_parent.setMinimumHeight(40)
     btn_browse = QPushButton("Browse...")
     btn_browse.setMinimumWidth(110)
-    btn_browse.setFixedHeight(36)
+    btn_browse.setFixedHeight(40)
     workspace_row.addWidget(edit_parent, 1)
     workspace_row.addWidget(btn_browse)
     form.addRow("Workspace parent:", workspace_row)
@@ -318,7 +318,7 @@ def project_details_dialog(
         edit = QLineEdit()
         edit.setText(getattr(project, attr or key, "") or "")
         edit.setPlaceholderText(placeholder)
-        edit.setMinimumHeight(36)
+        edit.setMinimumHeight(40)
         fields[key] = edit
         form.addRow(label, edit)
 
@@ -354,8 +354,8 @@ def project_details_dialog(
     buttons = QDialogButtonBox()
     btn_ok = buttons.addButton("OK", QDialogButtonBox.AcceptRole)
     btn_cancel = buttons.addButton("Cancel", QDialogButtonBox.RejectRole)
-    btn_ok.setFixedHeight(36)
-    btn_cancel.setFixedHeight(36)
+    btn_ok.setFixedHeight(40)
+    btn_cancel.setFixedHeight(40)
     btn_ok.setMinimumWidth(110)
     btn_cancel.setMinimumWidth(110)
 
@@ -434,8 +434,8 @@ def confirm_dialog(
     btn_ok = buttons.addButton(ok_text, QDialogButtonBox.AcceptRole)
     btn_cancel = buttons.addButton(cancel_text, QDialogButtonBox.RejectRole)
 
-    btn_ok.setFixedHeight(36)
-    btn_cancel.setFixedHeight(36)
+    btn_ok.setFixedHeight(40)
+    btn_cancel.setFixedHeight(40)
     btn_ok.setMinimumWidth(110)
     btn_cancel.setMinimumWidth(110)
 
