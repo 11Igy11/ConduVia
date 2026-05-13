@@ -342,9 +342,12 @@ def build_activity_profile_context(
         lines.append(f"- Total volume: {behavior.get('total_bytes_label') or human_bytes(behavior.get('total_bytes', 0), precision=2)}")
         dataset_info = behavior.get("project_dataset_info") or {}
         if dataset_info:
+            loaded_files = dataset_info.get("loaded_json_file_count", 0)
+            file_count = dataset_info.get("json_file_count", 0)
             lines.append(
-                "- Project JSON sources included: "
-                f"{dataset_info.get('loaded_source_count', 0)} / {dataset_info.get('source_count', 0)}; "
+                "- Project JSON files included: "
+                f"{loaded_files} / {file_count}; "
+                f"saved sources {dataset_info.get('loaded_source_count', 0)} / {dataset_info.get('source_count', 0)}; "
                 f"deduped paths {dataset_info.get('deduped_path_count', 0)}; "
                 f"missing/error paths {len(dataset_info.get('missing_rows') or [])}"
             )

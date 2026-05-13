@@ -40,11 +40,15 @@ def get_workspace_subfolder(base_folder: str, name: str) -> Path | None:
     return Path(folder) / name
 
 
-def workspace_export_path(base_folder: str, default_name: str) -> Path:
+def workspace_export_path(base_folder: str, default_name: str, category: str = "") -> Path:
     name = Path((default_name or "").strip() or "export.html").name
     exports_dir = get_workspace_subfolder(base_folder, "exports")
     if exports_dir is None:
         return Path(name)
+
+    category = re.sub(r"[^A-Za-z0-9_.-]+", "_", (category or "").strip()).strip("._")
+    if category:
+        exports_dir = exports_dir / category
 
     exports_dir.mkdir(parents=True, exist_ok=True)
     return exports_dir / name
@@ -122,6 +126,7 @@ def write_project_workspace_manifest(
         "- datasets/pcap_sources.txt lists saved PCAP source references.",
         "- findings/findings.txt lists saved finding references and notes.",
         "- notes/project_notes.txt is maintained from ViaNyquist Notes.",
+        "- exports/json/ and exports/pcap/ contain default JSON and PCAP exports.",
         "- reports/activity_profile.txt contains the current Activity Profile snapshot.",
         "- reports/activity_log.txt contains the current project activity log.",
         "- reports/case_snapshot.txt contains a compact beta case folder summary.",

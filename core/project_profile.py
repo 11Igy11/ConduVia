@@ -13,6 +13,7 @@ from core.db import (
     list_recent_datasets,
 )
 from core.formatters import human_bytes
+from core.project_datasets import list_project_json_dataset_files
 from core.project_identity import project_identifiers_text, subject_display_label, target_display_label
 
 
@@ -41,7 +42,12 @@ def build_project_activity_profile(
             "total_pcap_bytes_label": human_bytes(0, precision=2),
         }
 
-    datasets = list_recent_datasets(project_id, limit=1000, db_path=db_path)
+    dataset_sources = list_recent_datasets(project_id, limit=1000, db_path=db_path)
+    dataset_files = [
+        row for row in list_project_json_dataset_files(project_id, limit=1000, db_path=db_path)
+        if row.get("status") == "Available"
+    ]
+    dataset_count = len(dataset_files)
     pcaps = list_pcap_sources(project_id, limit=1000, db_path=db_path)
     findings = list_findings(project_id, limit=1000, db_path=db_path)
     activity = list_activity(project_id, limit=200, db_path=db_path)
@@ -60,7 +66,7 @@ def build_project_activity_profile(
         f"- Case subject: {subject_display_label(project)}",
         f"- Known identifiers: {project_identifiers_text(project)}",
         f"- Target fallback: {target_display_label(project)}",
-        f"- JSON datasets: {len(datasets)}",
+        f"- JSON datasets: {dataset_count}",
         f"- PCAP sources: {len(pcaps)}",
         f"- Findings: {len(findings)}",
     ]
@@ -74,8 +80,10 @@ def build_project_activity_profile(
     else:
         summary_lines.append("- PCAP capture range: no PCAP sources saved yet")
 
-    if datasets:
-        summary_lines.append(f"- Most recent dataset: {datasets[0]}")
+    if dataset_files:
+        summary_lines.append(f"- Most recent dataset: {dataset_files[0].get('path')}")
+    elif dataset_sources:
+        summary_lines.append(f"- Most recent dataset source: {dataset_sources[0]}")
     else:
         summary_lines.append("- Most recent dataset: none")
 
@@ -87,7 +95,7 @@ def build_project_activity_profile(
         timeline_lines.append(f"- {created}: {_event_label(event_type)}{(': ' + message) if message else ''}")
 
     recommendation_lines = _recommendations(
-        dataset_count=len(datasets),
+        dataset_count=dataset_count,
         pcap_count=len(pcaps),
         finding_count=len(findings),
         pcap_ips=pcap_ips,
@@ -98,17 +106,17 @@ def build_project_activity_profile(
         "timeline_lines": timeline_lines,
         "recommendation_lines": recommendation_lines,
         "metrics": [
-            {"label": "JSON Datasets", "value": len(datasets), "detail": "loaded"},
+            {"label": "JSON Datasets", "value": dataset_count, "detail": "loaded"},
             {"label": "PCAP Sources", "value": len(pcaps), "detail": "saved"},
             {"label": "Findings", "value": len(findings), "detail": "saved"},
             {"label": "Device IPs", "value": len(pcap_ips), "detail": "from PCAP"},
         ],
-        "dataset_count": len(datasets),
+        "dataset_count": dataset_count,
         "pcap_count": len(pcaps),
         "finding_count": len(findings),
         "pcap_device_ips": dict(pcap_ips),
         "evidence_counts": [
-            {"label": "JSON Datasets", "count": len(datasets)},
+            {"label": "JSON Datasets", "count": dataset_count},
             {"label": "PCAP Sources", "count": len(pcaps)},
             {"label": "Findings", "count": len(findings)},
         ],

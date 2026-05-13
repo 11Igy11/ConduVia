@@ -102,15 +102,56 @@ QLabel#ProfileCountBadge {
     font-weight: 700;
 }
 
+QLabel#RegistryStrongTitle {
+    color: #f8fafc;
+    font-size: 14px;
+    font-weight: 900;
+}
+
+QLabel#RegistryMetricValue {
+    color: #f8fafc;
+    font-size: 22px;
+    font-weight: 900;
+}
+
+QLabel#RegistryDeviationLabel {
+    color: #e5e7eb;
+    font-weight: 700;
+}
+
+QLabel#RegistryBodyText {
+    color: #cbd5e1;
+}
+
+QLabel#RegistrySmallTitle {
+    color: #cbd5e1;
+    font-size: 12px;
+    font-weight: 700;
+}
+
 QProgressBar {
     background: #1f2937;
     border: 1px solid #334155;
     border-radius: 6px;
 }
 
+QProgressBar#RegistryDeviationBar {
+    border: 1px solid #475569;
+    border-radius: 9px;
+    background: #1f2937;
+    text-align: center;
+    font-weight: 700;
+    color: #e5e7eb;
+}
+
 QProgressBar::chunk {
     background: #3b82f6;
     border-radius: 5px;
+}
+
+QProgressBar#RegistryDeviationBar::chunk {
+    background: #3b82f6;
+    border-radius: 9px;
 }
 
 /* =========================
@@ -598,6 +639,61 @@ QPushButton#DangerButton:hover {
 QPushButton#DangerButton:pressed {
     background: #991b1b;
     border: 1px solid #991b1b;
+}
+
+#NotesToolbar {
+    background: #223149;
+    border: 1px solid #415372;
+    border-radius: 10px;
+}
+
+#NotesEditorPanel {
+    background: #202c40;
+    border: 1px solid #3d4d68;
+    border-radius: 12px;
+}
+
+#NotesEditorPanel QComboBox,
+#NotesEditorPanel QSpinBox {
+    min-height: 24px;
+    padding: 4px 8px;
+    border-radius: 8px;
+}
+
+#NotesEditorPanel QSpinBox::up-button,
+#NotesEditorPanel QSpinBox::down-button {
+    width: 30px;
+}
+
+QLabel#NotesPanelLabel {
+    color: #93a4bd;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0px;
+    padding-top: 4px;
+}
+
+QPushButton#NotesToolButton {
+    min-width: 24px;
+    min-height: 22px;
+    padding: 2px 6px;
+    border-radius: 8px;
+    font-weight: 600;
+}
+
+QPushButton#NotesToolButton:checked {
+    background: #3b82f6;
+    border-color: #60a5fa;
+    color: #ffffff;
+}
+
+QPushButton#NotesColorButton {
+    min-width: 24px;
+    min-height: 22px;
+    padding: 2px 6px;
+    border-radius: 8px;
+    font-weight: 800;
+    color: #ef4444;
 }
 
 QDialog QLabel {

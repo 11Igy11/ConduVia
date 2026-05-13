@@ -18,6 +18,7 @@ from core.db import (
 )
 from core.formatters import format_duration_compact_ms, format_pcap_datetime, human_bytes
 from core.project_identity import project_identifiers_text, subject_display_label
+from core.project_datasets import list_project_json_dataset_files
 from core.project_profile import build_project_activity_profile, format_project_activity_profile
 from core.workspace import (
     ensure_workspace_structure,
@@ -404,7 +405,11 @@ class ProjectsUIController:
         if not project or not (project.base_folder or "").strip():
             return
 
-        json_datasets = list_recent_datasets(project_id, limit=500)
+        json_rows = [
+            row for row in list_project_json_dataset_files(project_id, limit=500)
+            if row.get("status") == "Available"
+        ]
+        json_datasets = [str(row.get("path") or "") for row in json_rows if row.get("path")]
         pcap_sources = []
         for source in list_pcap_sources(project_id, limit=500):
             pieces = [source.file_name or Path(source.file_path).name]
@@ -527,28 +532,7 @@ class ProjectsUIController:
         return f"{ip}:{port}" if port else ip
 
     def refresh_recent_datasets(self, project_id: int):
-        paths = list_recent_datasets(project_id, limit=15)
-        self.app.project_recent_json_rows = []
-
-        for fp in paths:
-            p = Path(str(fp))
-
-            if p.is_file():
-                status = "Available"
-                kind = "JSON file"
-            elif p.is_dir():
-                status = "Available"
-                kind = "Folder"
-            else:
-                status = "Missing"
-                kind = "Path"
-
-            self.app.project_recent_json_rows.append({
-                "status": status,
-                "name": p.name or str(fp),
-                "kind": kind,
-                "path": str(fp),
-            })
+        self.app.project_recent_json_rows = list_project_json_dataset_files(project_id, limit=500)[:100]
 
         pcap_sources = list_pcap_sources(project_id, limit=500)
         self.app.project_recent_pcap_rows = []
@@ -583,14 +567,16 @@ class ProjectsUIController:
         self._refresh_project_launcher_cards()
 
     def _refresh_project_launcher_cards(self) -> None:
-        json_count = len(getattr(self.app, "project_recent_json_rows", []) or [])
+        json_rows = getattr(self.app, "project_recent_json_rows", []) or []
+        json_count = sum(1 for row in json_rows if row.get("status") == "Available")
         pcap_count = len(getattr(self.app, "project_recent_pcap_rows", []) or [])
         activity_count = len(getattr(self.app, "project_activity_rows", []) or [])
 
         if hasattr(self.app, "lbl_recent_json_count"):
             self.app.lbl_recent_json_count.setText(f"{json_count:,} JSON datasets")
             if json_count:
-                newest = self._short_text(self.app.project_recent_json_rows[0].get("name") or "-")
+                newest_row = next((row for row in json_rows if row.get("status") == "Available"), json_rows[0])
+                newest = self._short_text(newest_row.get("name") or "-")
                 self.app.lbl_recent_json_detail.setText(f"Most recent: {newest}")
             else:
                 self.app.lbl_recent_json_detail.setText("No JSON datasets saved for this project.")

@@ -31,6 +31,17 @@ def human_bytes(value: Any, *, precision: int = 1) -> str:
     return f"{size:.{precision}f} {units[idx]}"
 
 
+def bytes_mb_or_b(value: Any, *, precision: int = 2) -> str:
+    try:
+        size = float(value or 0)
+    except Exception:
+        size = 0.0
+
+    if size >= 1024 * 1024:
+        return f"{size / (1024 * 1024):.{precision}f} MB"
+    return f"{int(size):,} B"
+
+
 def format_flow_date(value: Any) -> str:
     dt = parse_timestamp(value)
     return "" if dt is None else dt.strftime("%d.%m.%Y")

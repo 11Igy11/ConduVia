@@ -9,6 +9,7 @@ from typing import Any
 from core.db import Project
 from core.exporters.case_context import build_case_context, context_cards_html
 from core.formatters import (
+    bytes_mb_or_b,
     format_duration_hms_ms,
     format_flow_datetime,
     format_short_date,
@@ -352,6 +353,8 @@ def export_registry_html(
 
         if key == "top_proto":
             items = [(format_ip_proto(k), v) for k, v in items]
+        if key in ("top_bytes_src", "top_bytes_dst", "top_bytes_app"):
+            items = [(k, bytes_mb_or_b(v, precision=2)) for k, v in items]
 
         insight_cards.append(_simple_table(title, items, hdrs[0], hdrs[1]))
 

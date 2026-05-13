@@ -309,7 +309,7 @@ class ActivityProfilePage(QWidget):
         default_name = f"{self.project_name or 'activity-profile'}-activity-profile.html"
         project = self._current_project()
         default_path = (
-            str(workspace_export_path(project.base_folder, default_name))
+            str(workspace_export_path(project.base_folder, default_name, category="profile"))
             if project and project.base_folder
             else default_name
         )
@@ -474,11 +474,19 @@ class ActivityProfilePage(QWidget):
         lines: list[str] = []
         info = self._project_dataset_info or {}
         if info:
+            loaded_files = int(info.get("loaded_json_file_count") or 0)
+            file_count = int(info.get("json_file_count") or 0)
             lines.append(
-                "Project JSON sources included: "
-                f"{int(info.get('loaded_source_count') or 0)} / {int(info.get('source_count') or 0)}; "
+                "Project JSON files included: "
+                f"{loaded_files} / {file_count}; "
                 f"flow records: {int(info.get('flow_count') or 0):,}."
             )
+            source_count = int(info.get("source_count") or 0)
+            if source_count != file_count:
+                lines.append(
+                    "Saved dataset sources: "
+                    f"{int(info.get('loaded_source_count') or 0)} / {source_count}."
+                )
             missing = int(len(info.get("missing_rows") or []))
             if missing:
                 lines.append(f"Dataset paths needing review: {missing}.")

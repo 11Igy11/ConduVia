@@ -7,7 +7,7 @@ from PySide6.QtWidgets import QFileDialog
 
 from core.analyzer import top_applications, top_dst_ips, top_protocols, top_src_ips
 from core.db import add_dataset_load, get_project, list_recent_datasets, set_project_target
-from core.loader import load_folder, load_json_file
+from core.loader import list_json_files, load_folder, load_json_file
 from core.parser import extract_dataset_meta
 from core.project_identity import (
     identifier_values_match,
@@ -142,8 +142,34 @@ class DatasetController(QObject):
             folder = QFileDialog.getExistingDirectory(self.app, "Select dataset folder")
             if not folder:
                 return None
-            self.load_dataset_path(folder)
-            return "json"
+            json_files = self._json_files_in_folder(folder)
+            pcap_files = self._pcap_files_in_folder(folder)
+
+            opened = None
+            if json_files:
+                self.load_dataset_path(folder)
+                opened = "json"
+
+            if pcap_files and hasattr(self.app, "pcap_page"):
+                self.app.go_page(self.app.IDX_PCAP, self.app._nav_pcap)
+                self.app.pcap_page.load_pcap_queue([str(path) for path in pcap_files])
+                opened = "pcap"
+                if len(pcap_files) > 1:
+                    self.app._message_dialog(
+                        "PCAP folder",
+                        f"{len(pcap_files)} PCAP files found in the folder.",
+                        "ViaNyquist opened the first PCAP file. Use Open next PCAP to review the remaining files one by one.",
+                        width=560,
+                    )
+
+            if opened is None:
+                self.app._message_dialog(
+                    "Dataset folder",
+                    "No JSON or PCAP files were found in the selected folder.",
+                    folder,
+                    width=520,
+                )
+            return opened
 
         if choice == "JSON file":
             file_path, _ = QFileDialog.getOpenFileName(
@@ -172,6 +198,24 @@ class DatasetController(QObject):
             return "pcap"
 
         return None
+
+    def _json_files_in_folder(self, folder: str) -> list[Path]:
+        try:
+            return list_json_files(folder)
+        except Exception:
+            return []
+
+    def _pcap_files_in_folder(self, folder: str) -> list[Path]:
+        path = Path(folder)
+        if not path.exists() or not path.is_dir():
+            return []
+        return sorted(
+            [
+                item for item in path.iterdir()
+                if item.is_file() and item.suffix.lower() in {".pcap", ".pcapng", ".cap"}
+            ],
+            key=lambda item: item.name.casefold(),
+        )
 
     def render_summary(self):
         flows = self.app.flow_controller.get_all()

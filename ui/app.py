@@ -11,7 +11,7 @@ import html
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable
-from core.workspace import write_project_notes_backup
+from core.workspace import workspace_export_path
 from ui.controllers.flow_controller import FlowController
 from ui.controllers.findings_controller import FindingsController
 from ui.controllers.search_controller import SearchController
@@ -21,7 +21,15 @@ from ui.controllers.explore_ui_controller import ExploreUIController
 
 from ui.explore_models import FlowTableModel, NumericSortProxy
 from ui.explore_widgets import AITextWorker, CopyableTableView, FlowTableView
+from ui.ai_output import AIOutputState, build_ai_output_state, make_ai_note_block, render_ai_output_hub
 from ui.findings_page import FindingsPage
+from ui.notes_actions import (
+    export_notes_word as export_notes_word_action,
+    load_project_notes,
+    save_project_notes,
+)
+from ui.notes_charts import available_notes_charts, render_notes_chart
+from ui.notes_page import NotesPage
 from ui.controllers.notes_controller import NotesController
 from ui.dialogs import (
     message_dialog,
@@ -162,6 +170,37 @@ QLabel#ProfileCountBadge {
     color: #ffffff;
 }
 
+QLabel#RegistryStrongTitle {
+    background: transparent;
+    color: #0f172a;
+}
+
+QLabel#RegistryMetricValue {
+    background: transparent;
+    color: #0f172a;
+}
+
+QLabel#RegistryDeviationLabel {
+    background: transparent;
+    color: #334155;
+}
+
+QLabel#RegistryBodyText,
+QLabel#RegistrySmallTitle {
+    background: transparent;
+    color: #475569;
+}
+
+QProgressBar#RegistryDeviationBar {
+    background: #e2e8f0;
+    border: 1px solid #cbd5e1;
+    color: #0f172a;
+}
+
+QProgressBar#RegistryDeviationBar::chunk {
+    background: #3b82f6;
+}
+
 QLineEdit,
 QTextEdit,
 QPlainTextEdit,
@@ -265,6 +304,154 @@ QProgressBar {
 
 QProgressBar::chunk {
     background: #3b82f6;
+}
+
+QScrollArea,
+QScrollArea QWidget {
+    background: transparent;
+}
+
+QFrame#FlowToolbarCard,
+QGroupBox#SummaryCard,
+QGroupBox#FlowDetailsCard,
+QFrame#NotesEditorPanel,
+QFrame#ListingHeaderCard {
+    background: #ffffff;
+    border: 1px solid #cbd5e1;
+    color: #111827;
+}
+
+QGroupBox::title,
+QGroupBox#SummaryCard::title,
+QGroupBox#FlowDetailsCard::title {
+    background: #ffffff;
+    color: #0f172a;
+}
+
+QLabel#FlowFieldValue {
+    background: #f8fafc;
+    border: 1px solid #cbd5e1;
+    color: #111827;
+}
+
+QLabel#Signature {
+    color: #64748b;
+}
+
+QPushButton:disabled {
+    background: #f1f5f9;
+    border-color: #d7dee9;
+    color: #94a3b8;
+}
+
+QPushButton#NotesToolButton,
+QPushButton#NotesColorButton {
+    background: #ffffff;
+    border: 1px solid #cbd5e1;
+    color: #111827;
+}
+
+QPushButton#NotesColorButton {
+    color: #ef4444;
+}
+
+QPushButton#NotesToolButton:hover,
+QPushButton#NotesColorButton:hover {
+    background: #e2e8f0;
+}
+
+QPushButton#NotesToolButton:checked {
+    background: #3b82f6;
+    border-color: #2563eb;
+    color: #ffffff;
+}
+
+QLabel#NotesPanelLabel {
+    color: #475569;
+}
+
+QSpinBox {
+    background: #ffffff;
+    color: #111827;
+    border: 1px solid #cbd5e1;
+    border-radius: 10px;
+    padding: 6px 8px;
+    selection-background-color: #3b82f6;
+    selection-color: #ffffff;
+}
+
+QSpinBox:focus {
+    border-color: #2563eb;
+}
+
+QCheckBox {
+    color: #111827;
+}
+
+QCheckBox::indicator {
+    border: 1px solid #94a3b8;
+    background: #ffffff;
+}
+
+QCheckBox::indicator:hover {
+    border-color: #2563eb;
+    background: #eff6ff;
+}
+
+QCheckBox::indicator:checked {
+    border-color: #2563eb;
+    background: #3b82f6;
+}
+
+QTableView::item {
+    color: #111827;
+}
+
+QTableView::item:selected {
+    background: #3b82f6;
+    color: #ffffff;
+}
+
+QListWidget::item {
+    color: #111827;
+}
+
+QListWidget::item:hover {
+    background: #e2e8f0;
+}
+
+QListWidget::item:selected {
+    background: #3b82f6;
+    color: #ffffff;
+}
+
+QMenu,
+QDialog,
+QMessageBox,
+QInputDialog,
+QFileDialog {
+    background: #f8fafc;
+    color: #111827;
+}
+
+QMenu::item:selected {
+    background: #3b82f6;
+    color: #ffffff;
+}
+
+QDialog QLabel,
+QMessageBox QLabel,
+QInputDialog QLabel {
+    background: transparent;
+    color: #111827;
+}
+
+QDialog QLineEdit,
+QDialog QPlainTextEdit,
+QDialog QComboBox {
+    background: #ffffff;
+    border-color: #cbd5e1;
+    color: #111827;
 }
 """
 
@@ -628,9 +815,7 @@ class App(QWidget):
         self._ai_thread: QThread | None = None
         self._ai_worker: AITextWorker | None = None
         self._ai_mode: str | None = None
-        self._last_ai_title = "No AI output yet"
-        self._last_ai_source = ""
-        self._last_ai_text = ""
+        self._ai_output_state = AIOutputState()
 
     def _build_osint_page(self) -> QWidget:
         page = QWidget()
@@ -1382,14 +1567,11 @@ class App(QWidget):
 
         self.tabs.addTab(self.findings_page, "Findings")
 
-        # Notes tab
-        notes_tab = QWidget()
-        notes_root = QVBoxLayout(notes_tab)
-
-        notes_root.addWidget(QLabel("Project notes"))
-        self.txt_notes = QTextEdit()
-        self.txt_notes.setPlaceholderText("Write case notes here… (autosave)")
-        notes_root.addWidget(self.txt_notes, 1)
+        # Notes page
+        self.notes_page = NotesPage(self)
+        self.txt_notes = self.notes_page.editor
+        self.notes_page.btn_insert_chart.clicked.connect(self.insert_notes_chart)
+        self.notes_page.btn_export_word.clicked.connect(self.export_notes_word)
 
         ai_page = QWidget()
         ai_root = QVBoxLayout(ai_page)
@@ -1437,7 +1619,7 @@ class App(QWidget):
         self.activity_profile_page = ActivityProfilePage(self)
         self.pages.addWidget(self.activity_profile_page)
 
-        self.pages.addWidget(notes_tab)
+        self.pages.addWidget(self.notes_page)
         self.pages.addWidget(ai_page)
 
         json_page = QWidget()
@@ -2089,36 +2271,21 @@ class App(QWidget):
             self.refresh_activity_ui()
 
     def _make_ai_note_block(self, text: str) -> str:
-        ts = datetime.now().strftime("%d.%m.%Y. %H:%M:%S")
-        body = (text or "").strip()
-
-        if not body:
-            return ""
-
-        return (
-            f"[AI note added: {ts}]\n"
-            f"{body}\n"
-            f"{'-' * 60}\n"
-        )
+        return make_ai_note_block(text)
 
     def publish_ai_output(self, source: str, title: str, text: str) -> None:
-        self._last_ai_source = (source or "AI").strip()
-        self._last_ai_title = (title or "AI Summary").strip()
-        self._last_ai_text = text or ""
-        if hasattr(self, "lbl_ai_hub_title"):
-            self.lbl_ai_hub_title.setText(self._last_ai_title)
-        if hasattr(self, "lbl_ai_hub_context"):
-            context = f"Source: {self._last_ai_source}"
-            if self.current_project_name:
-                context += f" | Project: {self.current_project_name}"
-            self.lbl_ai_hub_context.setText(context)
-        if hasattr(self, "txt_ai_hub"):
-            self.txt_ai_hub.setPlainText(self._last_ai_text)
-        if hasattr(self, "btn_ai_hub_add_notes"):
-            self.btn_ai_hub_add_notes.setEnabled(bool(self._last_ai_text.strip()))
+        self._ai_output_state = build_ai_output_state(source, title, text)
+        render_ai_output_hub(
+            state=self._ai_output_state,
+            project_name=self.current_project_name,
+            title_label=getattr(self, "lbl_ai_hub_title", None),
+            context_label=getattr(self, "lbl_ai_hub_context", None),
+            text_edit=getattr(self, "txt_ai_hub", None),
+            add_notes_button=getattr(self, "btn_ai_hub_add_notes", None),
+        )
 
     def add_ai_hub_to_notes(self):
-        text = (self._last_ai_text or "").strip()
+        text = (self._ai_output_state.text or "").strip()
         if not text:
             self._message_dialog("Notes", "There is no AI-generated text to add.", width=440)
             return
@@ -2133,16 +2300,7 @@ class App(QWidget):
         if not block:
             return False
 
-        existing = self.txt_notes.toPlainText() or ""
-
-        if existing.strip():
-            if not existing.endswith("\n"):
-                existing += "\n"
-            new_text = existing + "\n" + block
-        else:
-            new_text = block
-
-        self.txt_notes.setPlainText(new_text)
+        self.notes_page.append_block(block)
         self._notes_dirty = True
         self._flush_notes()
         self.go_to_notes()
@@ -2161,22 +2319,95 @@ class App(QWidget):
         self.txt_notes.blockSignals(True)
 
         if self.current_project_id is None:
-            self.txt_notes.setPlainText("")
-            self.txt_notes.setPlaceholderText("Select an active project to use Notes.")
-            self.txt_notes.setEnabled(False)
+            load_project_notes(
+                project_id=None,
+                notes_controller=self.notes_controller,
+                notes_page=self.notes_page,
+            )
             self.project_activity_rows = []
             if hasattr(self, "projects_ui_controller"):
                 self.projects_ui_controller._refresh_project_launcher_cards()
             self.txt_notes.blockSignals(False)
             return
 
-        self.txt_notes.setEnabled(True)
-        self.txt_notes.setPlaceholderText("Write case notes here… (autosave)")
-        notes = self.notes_controller.load_notes(self.current_project_id)
-        self.txt_notes.setPlainText(notes)
+        load_project_notes(
+            project_id=self.current_project_id,
+            notes_controller=self.notes_controller,
+            notes_page=self.notes_page,
+        )
         self.txt_notes.blockSignals(False)
 
         self.refresh_activity_ui()
+
+    def insert_notes_chart(self):
+        if self.current_project_id is None:
+            self._message_dialog("Notes chart", "Open an active project first.", width=420)
+            return
+
+        self.refresh_activity_profile_ui()
+        profile = getattr(self.activity_profile_page, "profile", None) if hasattr(self, "activity_profile_page") else None
+        behavior = (profile or {}).get("behavior_profile") or {}
+
+        pcap_summary = getattr(getattr(self, "pcap_page", None), "summary", None)
+        charts = available_notes_charts(profile or {}, behavior, pcap_summary)
+        choices = [chart["name"] for chart in charts]
+        choice, ok = self._item_choice_dialog(
+            "Insert chart",
+            "Choose a chart to insert into Notes:",
+            choices,
+            width=460,
+        )
+        if not ok:
+            return
+
+        chart = next((item for item in charts if item["name"] == choice), None)
+        if not chart:
+            return
+        rows = list(chart.get("rows") or [])
+
+        if not rows:
+            self._message_dialog(
+                "Notes chart",
+                "No chart data is available yet.",
+                str(chart.get("empty_text") or "Save datasets/PCAP captures to the active project, then try again."),
+                width=520,
+            )
+            return
+
+        project = get_project(self.current_project_id)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        default_name = f"{chart['filename']}-{timestamp}.png"
+        chart_path = (
+            workspace_export_path(project.base_folder, default_name, category="notes")
+            if project and project.base_folder
+            else Path(default_name)
+        )
+
+        try:
+            render_notes_chart(chart_path, chart, rows)
+            self.notes_page.insert_image_file(str(chart_path))
+            self._notes_dirty = True
+            self._flush_notes()
+        except Exception as exc:
+            self._message_dialog("Notes chart", "Failed to insert chart.", str(exc), width=520)
+
+    def export_notes_word(self):
+        result = export_notes_word_action(
+            self,
+            project_id=self.current_project_id,
+            project_name=self.current_project_name,
+            notes_page=self.notes_page,
+        )
+        if result.cancelled:
+            return
+        if not result.exported:
+            if self.current_project_id is None:
+                self._message_dialog("Notes export", result.error, width=420)
+                return
+            self._message_dialog("Notes export", "Failed to export notes.", result.error, width=520)
+            return
+
+        self._message_dialog("Notes export", "Notes exported to Word document.", result.file_path, width=560)
 
     def refresh_activity_ui_for_project(self, project_id: int | None):
         self.project_activity_rows = []
@@ -2222,27 +2453,17 @@ class App(QWidget):
         if not self._notes_dirty or self.current_project_id is None:
             return
 
-        text = self.txt_notes.toPlainText()
-
         try:
-            self.notes_controller.save_notes(
-                self.current_project_id,
-                text
+            saved = save_project_notes(
+                project_id=self.current_project_id,
+                notes_controller=self.notes_controller,
+                notes_page=self.notes_page,
             )
         except Exception:
             return
 
-        try:
-            project = get_project(self.current_project_id)
-            if project and project.base_folder:
-                write_project_notes_backup(
-                    project.base_folder,
-                    text
-                )
-        except Exception:
-            pass
-
-        self._notes_dirty = False
+        if saved:
+            self._notes_dirty = False
 
     def clear_dataset_context(self) -> None:
         # reset basic dataset state

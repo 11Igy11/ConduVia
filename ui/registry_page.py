@@ -3,7 +3,7 @@ from core.protocols import format_ip_proto
 import html
 from pathlib import Path
 from typing import Any
-from core.formatters import human_bytes, safe_int, format_short_date
+from core.formatters import bytes_mb_or_b, human_bytes, safe_int, format_short_date
 from core.timeutils import parse_flow_timestamp
 from core.exporters.registry_exporter import export_registry_html
 from core.db import get_app_settings, get_project
@@ -48,7 +48,7 @@ def _fmt_days_short(x: Any) -> str:
 
 def _day_activity_html(day_hist: dict[str, Any], day_bytes: dict[str, Any], *, top_n: int = 7) -> str:
     if not isinstance(day_hist, dict) or not day_hist:
-        return "<span style='color:#6b7280;'>—</span>"
+        return "<span>—</span>"
 
     items = []
     for day, count in day_hist.items():
@@ -76,26 +76,23 @@ def _day_activity_html(day_hist: dict[str, Any], day_bytes: dict[str, Any], *, t
 
         mb = float(total_bytes) / (1024.0 * 1024.0)
 
-        bg = "##273549" if i % 2 == 0 else "#2f3e55"
-
         rows.append(
-            "<tr style='background:" + bg + ";'>"
-            f"<td style='padding:7px 12px;border-top:1px solid #334155;color:#cbd5e1;'>{_esc(_fmt_dt_short(day))}</td>"
-            f"<td style='padding:7px 12px;border-top:1px solid #334155;color:#f8fafc;font-weight:700;text-align:right;'>{count}</td>"
-            f"<td style='padding:7px 12px;border-top:1px solid #334155;color:#cbd5e1;font-weight:600;text-align:right;'>{mb:.1f} MB</td>"
+            "<tr>"
+            f"<td style='padding:7px 12px;'>{_esc(_fmt_dt_short(day))}</td>"
+            f"<td style='padding:7px 12px;font-weight:700;text-align:right;'>{count}</td>"
+            f"<td style='padding:7px 12px;font-weight:600;text-align:right;'>{mb:.1f} MB</td>"
             "</tr>"
         )
 
     return (
             "<div style='margin-top:8px;max-width:520px;"
-            "border:1px solid #475569;border-radius:10px;overflow:hidden;"
-            "background:#273549;'>"
+            "border-radius:10px;overflow:hidden;'>"
             "<table style='width:100%;border-collapse:collapse;'>"
             "<thead>"
-            "<tr style='background:#1f2937;'>"
-            "<th style='padding:8px 12px;text-align:left;color:#94a3b8;font-size:11px;font-weight:700;'>Date</th>"
-            "<th style='padding:8px 12px;text-align:right;color:#94a3b8;font-size:11px;font-weight:700;'>Flows</th>"
-            "<th style='padding:8px 12px;text-align:right;color:#94a3b8;font-size:11px;font-weight:700;'>Bytes</th>"
+            "<tr>"
+            "<th style='padding:8px 12px;text-align:left;font-size:11px;font-weight:700;'>Date</th>"
+            "<th style='padding:8px 12px;text-align:right;font-size:11px;font-weight:700;'>Flows</th>"
+            "<th style='padding:8px 12px;text-align:right;font-size:11px;font-weight:700;'>Bytes</th>"
             "</tr>"
             "</thead>"
             "<tbody>"
@@ -107,7 +104,7 @@ def _day_activity_html(day_hist: dict[str, Any], day_bytes: dict[str, Any], *, t
 
 def _top_active_days_html(day_hist: dict[str, Any], day_bytes: dict[str, Any], *, top_n: int = 5) -> str:
     if not isinstance(day_hist, dict) or not day_hist:
-        return "<span style='color:#6b7280;'>—</span>"
+        return "<span>—</span>"
 
     items = []
     for day, count in day_hist.items():
@@ -132,26 +129,23 @@ def _top_active_days_html(day_hist: dict[str, Any], day_bytes: dict[str, Any], *
 
         mb = float(total_bytes) / (1024.0 * 1024.0)
 
-        bg = "#273549" if i % 2 == 0 else "#2f3e55"
-
         rows.append(
-            "<tr style='background:" + bg + ";'>"
-            f"<td style='padding:7px 12px;border-top:1px solid #334155;color:#cbd5e1;'>{_esc(_fmt_dt_short(day))}</td>"
-            f"<td style='padding:7px 12px;border-top:1px solid #334155;color:#f8fafc;font-weight:700;text-align:right;'>{count}</td>"
-            f"<td style='padding:7px 12px;border-top:1px solid #334155;color:#cbd5e1;font-weight:600;text-align:right;'>{mb:.1f} MB</td>"
+            "<tr>"
+            f"<td style='padding:7px 12px;'>{_esc(_fmt_dt_short(day))}</td>"
+            f"<td style='padding:7px 12px;font-weight:700;text-align:right;'>{count}</td>"
+            f"<td style='padding:7px 12px;font-weight:600;text-align:right;'>{mb:.1f} MB</td>"
             "</tr>"
         )
 
     return (
         "<div style='margin-top:8px;max-width:520px;"
-        "border:1px solid #475569;border-radius:10px;overflow:hidden;"
-        "background:#273549;'>"
+        "border-radius:10px;overflow:hidden;'>"
         "<table style='width:100%;border-collapse:collapse;'>"
         "<thead>"
-        "<tr style='background:#1f2937;'>"
-        "<th style='padding:8px 12px;text-align:left;color:#94a3b8;font-size:11px;font-weight:700;'>Date</th>"
-        "<th style='padding:8px 12px;text-align:right;color:#94a3b8;font-size:11px;font-weight:700;'>Flows</th>"
-        "<th style='padding:8px 12px;text-align:right;color:#94a3b8;font-size:11px;font-weight:700;'>Bytes</th>"
+        "<tr>"
+        "<th style='padding:8px 12px;text-align:left;font-size:11px;font-weight:700;'>Date</th>"
+        "<th style='padding:8px 12px;text-align:right;font-size:11px;font-weight:700;'>Flows</th>"
+        "<th style='padding:8px 12px;text-align:right;font-size:11px;font-weight:700;'>Bytes</th>"
         "</tr>"
         "</thead>"
         "<tbody>"
@@ -210,11 +204,11 @@ def _mini_hist_24_html(vals: list[int], *, height_px: int = 14) -> str:
     labels_row = """
     <table style='width:100%;border-collapse:collapse;margin-top:4px;' cellspacing='0' cellpadding='0'>
       <tr>
-        <td style='width:0%;font-size:11px;color:#94a3b8;'>00</td>
-        <td style='width:25%;font-size:11px;color:#94a3b8;text-align:center;'>06</td>
-        <td style='width:25%;font-size:11px;color:#94a3b8;text-align:center;'>12</td>
-        <td style='width:25%;font-size:11px;color:#94a3b8;text-align:center;'>18</td>
-        <td style='width:25%;font-size:11px;color:#94a3b8;text-align:right;'>23</td>
+        <td style='width:0%;font-size:11px;'>00</td>
+        <td style='width:25%;font-size:11px;text-align:center;'>06</td>
+        <td style='width:25%;font-size:11px;text-align:center;'>12</td>
+        <td style='width:25%;font-size:11px;text-align:center;'>18</td>
+        <td style='width:25%;font-size:11px;text-align:right;'>23</td>
       </tr>
     </table>
     """
@@ -788,7 +782,7 @@ class RegistryPage(QWidget):
 
         hdr2 = QHBoxLayout()
         self.lbl_analyst_title = QLabel("Analyst summary")
-        self.lbl_analyst_title.setStyleSheet("font-size:14px;font-weight:900;color:#f8fafc;")
+        self.lbl_analyst_title.setObjectName("RegistryStrongTitle")
         hdr2.addWidget(self.lbl_analyst_title)
         hdr2.addStretch()
         al.addLayout(hdr2)
@@ -796,7 +790,7 @@ class RegistryPage(QWidget):
         # Behavior deviation row: label + progress
         deviation_row = QHBoxLayout()
         self.lbl_deviation = QLabel("Behavior deviation: —")
-        self.lbl_deviation.setStyleSheet("color:#e5e7eb;font-weight:700;")
+        self.lbl_deviation.setObjectName("RegistryDeviationLabel")
         deviation_row.addWidget(self.lbl_deviation, 0)
 
         self.deviation_bar = QProgressBar()
@@ -805,20 +799,7 @@ class RegistryPage(QWidget):
         self.deviation_bar.setTextVisible(True)
         self.deviation_bar.setFormat("%p%")
         self.deviation_bar.setFixedHeight(18)
-        self.deviation_bar.setStyleSheet("""
-            QProgressBar {
-                border: 1px solid #475569;
-                border-radius: 9px;
-                background: #1f2937;
-                text-align: center;
-                font-weight: 700;
-                color: #e5e7eb;
-            }
-            QProgressBar::chunk {
-                background: #3b82f6;
-                border-radius: 9px;
-            }
-        """)
+        self.deviation_bar.setObjectName("RegistryDeviationBar")
         deviation_row.addWidget(self.deviation_bar, 1)
         al.addLayout(deviation_row)
 
@@ -826,27 +807,27 @@ class RegistryPage(QWidget):
         self.lbl_analyst_body = QLabel("")
         self.lbl_analyst_body.setTextFormat(Qt.RichText)
         self.lbl_analyst_body.setWordWrap(True)
-        self.lbl_analyst_body.setStyleSheet("color:#cbd5e1;")
+        self.lbl_analyst_body.setObjectName("RegistryBodyText")
         self.lbl_analyst_body.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
         al.addWidget(self.lbl_analyst_body)
 
         self.lbl_day_section = QLabel("")
         self.lbl_day_section.setTextFormat(Qt.RichText)
         self.lbl_day_section.setWordWrap(True)
-        self.lbl_day_section.setStyleSheet("color:#cbd5e1;")
+        self.lbl_day_section.setObjectName("RegistryBodyText")
         al.addWidget(self.lbl_day_section)
 
         self.lbl_activity_text = QLabel("")
         self.lbl_activity_text.setTextFormat(Qt.RichText)
         self.lbl_activity_text.setWordWrap(True)
-        self.lbl_activity_text.setStyleSheet("color:#cbd5e1;")
+        self.lbl_activity_text.setObjectName("RegistryBodyText")
         al.addWidget(self.lbl_activity_text)
         al.addSpacing(4)
 
         hist_hdr = QHBoxLayout()
 
         self.lbl_hist_title = QLabel("Activity by bytes")
-        self.lbl_hist_title.setStyleSheet("color:#cbd5e1;font-size:12px;font-weight:700;")
+        self.lbl_hist_title.setObjectName("RegistrySmallTitle")
         hist_hdr.addWidget(self.lbl_hist_title)
 
         hist_hdr.addStretch()
@@ -867,7 +848,7 @@ class RegistryPage(QWidget):
         self.lbl_dir_text = QLabel("")
         self.lbl_dir_text.setTextFormat(Qt.RichText)
         self.lbl_dir_text.setWordWrap(True)
-        self.lbl_dir_text.setStyleSheet("color:#cbd5e1;")
+        self.lbl_dir_text.setObjectName("RegistryBodyText")
         al.addWidget(self.lbl_dir_text)
 
         # OUT vs IN bar widget
@@ -885,7 +866,7 @@ class RegistryPage(QWidget):
 
         hdr = QHBoxLayout()
         lbl_ins = QLabel("Insights (Top 15)")
-        lbl_ins.setStyleSheet("font-size:14px;font-weight:900;color:#f8fafc;")
+        lbl_ins.setObjectName("RegistryStrongTitle")
         hdr.addWidget(lbl_ins)
         hdr.addStretch()
         il.addLayout(hdr)
@@ -936,14 +917,14 @@ class RegistryPage(QWidget):
         nl.setSpacing(6)
 
         lbl = QLabel("Note")
-        lbl.setStyleSheet("font-size:14px;font-weight:900;color:#f8fafc;")
+        lbl.setObjectName("RegistryStrongTitle")
         nl.addWidget(lbl)
 
         self.txt_note = QLabel(
             "Passive analysis only. Findings are indicative and based on metadata "
             "(IP, protocol, app, timing, volume)."
         )
-        self.txt_note.setStyleSheet("color:#cbd5e1;")
+        self.txt_note.setObjectName("RegistryBodyText")
         self.txt_note.setWordWrap(True)
         nl.addWidget(self.txt_note)
 
@@ -953,7 +934,7 @@ class RegistryPage(QWidget):
         # ---------------- Dataset content ----------------
         top = QHBoxLayout()
         lbl_full = QLabel("Full dataset")
-        lbl_full.setStyleSheet("font-size:14px;font-weight:900;color:#f8fafc;")
+        lbl_full.setObjectName("RegistryStrongTitle")
 
         self.lbl_full_hint = QLabel("")
         self.lbl_full_hint.setObjectName("Muted")
@@ -1009,10 +990,9 @@ class RegistryPage(QWidget):
 
         t = QLabel(title)
         t.setObjectName("Muted")
-        t.setStyleSheet("font-size:12px;")
 
         v = QLabel(value)
-        v.setStyleSheet("font-size:22px;font-weight:900;color:#f8fafc;")
+        v.setObjectName("RegistryMetricValue")
         v.setProperty("stat_value", True)
 
         l.addWidget(t)
@@ -1121,12 +1101,8 @@ class RegistryPage(QWidget):
             vv = _esc(value or "—")
             ll = _esc(label)
             return (
-                "<span style="
-                "'display:inline-block;margin:0 10px 8px 0;"
-                "padding:6px 10px;border-radius:999px;"
-                "background:#334155;border:1px solid #475569;"
-                "color:#cbd5e1;font-size:12px;'>"
-                f"<b style='color:#f8fafc;'>{ll}:</b> {vv}"
+                "<span style='display:inline-block;margin:0 10px 8px 0;font-size:12px;'>"
+                f"<b>{ll}:</b> {vv}"
                 "</span>"
             )
 
@@ -1207,7 +1183,7 @@ class RegistryPage(QWidget):
         dom_text = (
             f"<b>Dominant app:</b> {html.escape(str(dom_b.get('name','—')))} "
             f"({float(dom_b.get('share_pct',0.0)):.1f}% bytes) "
-            f"<span style='color:#94a3b8'>(count: {html.escape(str(dom_c.get('name','—')))}, "
+            f"<span>(count: {html.escape(str(dom_c.get('name','—')))}, "
             f"{float(dom_c.get('share_pct',0.0)):.1f}%)</span>"
         )
 
@@ -1339,11 +1315,11 @@ class RegistryPage(QWidget):
             "<table style='width:100%;border-collapse:collapse;' cellspacing='0' cellpadding='0'>"
             "<tr>"
             "<td style='width:50%;vertical-align:top;padding-right:8px;'>"
-            "<div style='font-weight:700;color:#f8fafc;margin-bottom:6px;'>Activity by day</div>"
+            "<div style='font-weight:700;margin-bottom:6px;'>Activity by day</div>"
             f"{recent_html}"
             "</td>"
             "<td style='width:50%;vertical-align:top;padding-left:8px;'>"
-            "<div style='font-weight:700;color:#f8fafc;margin-bottom:6px;'>Top active days</div>"
+            "<div style='font-weight:700;margin-bottom:6px;'>Top active days</div>"
             f"{top_html}"
             "</td>"
             "</tr>"
@@ -1468,6 +1444,8 @@ class RegistryPage(QWidget):
         rows = list(self._summary.get(key, []) or [])[:15]
         if key == "top_proto":
             rows = [(format_ip_proto(k), v) for (k, v) in rows]
+        if key in ("top_bytes_src", "top_bytes_dst", "top_bytes_app"):
+            rows = [(k, bytes_mb_or_b(v, precision=2)) for (k, v) in rows]
         self.pairs_model.set_rows(rows, headers=hdrs)
 
         # ergonomics
@@ -1501,7 +1479,7 @@ class RegistryPage(QWidget):
         default_name = "ViaNyquist_Registry_Report.html"
         project = self._current_project()
         default_path = (
-            str(workspace_export_path(project.base_folder, default_name))
+            str(workspace_export_path(project.base_folder, default_name, category="json"))
             if project and project.base_folder
             else str(self._folder / default_name)
         )

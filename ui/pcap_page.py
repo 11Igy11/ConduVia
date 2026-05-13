@@ -164,6 +164,7 @@ class PcapPage(QWidget):
         self._ai_thread: QThread | None = None
         self._ai_worker: AITextWorker | None = None
         self._saved_source_id: int | None = None
+        self._pcap_queue: list[str] = []
         self._all_artifacts: list[dict[str, Any]] = []
         self._build_ui()
 
@@ -884,7 +885,7 @@ class PcapPage(QWidget):
         base_name = f"{safe_title}.{suffix}"
         project = get_project(self._current_project_id()) if self._current_project_id() is not None else None
         if project and project.base_folder:
-            return str(workspace_export_path(project.base_folder, base_name))
+            return str(workspace_export_path(project.base_folder, base_name, category="pcap"))
         return base_name
 
     def _export_table_dialog(self, title: str, table: QTableView, export_format: str) -> None:
@@ -953,6 +954,10 @@ class PcapPage(QWidget):
         if not self._ensure_project_workspace():
             return
 
+        if self._pcap_queue and self._thread is None:
+            self._load_next_queued_pcap()
+            return
+
         file_path, _ = QFileDialog.getOpenFileName(
             self,
             "Open PCAP file",
@@ -963,6 +968,25 @@ class PcapPage(QWidget):
             self.load_pcap(file_path)
 
     def load_pcap(self, file_path: str):
+        self._pcap_queue = []
+        self._load_pcap_file(file_path)
+
+    def load_pcap_queue(self, file_paths: list[str]) -> None:
+        paths = [str(path) for path in (file_paths or []) if str(path or "").strip()]
+        if not paths:
+            return
+
+        self._pcap_queue = paths[1:]
+        self._load_pcap_file(paths[0])
+
+    def _load_next_queued_pcap(self) -> None:
+        if not self._pcap_queue:
+            self._update_open_button_text()
+            return
+        next_path = self._pcap_queue.pop(0)
+        self._load_pcap_file(next_path)
+
+    def _load_pcap_file(self, file_path: str):
         if not self._ensure_project_workspace():
             return
 
@@ -1007,6 +1031,11 @@ class PcapPage(QWidget):
             f"Volume: {human_bytes(summary.wire_bytes, precision=2)} | "
             f"Period: {self._format_pcap_range(summary.first_seen, summary.last_seen)}"
         )
+        if self._pcap_queue:
+            self.lbl_stats.setText(
+                self.lbl_stats.text()
+                + f" | Folder queue: {len(self._pcap_queue)} more"
+            )
         investigator = build_investigator_view(summary)
         self._set_highlights(summary)
         self._set_investigator_text(investigator)
@@ -1316,9 +1345,15 @@ class PcapPage(QWidget):
 
     def _cleanup_thread(self):
         self.btn_open.setEnabled(True)
-        self.btn_open.setText("Open PCAP")
+        self._update_open_button_text()
         self._worker = None
         self._thread = None
+
+    def _update_open_button_text(self) -> None:
+        if self._pcap_queue:
+            self.btn_open.setText(f"Open next PCAP ({len(self._pcap_queue)})")
+        else:
+            self.btn_open.setText("Open PCAP")
 
     def _set_table(self, table: QTableView, rows: list[dict[str, Any]]):
         model = table.model()
@@ -1492,7 +1527,7 @@ class PcapPage(QWidget):
         default_name = Path(self.summary.file_name).with_suffix(".pcap-summary.html").name
         project = get_project(self._current_project_id()) if self._current_project_id() is not None else None
         default_path = (
-            str(workspace_export_path(project.base_folder, default_name))
+            str(workspace_export_path(project.base_folder, default_name, category="pcap"))
             if project and project.base_folder
             else default_name
         )
@@ -1565,6 +1600,10 @@ class PcapPage(QWidget):
         self.btn_save_project.setText("Saved to Project")
         if hasattr(self.app, "projects_ui_controller"):
             self.app.projects_ui_controller.sync_project_workspace(project_id)
+            self.app.projects_ui_controller.refresh_recent_datasets(project_id)
+            self.app.projects_ui_controller.refresh_case_dashboard(project_id)
+        if hasattr(self.app, "refresh_activity_profile_ui"):
+            self.app.refresh_activity_profile_ui()
         details = [f"Source id: {source_id}"]
         if bound_project_ip:
             details.append(f"Project known IP was set to: {bound_project_ip}")
@@ -1586,15 +1625,17 @@ class PcapPage(QWidget):
             return
 
         try:
-            existing = self.app.txt_notes.toPlainText() or ""
-            if existing.strip():
-                if not existing.endswith("\n"):
-                    existing += "\n"
-                new_text = existing + "\n" + block
+            if hasattr(self.app, "notes_page"):
+                self.app.notes_page.append_block(block)
             else:
-                new_text = block
-
-            self.app.txt_notes.setPlainText(new_text)
+                existing = self.app.txt_notes.toPlainText() or ""
+                if existing.strip():
+                    if not existing.endswith("\n"):
+                        existing += "\n"
+                    new_text = existing + "\n" + block
+                else:
+                    new_text = block
+                self.app.txt_notes.setPlainText(new_text)
             self.app._notes_dirty = True
             self.app._flush_notes()
             add_activity(project_id, "pcap_notes_added", self.summary.file_name)
