@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any, Callable
 
 from core.db import add_activity, get_finding, update_finding
+from core.formatters import human_bytes
 
 
 def format_finding_detail(row: Any, status_label: Callable[[str], str]) -> str:
@@ -20,7 +21,7 @@ def format_finding_detail(row: Any, status_label: Callable[[str], str]) -> str:
             f"Protocol: {row['protocol']}",
             f"Application: {row['application_name'] or '-'}",
             f"SNI: {row['requested_server_name'] or '-'}",
-            f"Bytes: {row['bidirectional_bytes']}",
+            f"Bytes: {human_bytes(row['bidirectional_bytes'], precision=2)}",
             f"Packets: {row['bidirectional_packets']}",
             f"Duration (ms): {row['bidirectional_duration_ms']}",
             "",

@@ -1,4 +1,5 @@
 from core.protocols import format_ip_proto
+from core.formatters import human_bytes
 from PySide6.QtCore import QThread
 from PySide6.QtWidgets import QApplication
 from ui.explore_widgets import AITextWorker
@@ -85,7 +86,7 @@ class ExploreUIController:
         self.app.d_dst.setText(f"{flow.get('dst_ip','')}:{flow.get('dst_port','')}")
         self.app.d_proto.setText(format_ip_proto(flow.get("protocol", "")))
         self.app.d_app.setText(str(flow.get("application_name", "")))
-        self.app.d_bytes.setText(str(flow.get("bidirectional_bytes", "")))
+        self.app.d_bytes.setText(human_bytes(flow.get("bidirectional_bytes", 0), precision=2))
         self.app.d_packets.setText(str(flow.get("bidirectional_packets", "")))
         self.app.d_duration.setText(str(flow.get("bidirectional_duration_ms", "")))
         self.app.d_sni.setText(str(flow.get("requested_server_name", "")))
@@ -178,7 +179,7 @@ class ExploreUIController:
         top_app = max(apps, key=apps.get) if apps else "-"
 
         self.app.lbl_conv_summary.setText(
-            f"Conversation — Flows: {rows} | Bytes: {total_bytes:,} | Top app: {top_app}"
+            f"Conversation — Flows: {rows} | Volume: {human_bytes(total_bytes, precision=2)} | Top app: {top_app}"
         )
         self.app.lbl_conv_summary.show()
 
@@ -266,7 +267,7 @@ class ExploreUIController:
             f"Destination Port: {flow.get('dst_port', '')}",
             f"Protocol: {format_ip_proto(flow.get('protocol', ''))}",
             f"Application: {flow.get('application_name', '')}",
-            f"Bytes: {flow.get('bidirectional_bytes', '')}",
+            f"Bytes: {human_bytes(flow.get('bidirectional_bytes', 0), precision=2)}",
             f"Duration(ms): {flow.get('bidirectional_duration_ms', '')}",
             f"SNI: {flow.get('requested_server_name', '')}",
         ]

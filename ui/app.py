@@ -23,6 +23,8 @@ from ui.ai_output import AIOutputState, build_ai_output_state, make_ai_note_bloc
 from ui.findings_format import format_finding_detail, update_finding_status
 from ui.findings_page import FindingsPage
 from ui.notes_actions import (
+    export_notes_html_action,
+    export_notes_pdf as export_notes_pdf_action,
     export_notes_word as export_notes_word_action,
     insert_notes_chart as insert_notes_chart_action,
     load_project_notes,
@@ -154,6 +156,11 @@ QLabel#DialogDetailsLabel {
 QLabel#PcapPlainSummary {
     background: transparent;
     color: #111827;
+}
+
+QLabel#PcapLoadingStatus {
+    background: transparent;
+    color: #16a34a;
 }
 
 QLabel#ProfileMetric,
@@ -1130,6 +1137,11 @@ class App(QWidget):
         self.lbl_showing = QLabel("")
         self.lbl_showing.setObjectName("HeaderStatLabel")
 
+        self.lbl_json_meta = QLabel("")
+        self.lbl_json_meta.setObjectName("HeaderStatLabel")
+        self.lbl_json_meta.setWordWrap(True)
+        self.lbl_json_meta.setTextInteractionFlags(Qt.TextSelectableByMouse)
+
         self.lbl_mode = QLabel("")
         self.lbl_mode.hide()
 
@@ -1174,9 +1186,14 @@ class App(QWidget):
         header_bottom.addWidget(self.lbl_showing)
         header_bottom.addStretch()
 
+        header_meta = QHBoxLayout()
+        header_meta.setSpacing(8)
+        header_meta.addWidget(self.lbl_json_meta, 1)
+
         header_layout.addLayout(header_top)
         header_layout.addLayout(header_mid)
         header_layout.addLayout(header_bottom)
+        header_layout.addLayout(header_meta)
 
         self.search = QLineEdit()
         self.search.setPlaceholderText("Search IP / SNI / app...")
@@ -1457,15 +1474,23 @@ class App(QWidget):
         self.table.setModel(self.proxy)
 
         header = self.table.horizontalHeader()
-        header.setSectionResizeMode(0, QHeaderView.ResizeToContents)   # Source IP
-        header.setSectionResizeMode(1, QHeaderView.ResizeToContents)   # Source Port
-        header.setSectionResizeMode(2, QHeaderView.ResizeToContents)   # Destination IP
-        header.setSectionResizeMode(3, QHeaderView.ResizeToContents)   # Destination Port
-        header.setSectionResizeMode(4, QHeaderView.ResizeToContents)   # Protocol
-        header.setSectionResizeMode(5, QHeaderView.ResizeToContents)   # App
-        header.setSectionResizeMode(6, QHeaderView.ResizeToContents)   # Bytes
-        header.setSectionResizeMode(7, QHeaderView.ResizeToContents)   # Duration
+        header.setSectionResizeMode(0, QHeaderView.Interactive)        # Source IP
+        header.setSectionResizeMode(1, QHeaderView.Fixed)              # Source Port
+        header.setSectionResizeMode(2, QHeaderView.Interactive)        # Destination IP
+        header.setSectionResizeMode(3, QHeaderView.Fixed)              # Destination Port
+        header.setSectionResizeMode(4, QHeaderView.Fixed)              # Protocol
+        header.setSectionResizeMode(5, QHeaderView.Interactive)        # App
+        header.setSectionResizeMode(6, QHeaderView.Fixed)              # Bytes
+        header.setSectionResizeMode(7, QHeaderView.Fixed)              # Duration
         header.setSectionResizeMode(8, QHeaderView.Stretch)            # SNI
+        self.table.setColumnWidth(0, 138)
+        self.table.setColumnWidth(1, 92)
+        self.table.setColumnWidth(2, 138)
+        self.table.setColumnWidth(3, 116)
+        self.table.setColumnWidth(4, 86)
+        self.table.setColumnWidth(5, 140)
+        self.table.setColumnWidth(6, 96)
+        self.table.setColumnWidth(7, 104)
 
         self.splitter.addWidget(self.table)
 
@@ -1587,6 +1612,8 @@ class App(QWidget):
         self.txt_notes = self.notes_page.editor
         self.notes_page.btn_insert_chart.clicked.connect(self.insert_notes_chart)
         self.notes_page.btn_export_word.clicked.connect(self.export_notes_word)
+        self.notes_page.btn_export_html.clicked.connect(self.export_notes_html)
+        self.notes_page.btn_export_pdf.clicked.connect(self.export_notes_pdf)
 
         ai_page = QWidget()
         ai_root = QVBoxLayout(ai_page)
@@ -2373,6 +2400,36 @@ class App(QWidget):
 
         self._message_dialog("Notes export", "Notes exported to Word document.", result.file_path, width=560)
 
+    def export_notes_html(self):
+        result = export_notes_html_action(
+            self,
+            project_id=self.current_project_id,
+            project_name=self.current_project_name,
+            notes_page=self.notes_page,
+        )
+        self._handle_notes_export_result(result, "HTML")
+
+    def export_notes_pdf(self):
+        result = export_notes_pdf_action(
+            self,
+            project_id=self.current_project_id,
+            project_name=self.current_project_name,
+            notes_page=self.notes_page,
+        )
+        self._handle_notes_export_result(result, "PDF")
+
+    def _handle_notes_export_result(self, result, label: str) -> None:
+        if result.cancelled:
+            return
+        if not result.exported:
+            if self.current_project_id is None:
+                self._message_dialog("Notes export", result.error, width=420)
+                return
+            self._message_dialog("Notes export", f"Failed to export notes to {label}.", result.error, width=520)
+            return
+
+        self._message_dialog("Notes export", f"Notes exported to {label}.", result.file_path, width=560)
+
     def refresh_activity_ui_for_project(self, project_id: int | None):
         self.project_activity_rows = []
 
@@ -2461,6 +2518,8 @@ class App(QWidget):
 
         self.lbl_path.setText("No dataset loaded")
         self.lbl_stats.setText("")
+        if hasattr(self, "lbl_json_meta"):
+            self.lbl_json_meta.setText("")
         self.lbl_showing.setText("")
         self.lbl_loaded.setText("")
         self.lbl_conv_summary.clear()

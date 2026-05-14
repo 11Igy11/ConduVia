@@ -582,6 +582,12 @@ QLabel#HeaderStatLabel {
     color: #c6d4e8;
 }
 
+QLabel#PcapLoadingStatus {
+    font-size: 13px;
+    color: #86efac;
+    font-weight: 700;
+}
+
 /* =========================
    DIALOGS
    ========================= */
