@@ -9,6 +9,7 @@ from core.analyzer import top_applications, top_dst_ips, top_protocols, top_src_
 from core.db import add_dataset_load, get_project, list_recent_datasets, set_project_target
 from core.loader import list_json_files, load_folder, load_json_file
 from core.parser import extract_dataset_meta
+from core.formatters import format_short_date
 from core.project_identity import (
     identifier_values_match,
     project_identifier_rows,
@@ -16,6 +17,26 @@ from core.project_identity import (
     target_display_label,
 )
 from core.protocols import format_ip_proto
+
+
+def _json_order_metadata_line(meta: dict | None) -> str:
+    meta = meta or {}
+    klasa = str(meta.get("OrigRegNo") or "-")
+    urbroj = str(meta.get("RegNo") or "-")
+    target = str(meta.get("target") or "")
+    target_type = str(meta.get("targettype") or "")
+    liid = str(meta.get("liid") or "-")
+    bt = str(meta.get("bt") or "")
+    et = str(meta.get("et") or "")
+    target_label = f"{target} ({target_type})" if target or target_type else "-"
+    if bt or et:
+        validity = f"{format_short_date(bt, missing='-')} -> {format_short_date(et, missing='-')}"
+    else:
+        validity = "-"
+    return (
+        f"Klasa: {klasa}   |   Urbroj: {urbroj}   |   Target: {target_label}   |   "
+        f"LIID: {liid}   |   Order validity: {validity}"
+    )
 
 
 class DatasetLoadWorker(QObject):
@@ -301,6 +322,13 @@ class DatasetController(QObject):
             return
 
         self._set_loading(True)
+        if hasattr(self.app, "lbl_path"):
+            kind = "folder" if mode == "folder" else "JSON file"
+            self.app.lbl_path.setText(f"Analyzing {kind}: {path}")
+        if hasattr(self.app, "lbl_stats"):
+            self.app.lbl_stats.setText("Loading and parsing JSON flows. Please wait...")
+        if hasattr(self.app, "lbl_json_meta"):
+            self.app.lbl_json_meta.setText("")
 
         self._load_thread = QThread()
         self._load_worker = DatasetLoadWorker(
@@ -351,6 +379,8 @@ class DatasetController(QObject):
 
         self.app.lbl_path.setText(str(result["dataset_label"]))
         self.app.lbl_stats.setText(str(result["stats_label"]))
+        if hasattr(self.app, "lbl_json_meta"):
+            self.app.lbl_json_meta.setText(_json_order_metadata_line(result.get("meta") or {}))
 
         if self.app.current_project_id is not None:
             add_dataset_load(self.app.current_project_id, path)
@@ -547,6 +577,8 @@ class DatasetController(QObject):
         )
 
     def _on_dataset_load_error(self, title: str, details: str):
+        if hasattr(self.app, "lbl_stats"):
+            self.app.lbl_stats.setText("JSON dataset load failed.")
         self.app._message_dialog("Dataset", title, details, width=520)
 
     def _cleanup_load_thread(self):

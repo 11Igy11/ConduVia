@@ -2,6 +2,7 @@ from PySide6.QtCore import QObject, Signal, Qt, QItemSelectionModel
 from PySide6.QtGui import QContextMenuEvent
 from PySide6.QtWidgets import QApplication, QTableView, QMenu
 
+from core.formatters import human_bytes
 from core.protocols import format_ip_proto
 
 
@@ -129,7 +130,7 @@ class FlowTableView(QTableView):
                     f"Destination Port: {flow.get('dst_port', '')}",
                     f"Protocol: {format_ip_proto(flow.get('protocol', ''))}",
                     f"Application: {flow.get('application_name', '')}",
-                    f"Bytes: {flow.get('bidirectional_bytes', '')}",
+                    f"Bytes: {human_bytes(flow.get('bidirectional_bytes', 0), precision=2)}",
                     f"Duration(ms): {flow.get('bidirectional_duration_ms', '')}",
                     f"SNI: {flow.get('requested_server_name', '')}",
                 ]

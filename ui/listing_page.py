@@ -422,7 +422,7 @@ class ListingPage(QWidget):
         font.setBold(True)
         self.lbl_title.setFont(font)
 
-        self.lbl_dataset = QLabel("Dataset: (none)")
+        self.lbl_dataset = QLabel("Loaded JSON summary")
         self.lbl_files = QLabel("Files: 0")
         self.lbl_flows = QLabel("Flows: 0")
 
@@ -465,6 +465,7 @@ class ListingPage(QWidget):
 
         layout.addLayout(self.view_bar)
         layout.addWidget(self.card)
+        self.card.hide()
 
         # ---------- TABLE ----------
         self.table = CopyableTableView(self.app)
@@ -508,9 +509,9 @@ class ListingPage(QWidget):
     # ---------- UI UPDATE ----------
     def _update_ui(self):
         if not self.dataset_path:
-            self.lbl_dataset.setText("Dataset: (none)")
+            self.lbl_dataset.setText("No JSON dataset loaded.")
         else:
-            self.lbl_dataset.setText(f"Dataset: {self.dataset_path}")
+            self.lbl_dataset.setText("Loaded JSON dataset")
 
         self.lbl_files.setText(f"Files: {len(self.files)}")
         self.lbl_flows.setText(f"Flows: {len(self.flows)}")

@@ -6,6 +6,8 @@ from typing import Any
 from core.formatters import bytes_mb_or_b, human_bytes, safe_int, format_short_date
 from core.timeutils import parse_flow_timestamp
 from core.exporters.registry_exporter import export_registry_html
+from core.exporters.listing_exporter import export_listing_csv, export_listing_excel
+from core.exporters.table_exporter import export_table_html
 from core.db import get_app_settings, get_project
 from core.workspace import workspace_export_path
 
@@ -14,6 +16,7 @@ from PySide6.QtGui import QPainter, QColor, QPen, QFontMetrics
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QLineEdit,
     QTableView, QFileDialog, QMessageBox, QFrame, QGridLayout, QTabWidget,
+    QDialog, QHeaderView,
     QSizePolicy, QCheckBox, QScrollArea, QProgressBar, QToolTip, QApplication
 )
 
@@ -721,17 +724,21 @@ class RegistryPage(QWidget):
         hl.addLayout(top_row)
 
         self.lbl_meta_chips = QLabel("")
-        self.lbl_meta_chips.setTextFormat(Qt.RichText)
+        self.lbl_meta_chips.setTextFormat(Qt.PlainText)
         self.lbl_meta_chips.setWordWrap(True)
+        self.lbl_meta_chips.setTextInteractionFlags(Qt.TextSelectableByMouse)
         hl.addWidget(self.lbl_meta_chips)
 
         root.addWidget(hero)
+        hero.hide()
 
         # ---------------- Actions row ----------------
         actions = QHBoxLayout()
         actions.setSpacing(12)
+        actions.setContentsMargins(0, 0, 0, 0)
 
         self.txt_search = QLineEdit()
+        self.txt_search.hide()
         self.txt_search.setPlaceholderText("Search across ALL fields…")
 
         self.chk_full = QCheckBox("Include full dataset")
@@ -741,17 +748,18 @@ class RegistryPage(QWidget):
 
         self.btn_export = QPushButton("Export HTML report")
         self.btn_export.setObjectName("Primary")
-        self.btn_export.setFixedHeight(38)
+        self.btn_export.setFixedHeight(34)
         self.btn_export.clicked.connect(self.export_report)
 
-        actions.addWidget(self.txt_search, 1)
         actions.addWidget(self.chk_full, 0)
         actions.addWidget(self.btn_export, 0)
-        root.addLayout(actions)
+        actions_widget = QWidget()
+        actions_widget.setLayout(actions)
 
         # ---------------- Main Tabs ----------------
         self.main_tabs = QTabWidget()
         self.main_tabs.setDocumentMode(True)
+        self.main_tabs.setCornerWidget(actions_widget, Qt.TopRightCorner)
 
         # Report tab (scrollable)
         self.report_page = QWidget()
@@ -767,8 +775,8 @@ class RegistryPage(QWidget):
         report_outer.addWidget(self.report_scroll)
 
         rp = QVBoxLayout(self.report_inner)
-        rp.setContentsMargins(14, 14, 14, 14)
-        rp.setSpacing(12)
+        rp.setContentsMargins(10, 10, 10, 10)
+        rp.setSpacing(8)
 
         # Dataset tab
         self.dataset_page = QWidget()
@@ -785,8 +793,8 @@ class RegistryPage(QWidget):
         self.stats_wrap = QWidget()
         stats_grid = QGridLayout(self.stats_wrap)
         stats_grid.setContentsMargins(0, 0, 0, 0)
-        stats_grid.setHorizontalSpacing(12)
-        stats_grid.setVerticalSpacing(12)
+        stats_grid.setHorizontalSpacing(8)
+        stats_grid.setVerticalSpacing(8)
 
         self.card_total = self._make_stat_card("Total flows", "—")
         self.card_usrc = self._make_stat_card("Unique src IP", "—")
@@ -972,6 +980,10 @@ class RegistryPage(QWidget):
         top.addWidget(lbl_full)
         top.addStretch()
         top.addWidget(self.lbl_full_hint)
+        self.btn_expand_dataset = QPushButton("Open dataset table")
+        self.btn_expand_dataset.setFixedHeight(34)
+        self.btn_expand_dataset.clicked.connect(self._open_dataset_table_dialog)
+        top.addWidget(self.btn_expand_dataset)
         dp.addLayout(top)
 
         self.lbl_dataset_disabled = QLabel(
@@ -982,7 +994,7 @@ class RegistryPage(QWidget):
         dp.addWidget(self.lbl_dataset_disabled)
 
         self.table = CopyableTableView(self.app)
-        self.table.setSortingEnabled(False)
+        self.table.setSortingEnabled(True)
         self.table.setAlternatingRowColors(True)
         self.table.setSelectionBehavior(QTableView.SelectRows)
         self.table.setSelectionMode(QTableView.SingleSelection)
@@ -1004,6 +1016,7 @@ class RegistryPage(QWidget):
         self._hour_filter = None
         self._last_activity = {}
         self.btn_export.setEnabled(False)
+        self.btn_expand_dataset.setEnabled(False)
         self.model.set_data([], [])
         self._render_empty()
         self._on_toggle_full(self.chk_full.isChecked())
@@ -1012,10 +1025,10 @@ class RegistryPage(QWidget):
     def _make_stat_card(self, title: str, value: str) -> QFrame:
         card = QFrame()
         card.setObjectName("Card")
-        card.setFixedHeight(84)
+        card.setFixedHeight(64)
         l = QVBoxLayout(card)
-        l.setContentsMargins(14, 12, 14, 12)
-        l.setSpacing(2)
+        l.setContentsMargins(12, 7, 12, 7)
+        l.setSpacing(0)
 
         t = QLabel(title)
         t.setObjectName("Muted")
@@ -1076,6 +1089,7 @@ class RegistryPage(QWidget):
         self._render_insight_current()
 
         self.btn_export.setEnabled(bool(self._flows))
+        self.btn_expand_dataset.setEnabled(bool(self._flows))
         self.table.horizontalHeader().setStretchLastSection(True)
 
     # ----------------- rendering -----------------
@@ -1105,6 +1119,7 @@ class RegistryPage(QWidget):
         self.hist24.set_mode("bytes")
         self.hist24.set_quiet_hours([])
         self.hist24.set_values([0] * 24)
+        self.btn_expand_dataset.setEnabled(False)
 
         self.lbl_dataset_disabled.setVisible(True)
         self.table.setVisible(False)
@@ -1115,7 +1130,7 @@ class RegistryPage(QWidget):
             self._render_empty()
             return
 
-        self.lbl_folder.setText(str(self._folder))
+        self.lbl_folder.setText("Order and target metadata from the loaded JSON dataset.")
         self.lbl_right_hint.setText(f"JSON files: {len(self._files)}")
 
         urbroj = str(self._meta.get("RegNo") or "")
@@ -1144,7 +1159,21 @@ class RegistryPage(QWidget):
         if bt or et:
             chips.append(chip("Order validity", f"{_fmt_dt_short(bt)} → {_fmt_dt_short(et)}"))
 
-        self.lbl_meta_chips.setText("".join(chips))
+        self.lbl_meta_chips.setText(
+            "  |  ".join(
+                [
+                    f"Klasa: {klasa or '-'}",
+                    f"Urbroj: {urbroj or '-'}",
+                    f"Target: {f'{target} ({targettype})' if target or targettype else '-'}",
+                    f"LIID: {liid or '-'}",
+                    (
+                        f"Order validity: {_fmt_dt_short(bt)} -> {_fmt_dt_short(et)}"
+                        if bt or et
+                        else ""
+                    ),
+                ]
+            ).strip("  |")
+        )
 
     def _render_stats(self):
         s = self._summary or {}
@@ -1544,6 +1573,176 @@ class RegistryPage(QWidget):
 
         except Exception as e:
             QMessageBox.critical(self, "Export failed", str(e))
+
+    def _dialog_size(self, preferred_width: int, preferred_height: int) -> tuple[int, int]:
+        screen = QApplication.primaryScreen()
+        if screen is None:
+            return preferred_width, preferred_height
+        available = screen.availableGeometry()
+        width = min(preferred_width, max(760, available.width() - 120))
+        height = min(preferred_height, max(520, available.height() - 120))
+        return width, height
+
+    def _open_dataset_table_dialog(self):
+        if not self._flows or not self._cols:
+            QMessageBox.information(self, "Dataset table", "No dataset rows are loaded.")
+            return
+
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Registry dataset table")
+        dlg.resize(*self._dialog_size(1240, 760))
+
+        layout = QVBoxLayout(dlg)
+        layout.setContentsMargins(14, 14, 14, 14)
+        layout.setSpacing(10)
+
+        hint = QLabel(
+            "Expanded JSON dataset view. Sort columns, select rows, double-click a flow to open it in Explore, "
+            "or right-click to copy values."
+        )
+        hint.setObjectName("Muted")
+        hint.setWordWrap(True)
+        layout.addWidget(hint)
+
+        table = CopyableTableView(self.app)
+        table.setAlternatingRowColors(True)
+        table.setSortingEnabled(True)
+        table.setSelectionBehavior(QTableView.SelectRows)
+        table.setSelectionMode(QTableView.SingleSelection)
+        table.setWordWrap(False)
+        table.verticalHeader().setVisible(True)
+        table.verticalHeader().setDefaultSectionSize(34)
+        table.horizontalHeader().setSectionResizeMode(QHeaderView.Interactive)
+        table.horizontalHeader().setStretchLastSection(False)
+
+        model = RegistryTableModel()
+        model.set_data(list(self._flows), list(self._cols))
+        proxy = TextFilterProxy()
+        proxy.setSourceModel(model)
+        proxy.set_query(self.txt_search.text())
+        proxy.set_hour_filter(getattr(self, "_hour_filter", None))
+        table.setModel(proxy)
+        table.doubleClicked.connect(lambda idx: self._open_expanded_dataset_row(idx, proxy, model))
+
+        for col, key in enumerate(self._cols):
+            table.setColumnWidth(col, self._dataset_column_width(key))
+
+        layout.addWidget(table, 1)
+
+        footer = QHBoxLayout()
+        footer.addWidget(self._export_table_button("Export CSV", "Registry dataset", table, "csv"))
+        footer.addWidget(self._export_table_button("Export Excel", "Registry dataset", table, "xlsx"))
+        footer.addWidget(self._export_table_button("Export HTML", "Registry dataset", table, "html"))
+        footer.addStretch()
+        btn_close = QPushButton("Close")
+        btn_close.setFixedHeight(34)
+        btn_close.clicked.connect(dlg.accept)
+        footer.addWidget(btn_close)
+        layout.addLayout(footer)
+
+        dlg.exec()
+
+    def _open_expanded_dataset_row(
+        self,
+        index: QModelIndex,
+        proxy: TextFilterProxy,
+        model: RegistryTableModel,
+    ):
+        if not index.isValid():
+            return
+        src_index = proxy.mapToSource(index)
+        try:
+            flow = model._rows[src_index.row()]
+        except Exception:
+            return
+        src = str(flow.get("src_ip") or "")
+        dst = str(flow.get("dst_ip") or "")
+        if src and dst:
+            self.openExploreWithConversation.emit(src, dst)
+
+    def _dataset_column_width(self, key: str) -> int:
+        name = str(key or "").lower()
+        if "time" in name or "date" in name:
+            return 170
+        if name in {"src_ip", "dst_ip"} or name.endswith("_ip"):
+            return 150
+        if "port" in name or "proto" in name or "packet" in name:
+            return 120
+        if "byte" in name:
+            return 130
+        if "app" in name or "host" in name or "sni" in name or "domain" in name:
+            return 230
+        if "url" in name or "path" in name or "user" in name:
+            return 300
+        return 150
+
+    def _export_table_button(self, text: str, title: str, table: QTableView, export_format: str) -> QPushButton:
+        button = QPushButton(text)
+        button.setFixedHeight(34)
+        button.clicked.connect(lambda: self._export_dataset_table(title, table, export_format))
+        return button
+
+    def _dataset_table_export_data(self, table: QTableView) -> tuple[list[str], list[list[str]]]:
+        model = table.model()
+        if model is None:
+            return [], []
+
+        headers = [
+            str(model.headerData(col, Qt.Horizontal, Qt.DisplayRole) or "")
+            for col in range(model.columnCount())
+        ]
+        rows: list[list[str]] = []
+        for row in range(model.rowCount()):
+            rows.append([
+                str(model.index(row, col).data(Qt.DisplayRole) or "")
+                for col in range(model.columnCount())
+            ])
+        return headers, rows
+
+    def _dataset_table_default_path(self, title: str, suffix: str) -> str:
+        safe_title = "".join(ch if ch.isalnum() else "_" for ch in (title or "registry_dataset").lower())
+        safe_title = "_".join(part for part in safe_title.split("_") if part) or "registry_dataset"
+        base_name = f"{safe_title}.{suffix}"
+        project = self._current_project()
+        if project and project.base_folder:
+            return str(workspace_export_path(project.base_folder, base_name, category="json"))
+        return base_name
+
+    def _export_dataset_table(self, title: str, table: QTableView, export_format: str) -> None:
+        headers, rows = self._dataset_table_export_data(table)
+        if not headers or not rows:
+            QMessageBox.information(self, "Export table", "No rows are loaded.")
+            return
+
+        filters = {
+            "csv": "CSV files (*.csv)",
+            "xlsx": "Excel files (*.xlsx)",
+            "html": "HTML files (*.html)",
+        }
+        suffix = "xlsx" if export_format == "xlsx" else export_format
+        file_path, _ = QFileDialog.getSaveFileName(
+            self,
+            f"Export {title}",
+            self._dataset_table_default_path(title, suffix),
+            filters.get(export_format, "All files (*.*)"),
+        )
+        if not file_path:
+            return
+
+        try:
+            if export_format == "csv":
+                export_listing_csv(file_path, headers, rows)
+            elif export_format == "xlsx":
+                export_listing_excel(file_path, headers, rows)
+            elif export_format == "html":
+                export_table_html(file_path, title, headers, rows)
+            else:
+                raise ValueError(f"Unsupported export format: {export_format}")
+        except Exception as exc:
+            QMessageBox.critical(self, "Export table failed", str(exc))
+            return
+
+        QMessageBox.information(self, "Export table", f"Exported:\n{file_path}")
 
     def _current_project(self):
         project_id = getattr(self.app, "current_project_id", None)

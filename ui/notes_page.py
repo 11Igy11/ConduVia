@@ -91,6 +91,8 @@ class NotesPage(QWidget):
         self.btn_insert_image = self._tool_button("Image", "Insert picture / screenshot")
         self.btn_insert_chart = self._tool_button("Chart", "Insert chart from project profile")
         self.btn_export_word = self._tool_button("Word", "Export notes to Word document")
+        self.btn_export_html = self._tool_button("HTML", "Export notes to HTML document")
+        self.btn_export_pdf = self._tool_button("PDF", "Export notes to PDF document")
 
         self.editor = QTextEdit()
         self.editor.setAcceptRichText(True)
@@ -140,6 +142,8 @@ class NotesPage(QWidget):
 
         tools_layout.addWidget(self._panel_label("Export"))
         tools_layout.addWidget(self.btn_export_word)
+        tools_layout.addWidget(self.btn_export_html)
+        tools_layout.addWidget(self.btn_export_pdf)
         tools_layout.addStretch()
 
         body.addWidget(self.editor, 1)
@@ -176,6 +180,8 @@ class NotesPage(QWidget):
             self.btn_insert_image,
             self.btn_insert_chart,
             self.btn_export_word,
+            self.btn_export_html,
+            self.btn_export_pdf,
         ):
             widget.setEnabled(active)
         if active:

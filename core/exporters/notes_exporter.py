@@ -47,6 +47,37 @@ def export_notes_docx(
     return output
 
 
+def export_notes_html(
+    file_path: str | Path,
+    *,
+    title: str,
+    notes_html: str,
+    notes_text: str = "",
+) -> Path:
+    """Export project notes to a standalone HTML file."""
+    output = Path(file_path)
+    output.parent.mkdir(parents=True, exist_ok=True)
+
+    body = _html_body(notes_html) if notes_html else ""
+    if not body.strip():
+        body = "<br>".join(html.escape(line) for line in (notes_text or "").splitlines())
+
+    output.write_text(
+        "<!doctype html><html><head><meta charset=\"utf-8\">"
+        f"<title>{html.escape(title or 'Project notes')}</title>"
+        "<style>"
+        "body{font-family:'Segoe UI',Arial,sans-serif;margin:28px;color:#111827;line-height:1.5;}"
+        "h1{font-size:22px;margin:0 0 18px;} img{max-width:100%;height:auto;}"
+        ".notes{border-top:1px solid #e5e7eb;padding-top:18px;}"
+        "</style></head><body>"
+        f"<h1>{html.escape(title or 'Project notes')}</h1>"
+        f"<div class=\"notes\">{body}</div>"
+        "</body></html>",
+        encoding="utf-8",
+    )
+    return output
+
+
 def _document_blocks(*, notes_text: str, notes_html: str) -> tuple[list[str], list[_ImagePart]]:
     image_parts: list[_ImagePart] = []
     blocks: list[str] = []

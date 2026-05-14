@@ -5,10 +5,12 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable
 
+from PySide6.QtGui import QTextDocument
+from PySide6.QtPrintSupport import QPrinter
 from PySide6.QtWidgets import QFileDialog, QWidget
 
 from core.db import get_project
-from core.exporters.notes_exporter import export_notes_docx
+from core.exporters.notes_exporter import export_notes_docx, export_notes_html
 from core.workspace import workspace_export_path, write_project_notes_backup
 from ui.controllers.notes_controller import NotesController
 from ui.notes_charts import available_notes_charts, render_notes_chart
@@ -156,6 +158,90 @@ def export_notes_word(
             notes_text=notes_page.notes_plain_text(),
             notes_html=notes_page.notes_text(),
         )
+    except Exception as exc:
+        return NotesExportResult(exported=False, error=str(exc))
+
+    return NotesExportResult(exported=True, file_path=file_path)
+
+
+def export_notes_html_action(
+    parent: QWidget,
+    *,
+    project_id: int | None,
+    project_name: str | None,
+    notes_page: NotesPage,
+) -> NotesExportResult:
+    if project_id is None:
+        return NotesExportResult(exported=False, error="Open an active project first.")
+
+    project = get_project(project_id)
+    default_name = f"{project_name or 'project'}-notes.html"
+    default_path = (
+        str(workspace_export_path(project.base_folder, default_name, category="notes"))
+        if project and project.base_folder
+        else default_name
+    )
+
+    file_path, _ = QFileDialog.getSaveFileName(
+        parent,
+        "Export notes to HTML",
+        default_path,
+        "HTML documents (*.html)",
+    )
+    if not file_path:
+        return NotesExportResult(exported=False, cancelled=True)
+    if not file_path.lower().endswith(".html"):
+        file_path += ".html"
+
+    try:
+        export_notes_html(
+            file_path,
+            title=f"Project notes: {project_name or 'Project'}",
+            notes_text=notes_page.notes_plain_text(),
+            notes_html=notes_page.notes_text(),
+        )
+    except Exception as exc:
+        return NotesExportResult(exported=False, error=str(exc))
+
+    return NotesExportResult(exported=True, file_path=file_path)
+
+
+def export_notes_pdf(
+    parent: QWidget,
+    *,
+    project_id: int | None,
+    project_name: str | None,
+    notes_page: NotesPage,
+) -> NotesExportResult:
+    if project_id is None:
+        return NotesExportResult(exported=False, error="Open an active project first.")
+
+    project = get_project(project_id)
+    default_name = f"{project_name or 'project'}-notes.pdf"
+    default_path = (
+        str(workspace_export_path(project.base_folder, default_name, category="notes"))
+        if project and project.base_folder
+        else default_name
+    )
+
+    file_path, _ = QFileDialog.getSaveFileName(
+        parent,
+        "Export notes to PDF",
+        default_path,
+        "PDF documents (*.pdf)",
+    )
+    if not file_path:
+        return NotesExportResult(exported=False, cancelled=True)
+    if not file_path.lower().endswith(".pdf"):
+        file_path += ".pdf"
+
+    try:
+        printer = QPrinter(QPrinter.HighResolution)
+        printer.setOutputFormat(QPrinter.PdfFormat)
+        printer.setOutputFileName(file_path)
+        document = QTextDocument()
+        document.setHtml(notes_page.notes_text())
+        document.print_(printer)
     except Exception as exc:
         return NotesExportResult(exported=False, error=str(exc))
 

@@ -1001,6 +1001,8 @@ class PcapPage(QWidget):
         self.txt_pcap_ai_summary.clear()
         self.lbl_file.setText(file_path)
         self.lbl_stats.setText("Analyzing capture...")
+        self.lbl_stats.setObjectName("PcapLoadingStatus")
+        self._refresh_widget_style(self.lbl_stats)
 
         self._thread = QThread()
         self._worker = PcapWorker(file_path)
@@ -1026,6 +1028,8 @@ class PcapPage(QWidget):
         self.btn_ai_summary.setText("AI Summary")
         self.btn_add_notes.setEnabled(True)
         self.lbl_file.setText(summary.file_path)
+        self.lbl_stats.setObjectName("HeaderStatLabel")
+        self._refresh_widget_style(self.lbl_stats)
         self.lbl_stats.setText(
             f"{summary.format} | Packets: {summary.packet_count:,} | "
             f"Volume: {human_bytes(summary.wire_bytes, precision=2)} | "
@@ -1341,6 +1345,8 @@ class PcapPage(QWidget):
 
     def _on_error(self, message: str):
         QMessageBox.critical(self, "PCAP analysis failed", message)
+        self.lbl_stats.setObjectName("HeaderStatLabel")
+        self._refresh_widget_style(self.lbl_stats)
         self.lbl_stats.setText("PCAP analysis failed.")
 
     def _cleanup_thread(self):
@@ -1436,15 +1442,6 @@ class PcapPage(QWidget):
 
     def _overview_text(self, summary: PcapSummary) -> str:
         lines = [
-            "PCAP Investigation Overview",
-            "",
-            f"File: {summary.file_name}",
-            f"Format: {summary.format}",
-            f"Packets: {summary.packet_count:,}",
-            f"Traffic volume: {human_bytes(summary.wire_bytes, precision=2)}",
-            f"Capture period: {self._format_pcap_range(summary.first_seen, summary.last_seen)}",
-            f"Device IP: {summary.likely_device_ip or '-'}",
-            "",
             "What is visible:",
             f"- DNS queries: {len(summary.dns_queries)} unique visible names",
             f"- TLS SNI hosts: {len(summary.tls_sni)} unique visible host names",
@@ -1456,6 +1453,11 @@ class PcapPage(QWidget):
             "ViaNyquist shows the observable metadata and only the payload bytes that are actually visible.",
         ]
         return "\n".join(lines)
+
+    def _refresh_widget_style(self, widget: QWidget) -> None:
+        widget.style().unpolish(widget)
+        widget.style().polish(widget)
+        widget.update()
 
     def _set_investigator_text(self, investigator: dict[str, Any]) -> None:
         summary = str(investigator.get("plain_summary") or "")
