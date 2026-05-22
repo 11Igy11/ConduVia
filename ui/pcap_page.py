@@ -38,12 +38,14 @@ from core.exporters.table_exporter import export_table_html
 from core.formatters import format_duration_compact_ms, format_pcap_datetime, human_bytes
 from core.evidence_policy import format_period_day_label, period_combo_label
 from core.pcap_analyzer import PcapSummary, analyze_pcap, analyze_pcap_files, build_investigator_view
+from core.pcap_period import aggregate_hash_for_paths, capture_span_note, resolve_period_day
 from core.protocols import format_ip_proto
 from core.workspace import workspace_export_path
 from core.db import (
     add_activity,
     add_pcap_source,
     file_sha256,
+    save_pcap_period_summary,
     get_app_settings,
     get_project,
     list_project_pcap_device_ips,
@@ -78,11 +80,23 @@ class PcapBatchWorker(QObject):
     progress = Signal(int, int, int, str)
     finished = Signal(object, int, int)
 
-    def __init__(self, paths: list[str], *, project_id: int | None = None, auto_save: bool = False):
+    def __init__(
+        self,
+        paths: list[str],
+        *,
+        project_id: int | None = None,
+        auto_save: bool = False,
+        day_groups: dict[str, list[str]] | None = None,
+    ):
         super().__init__()
         self.paths = [str(path) for path in paths if str(path or "").strip()]
         self.project_id = project_id
         self.auto_save = bool(auto_save)
+        self.day_groups = {
+            str(day): [str(path) for path in day_paths if str(path or "").strip()]
+            for day, day_paths in (day_groups or {}).items()
+            if str(day or "").strip() and day != "undated"
+        }
         self.stop_requested = False
 
     def request_stop(self) -> None:
@@ -92,38 +106,113 @@ class PcapBatchWorker(QObject):
         processed = 0
         failed = 0
         last_summary = None
-        total = len(self.paths)
 
-        for path in self.paths:
+        jobs: list[tuple[str, list[str]]] = []
+        if self.day_groups:
+            for day, day_paths in sorted(self.day_groups.items(), key=lambda pair: pair[0]):
+                jobs.append((day, day_paths))
+        else:
+            jobs.append(("", self.paths))
+
+        total = sum(len(paths) for _day, paths in jobs)
+
+        for period_day, day_paths in jobs:
             if self.stop_requested:
                 break
+            if not day_paths:
+                continue
 
-            self.progress.emit(processed, total, failed, Path(path).name)
-            try:
-                summary = analyze_pcap(path)
-                last_summary = summary
-                if self.auto_save and self.project_id is not None:
-                    self._save_summary(summary)
-                processed += 1
+            if len(day_paths) > 1 or period_day:
+                self.progress.emit(processed, total, failed, f"{format_period_day_label(period_day) or 'batch'}")
+                try:
+                    label = (
+                        f"{format_period_day_label(period_day)} ({len(day_paths):,} PCAP files)"
+                        if period_day
+                        else f"{len(day_paths):,} PCAP files"
+                    )
+                    summary = analyze_pcap_files(day_paths, label=label)
+                    last_summary = summary
+                    if self.auto_save and self.project_id is not None:
+                        self._save_period_summary(summary, period_day, day_paths)
+                    processed += len(day_paths)
+                except Exception as exc:
+                    failed += len(day_paths)
+                    processed += len(day_paths)
+                    if self.project_id is not None:
+                        for path in day_paths:
+                            try:
+                                mark_ingest_item(self.project_id, path, "failed", str(exc))
+                            except Exception:
+                                pass
+                self.progress.emit(processed, total, failed, Path(day_paths[-1]).name)
+                continue
+
+            for path in day_paths:
+                if self.stop_requested:
+                    break
+
                 self.progress.emit(processed, total, failed, Path(path).name)
-            except Exception as exc:
-                failed += 1
-                processed += 1
-                if self.project_id is not None:
-                    try:
-                        mark_ingest_item(self.project_id, path, "failed", str(exc))
-                    except Exception:
-                        pass
-                self.progress.emit(processed, total, failed, Path(path).name)
+                try:
+                    summary = analyze_pcap(path)
+                    last_summary = summary
+                    if self.auto_save and self.project_id is not None:
+                        self._save_file_summary(summary, path)
+                    processed += 1
+                    self.progress.emit(processed, total, failed, Path(path).name)
+                except Exception as exc:
+                    failed += 1
+                    processed += 1
+                    if self.project_id is not None:
+                        try:
+                            mark_ingest_item(self.project_id, path, "failed", str(exc))
+                        except Exception:
+                            pass
+                    self.progress.emit(processed, total, failed, Path(path).name)
 
         self.finished.emit(last_summary, processed, failed)
 
-    def _save_summary(self, summary: PcapSummary) -> None:
-        digest = file_sha256(summary.file_path)
+    def _save_period_summary(self, summary: PcapSummary, period_day: str, source_paths: list[str]) -> None:
+        day = resolve_period_day(
+            active_day=period_day,
+            file_paths=source_paths,
+            first_seen=summary.first_seen,
+            last_seen=summary.last_seen,
+        )
+        digest = aggregate_hash_for_paths(source_paths)
+        investigator = build_investigator_view(summary)
+        plain = str(investigator.get("plain_summary") or "")
+        span = capture_span_note(summary.first_seen, summary.last_seen, period_day=day)
+        if span:
+            plain = f"{plain}\n{span}"
+        save_pcap_period_summary(
+            self.project_id,
+            period_day=day,
+            file_path=summary.file_path or summary.file_name,
+            file_sha256_value=digest,
+            file_size=summary.file_size,
+            file_name=summary.file_name,
+            format=summary.format,
+            packet_count=summary.packet_count,
+            wire_bytes=summary.wire_bytes,
+            first_seen=summary.first_seen,
+            last_seen=summary.last_seen,
+            duration_seconds=summary.duration_seconds,
+            likely_device_ip=summary.likely_device_ip,
+            summary_text=plain,
+        )
+        self._mark_paths_done(source_paths)
+
+    def _save_file_summary(self, summary: PcapSummary, source_path: str) -> None:
+        digest = file_sha256(source_path)
+        day = resolve_period_day(
+            file_paths=[source_path],
+            first_seen=summary.first_seen,
+            last_seen=summary.last_seen,
+        )
         investigator = build_investigator_view(summary)
         add_pcap_source(
             self.project_id,
-            file_path=summary.file_path,
+            file_path=source_path,
             file_name=summary.file_name,
             file_sha256_value=digest,
             file_size=summary.file_size,
@@ -135,8 +224,13 @@ class PcapBatchWorker(QObject):
             duration_seconds=summary.duration_seconds,
             likely_device_ip=summary.likely_device_ip,
             summary_text=str(investigator.get("plain_summary") or ""),
+            period_day=day,
         )
-        mark_ingest_item(self.project_id, summary.file_path, "done", "")
+        mark_ingest_item(self.project_id, source_path, "done", "")
+
+    def _mark_paths_done(self, source_paths: list[str]) -> None:
+        for path in source_paths:
+            mark_ingest_item(self.project_id, str(path), "done", "")
 
 
 class DictTableModel(QAbstractTableModel):
@@ -268,7 +362,9 @@ class PcapPage(QWidget):
         self.lbl_title = QLabel("PCAP analysis")
         self.lbl_title.setObjectName("HeaderProjectLabel")
         self.btn_open = QPushButton("Open PCAP")
-        self.btn_save_project = QPushButton("Save to Project")
+        self.btn_save_project = QPushButton("Save Period to Project")
+        self.btn_save_all_periods = QPushButton("Save All Periods")
+        self.btn_save_all_periods.setEnabled(False)
         self.btn_save_project.setEnabled(False)
         self.btn_ai_summary = QPushButton("AI Summary")
         self.btn_ai_summary.setEnabled(False)
@@ -280,6 +376,7 @@ class PcapPage(QWidget):
         top.addStretch()
         top.addWidget(self.btn_open)
         top.addWidget(self.btn_save_project)
+        top.addWidget(self.btn_save_all_periods)
         top.addWidget(self.btn_ai_summary)
         top.addWidget(self.btn_add_notes)
         top.addWidget(self.btn_export)
@@ -328,6 +425,7 @@ class PcapPage(QWidget):
 
         self.btn_open.clicked.connect(self.open_pcap_dialog)
         self.btn_save_project.clicked.connect(self.save_to_project)
+        self.btn_save_all_periods.clicked.connect(self.save_all_periods_to_project)
         self.btn_ai_summary.clicked.connect(self.generate_ai_summary)
         self.btn_add_notes.clicked.connect(self.add_summary_to_notes)
         self.btn_export.clicked.connect(self.export_summary)
@@ -1149,7 +1247,12 @@ class PcapPage(QWidget):
         self._update_batch_status(Path(paths[0]).name)
 
         self._batch_thread = QThread()
-        self._batch_worker = PcapBatchWorker(paths, project_id=project_id, auto_save=auto_save)
+        self._batch_worker = PcapBatchWorker(
+            paths,
+            project_id=project_id,
+            auto_save=auto_save,
+            day_groups=self._pcap_day_groups or None,
+        )
         self._batch_worker.moveToThread(self._batch_thread)
         self._batch_thread.started.connect(self._batch_worker.run)
         self._batch_worker.progress.connect(self._on_batch_progress, Qt.QueuedConnection)
@@ -1187,6 +1290,8 @@ class PcapPage(QWidget):
         self.cmb_pcap_day.blockSignals(False)
         self.lbl_pcap_day.setVisible(True)
         self.cmb_pcap_day.setVisible(True)
+        if hasattr(self, "btn_save_all_periods"):
+            self.btn_save_all_periods.setEnabled(True)
         self._pcap_active_day = self.cmb_pcap_day.currentData() or next(iter(self._pcap_day_groups))
         return list(self._pcap_day_groups.get(self._pcap_active_day, []))
 
@@ -1200,6 +1305,8 @@ class PcapPage(QWidget):
             self.cmb_pcap_day.setVisible(False)
         if hasattr(self, "lbl_pcap_day"):
             self.lbl_pcap_day.setVisible(False)
+        if hasattr(self, "btn_save_all_periods"):
+            self.btn_save_all_periods.setEnabled(False)
 
     def _on_pcap_day_changed(self, index: int) -> None:
         if index < 0 or not self._pcap_day_groups:
@@ -1286,13 +1393,15 @@ class PcapPage(QWidget):
         source_count = len(getattr(summary, "source_paths", None) or [])
         self.btn_save_project.setEnabled(True)
         if source_count > 1:
-            self.btn_save_project.setText("Save Day to Project")
+            self.btn_save_project.setText("Save Period to Project")
+            self.btn_save_all_periods.setEnabled(bool(self._pcap_day_groups))
             self.btn_save_project.setToolTip(
                 "Save this daily aggregate to the project profile. The source files remain indexed individually."
             )
         else:
-            self.btn_save_project.setText("Save to Project")
+            self.btn_save_project.setText("Save Period to Project")
             self.btn_save_project.setToolTip("")
+            self.btn_save_all_periods.setEnabled(bool(self._pcap_day_groups))
         self.btn_ai_summary.setEnabled(True)
         self.btn_ai_summary.setText("AI Summary")
         self.btn_add_notes.setEnabled(True)
@@ -1958,6 +2067,38 @@ class PcapPage(QWidget):
         except Exception as exc:
             QMessageBox.critical(self, "PCAP export failed", str(exc))
 
+    def save_all_periods_to_project(self) -> None:
+        if not self._pcap_day_groups:
+            self._info("PCAP", "No period groups are loaded.", "Import a folder with a calendar date range first.")
+            return
+        if self._thread is not None or self._batch_thread is not None:
+            self._info("PCAP", "PCAP analysis is already running.")
+            return
+        if not self._ensure_project_workspace():
+            return
+
+        project_id = self._current_project_id()
+        if project_id is None:
+            self._info("PCAP", "Open an active project first.")
+            return
+
+        total_files = sum(len(paths) for paths in self._pcap_day_groups.values())
+        if not self.app._confirm_dialog(
+            title="Save all PCAP periods",
+            message=f"Analyze and save {len(self._pcap_day_groups):,} daily periods to the project?",
+            details=(
+                f"Total PCAP files: {total_files:,}\n"
+                "Each calendar day is saved once to the project profile, matching the JSON period workflow."
+            ),
+            ok_text="Save all",
+            cancel_text="Cancel",
+            width=620,
+        ):
+            return
+
+        all_paths = [path for paths in self._pcap_day_groups.values() for path in paths]
+        self._start_auto_pcap_batch(all_paths, auto_save=True)
+
     def save_to_project(self):
         self._save_current_to_project(show_dialog=True, check_device=True)
 
@@ -1993,30 +2134,58 @@ class PcapPage(QWidget):
             if not source_paths and getattr(self.summary, "file_path", ""):
                 source_paths = [self.summary.file_path]
             source_count = len(source_paths)
+            investigator = build_investigator_view(self.summary)
+            plain = str(investigator.get("plain_summary") or "")
+            period_day = resolve_period_day(
+                active_day=self._pcap_active_day,
+                file_paths=source_paths,
+                first_seen=self.summary.first_seen,
+                last_seen=self.summary.last_seen,
+            )
+            span = capture_span_note(self.summary.first_seen, self.summary.last_seen, period_day=period_day)
+            if span:
+                plain = f"{plain}\n{span}"
+
             if source_count > 1:
-                digest = self._aggregate_source_hash(source_paths)
+                digest = aggregate_hash_for_paths(source_paths)
                 saved_path = self.summary.file_path or self.summary.file_name
                 saved_name = self.summary.file_name or f"{source_count:,} PCAP files"
+                source_id = save_pcap_period_summary(
+                    project_id,
+                    period_day=period_day,
+                    file_path=saved_path,
+                    file_name=saved_name,
+                    file_sha256_value=digest,
+                    file_size=self.summary.file_size,
+                    format=self.summary.format,
+                    packet_count=self.summary.packet_count,
+                    wire_bytes=self.summary.wire_bytes,
+                    first_seen=self.summary.first_seen,
+                    last_seen=self.summary.last_seen,
+                    duration_seconds=self.summary.duration_seconds,
+                    likely_device_ip=self.summary.likely_device_ip,
+                    summary_text=plain,
+                )
             else:
                 saved_path = self.summary.file_path
                 saved_name = self.summary.file_name
                 digest = file_sha256(saved_path)
-            investigator = build_investigator_view(self.summary)
-            source_id = add_pcap_source(
-                project_id,
-                file_path=saved_path,
-                file_name=saved_name,
-                file_sha256_value=digest,
-                file_size=self.summary.file_size,
-                format=self.summary.format,
-                packet_count=self.summary.packet_count,
-                wire_bytes=self.summary.wire_bytes,
-                first_seen=self.summary.first_seen,
-                last_seen=self.summary.last_seen,
-                duration_seconds=self.summary.duration_seconds,
-                likely_device_ip=self.summary.likely_device_ip,
-                summary_text=str(investigator.get("plain_summary") or ""),
-            )
+                source_id = save_pcap_period_summary(
+                    project_id,
+                    period_day=period_day or resolve_period_day(file_paths=[saved_path], first_seen=self.summary.first_seen),
+                    file_path=saved_path,
+                    file_name=saved_name,
+                    file_sha256_value=digest,
+                    file_size=self.summary.file_size,
+                    format=self.summary.format,
+                    packet_count=self.summary.packet_count,
+                    wire_bytes=self.summary.wire_bytes,
+                    first_seen=self.summary.first_seen,
+                    last_seen=self.summary.last_seen,
+                    duration_seconds=self.summary.duration_seconds,
+                    likely_device_ip=self.summary.likely_device_ip,
+                    summary_text=plain,
+                )
             self._mark_saved_source_paths_done(project_id, source_paths)
             bound_project_ip = self._bind_project_device_ip_if_empty(project_id)
         except Exception as exc:

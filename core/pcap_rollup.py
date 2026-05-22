@@ -113,6 +113,10 @@ def _rollup_day_group(group: list[Any]) -> tuple[int, int, Counter[str]]:
 
 
 def pcap_day_key(source: Any) -> str:
+    period_day = str(getattr(source, "period_day", "") or "").strip()
+    if period_day and period_day != "undated":
+        return period_day
+
     for value in (
         getattr(source, "first_seen", ""),
         getattr(source, "last_seen", ""),

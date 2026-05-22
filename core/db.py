@@ -49,6 +49,7 @@ class PcapSource:
     duration_seconds: float
     likely_device_ip: str
     summary_text: str
+    period_day: str
     created_at: str
     updated_at: str
 
@@ -165,6 +166,9 @@ def init_db(db_path: Path = DEFAULT_DB_PATH) -> None:
             );
             """
         )
+        _ensure_columns(con, "pcap_sources", [
+            ("period_day", "TEXT NOT NULL DEFAULT ''"),
+        ])
 
         # --- Findings ---
         con.execute(
@@ -1068,6 +1072,7 @@ def add_pcap_source(
     duration_seconds: float = 0.0,
     likely_device_ip: str = "",
     summary_text: str = "",
+    period_day: str = "",
     db_path: Path = DEFAULT_DB_PATH,
 ) -> int:
     file_path = (file_path or "").strip()
@@ -1107,6 +1112,7 @@ def add_pcap_source(
                     duration_seconds = ?,
                     likely_device_ip = ?,
                     summary_text = ?,
+                    period_day = ?,
                     updated_at = strftime('%Y-%m-%d %H:%M:%f', 'now')
                 WHERE id = ?;
                 """,
@@ -1122,6 +1128,7 @@ def add_pcap_source(
                     float(duration_seconds or 0.0),
                     likely_device_ip or "",
                     summary_text or "",
+                    period_day or "",
                     source_id,
                 ),
             )
@@ -1141,9 +1148,10 @@ def add_pcap_source(
                     last_seen,
                     duration_seconds,
                     likely_device_ip,
-                    summary_text
+                    summary_text,
+                    period_day
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
                 """,
                 (
                     project_id,
@@ -1159,6 +1167,7 @@ def add_pcap_source(
                     float(duration_seconds or 0.0),
                     likely_device_ip or "",
                     summary_text or "",
+                    period_day or "",
                 ),
             )
             source_id = int(cur.lastrowid)
@@ -1166,6 +1175,118 @@ def add_pcap_source(
     touch_project(project_id, db_path=db_path)
     add_activity(project_id, "pcap_saved", f"#{source_id} {file_name}", db_path=db_path)
     return source_id
+
+
+def save_pcap_period_summary(
+    project_id: int,
+    *,
+    period_day: str,
+    file_path: str,
+    file_sha256_value: str,
+    file_size: int,
+    file_name: str = "",
+    format: str = "",
+    packet_count: int = 0,
+    wire_bytes: int = 0,
+    first_seen: str = "",
+    last_seen: str = "",
+    duration_seconds: float = 0.0,
+    likely_device_ip: str = "",
+    summary_text: str = "",
+    db_path: Path = DEFAULT_DB_PATH,
+) -> int:
+    """Upsert one daily PCAP aggregate for a project period (stable Profile day row)."""
+    period_day = (period_day or "").strip()
+    if not period_day:
+        raise ValueError("period_day is required for daily PCAP saves.")
+
+    with _connect(db_path) as con:
+        existing = con.execute(
+            """
+            SELECT id
+            FROM pcap_sources
+            WHERE project_id = ?
+              AND period_day = ?;
+            """,
+            (project_id, period_day),
+        ).fetchone()
+
+        if existing:
+            source_id = int(existing["id"])
+            con.execute(
+                """
+                UPDATE pcap_sources
+                SET
+                    file_path = ?,
+                    file_name = ?,
+                    file_sha256 = ?,
+                    file_size = ?,
+                    analyzed_at = strftime('%Y-%m-%d %H:%M:%f', 'now'),
+                    format = ?,
+                    packet_count = ?,
+                    wire_bytes = ?,
+                    first_seen = ?,
+                    last_seen = ?,
+                    duration_seconds = ?,
+                    likely_device_ip = ?,
+                    summary_text = ?,
+                    updated_at = strftime('%Y-%m-%d %H:%M:%f', 'now')
+                WHERE id = ?;
+                """,
+                (
+                    file_path,
+                    file_name,
+                    file_sha256_value,
+                    int(file_size or 0),
+                    format or "",
+                    int(packet_count or 0),
+                    int(wire_bytes or 0),
+                    first_seen or "",
+                    last_seen or "",
+                    float(duration_seconds or 0.0),
+                    likely_device_ip or "",
+                    summary_text or "",
+                    source_id,
+                ),
+            )
+        else:
+            source_id = add_pcap_source(
+                project_id,
+                file_path=file_path,
+                file_sha256_value=file_sha256_value,
+                file_size=file_size,
+                file_name=file_name,
+                format=format,
+                packet_count=packet_count,
+                wire_bytes=wire_bytes,
+                first_seen=first_seen,
+                last_seen=last_seen,
+                duration_seconds=duration_seconds,
+                likely_device_ip=likely_device_ip,
+                summary_text=summary_text,
+                period_day=period_day,
+                db_path=db_path,
+            )
+            return source_id
+
+    touch_project(project_id, db_path=db_path)
+    add_activity(project_id, "pcap_saved", f"#{source_id} {file_name}", db_path=db_path)
+    return source_id
+
+
+def list_saved_pcap_period_days(project_id: int, *, db_path: Path = DEFAULT_DB_PATH) -> list[str]:
+    with _connect(db_path) as con:
+        rows = con.execute(
+            """
+            SELECT DISTINCT period_day
+            FROM pcap_sources
+            WHERE project_id = ?
+              AND period_day != ''
+            ORDER BY period_day;
+            """,
+            (project_id,),
+        ).fetchall()
+    return [str(row["period_day"]) for row in rows if str(row["period_day"] or "").strip()]
 
 
 def list_pcap_sources(project_id: int, limit: int = 50, db_path: Path = DEFAULT_DB_PATH) -> list[PcapSource]:
@@ -1218,6 +1339,7 @@ def _pcap_source_from_row(r: sqlite3.Row) -> PcapSource:
         duration_seconds=float(r["duration_seconds"] or 0.0),
         likely_device_ip=str(r["likely_device_ip"] or ""),
         summary_text=str(r["summary_text"] or ""),
+        period_day=str(r["period_day"] or "") if "period_day" in r.keys() else "",
         created_at=str(r["created_at"] or ""),
         updated_at=str(r["updated_at"] or ""),
     )

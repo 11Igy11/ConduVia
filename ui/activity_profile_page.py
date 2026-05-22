@@ -173,6 +173,14 @@ class ActivityProfilePage(QWidget):
         )
         self.day_chart = BarChartWidget("JSON activity by day", value_key="count", value_label_key="detail", label_width=110, max_rows=14)
         self.pcap_day_chart = BarChartWidget("PCAP volume by day", value_key="count", value_label_key="detail", label_width=110, max_rows=14)
+        self.pcap_coverage_chart = BarChartWidget(
+            "PCAP period coverage",
+            value_key="saved",
+            value_label_key="detail",
+            label_width=110,
+            max_rows=14,
+            count_list=True,
+        )
         self.hour_chart = BarChartWidget("Activity by hour", value_key="count", max_rows=24)
         self.txt_routine = QTextEdit()
         self.txt_routine.setReadOnly(True)
@@ -185,8 +193,9 @@ class ActivityProfilePage(QWidget):
         behavior_grid.addWidget(self.domain_chart, 0, 1)
         behavior_grid.addWidget(self.day_chart, 1, 0)
         behavior_grid.addWidget(self.pcap_day_chart, 1, 1)
-        behavior_grid.addWidget(self.hour_chart, 2, 0)
-        behavior_grid.addWidget(self._section("Activity rhythm", self.txt_routine), 2, 1)
+        behavior_grid.addWidget(self.pcap_coverage_chart, 2, 0)
+        behavior_grid.addWidget(self.hour_chart, 2, 1)
+        behavior_grid.addWidget(self._section("Activity rhythm", self.txt_routine), 3, 0, 1, 2)
         behavior_grid.setColumnStretch(0, 1)
         behavior_grid.setColumnStretch(1, 1)
         scroll_layout.addLayout(behavior_grid)
@@ -246,6 +255,7 @@ class ActivityProfilePage(QWidget):
         self.device_ip_chart.set_rows(profile.get("pcap_device_ip_rows") or [], empty_text="No saved PCAP device IPs yet.")
         self.activity_chart.set_rows(profile.get("activity_type_rows") or [], empty_text="No activity events yet.")
         self._set_behavior_profile()
+        self._set_pcap_period_coverage(profile.get("pcap_period_coverage") or [])
 
         summary_lines = list(profile.get("summary_lines") or [])
         self.txt_summary.setPlainText("\n".join(summary_lines))
@@ -274,6 +284,7 @@ class ActivityProfilePage(QWidget):
         self.domain_chart.set_rows([], empty_text="No saved project dataset is available for observed domains.")
         self.day_chart.set_rows([], empty_text="No saved JSON activity is available by day.")
         self.pcap_day_chart.set_rows([], empty_text="No saved PCAP activity is available by day.")
+        self.pcap_coverage_chart.set_rows([], empty_text="No indexed PCAP periods for this project.")
         self.hour_chart.set_rows([], empty_text="No saved project dataset is available for hourly activity.")
         self.txt_routine.clear()
         self.txt_summary.clear()
@@ -415,6 +426,20 @@ class ActivityProfilePage(QWidget):
             if idx < len(self.metric_cards):
                 self.metric_cards[idx].setText(f"{metric['label']}\n{metric['value']}")
                 self.metric_cards[idx].setToolTip(metric["detail"])
+
+    def _set_pcap_period_coverage(self, rows: list[dict[str, Any]]) -> None:
+        chart_rows = []
+        for row in rows:
+            saved = str(row.get("status") or "") == "Saved to project"
+            chart_rows.append({
+                "label": str(row.get("label") or "-"),
+                "saved": 1 if saved else 0,
+                "detail": f"{row.get('detail') or ''} | {row.get('status') or 'Unknown'}",
+            })
+        self.pcap_coverage_chart.set_rows(
+            chart_rows,
+            empty_text="Import a PCAP folder with a calendar period to see indexed days.",
+        )
 
     def _set_behavior_profile(self):
         project_id = getattr(self.app, "current_project_id", None) if self.app else None

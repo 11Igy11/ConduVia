@@ -19,6 +19,8 @@ from core.db import (
     add_dataset_load,
     add_finding,
     add_pcap_source,
+    save_pcap_period_summary,
+    list_saved_pcap_period_days,
     create_project,
     file_sha256,
     get_app_setting,
@@ -1474,6 +1476,62 @@ class PcapAnalyzerTests(unittest.TestCase):
         self.assertEqual(rollup.total_bytes, 500_000)
         self.assertTrue(is_aggregate_pcap_source(aggregate))
         self.assertFalse(is_aggregate_pcap_source(per_file))
+
+    def test_save_pcap_period_summary_upserts_by_period_day(self):
+        with temporary_directory() as tmp:
+            db_path = Path(tmp) / "pcap-period.db"
+            init_db(db_path)
+            project_id = create_project("Case A", db_path=db_path)
+
+            first = save_pcap_period_summary(
+                project_id,
+                period_day="2024-02-01",
+                file_path="01/02/2024 (2 PCAP files)",
+                file_sha256_value="aggregate:one",
+                file_size=1000,
+                file_name="01/02/2024 (2 PCAP files)",
+                packet_count=100,
+                wire_bytes=500,
+                first_seen="2024-02-01 00:10:00.000",
+                last_seen="2024-02-01 23:50:00.000",
+                db_path=db_path,
+            )
+            second = save_pcap_period_summary(
+                project_id,
+                period_day="2024-02-01",
+                file_path="01/02/2024 (2 PCAP files)",
+                file_sha256_value="aggregate:one-updated",
+                file_size=1200,
+                file_name="01/02/2024 (2 PCAP files)",
+                packet_count=120,
+                wire_bytes=600,
+                first_seen="2024-02-01 00:05:00.000",
+                last_seen="2024-02-01 23:59:00.000",
+                db_path=db_path,
+            )
+            save_pcap_period_summary(
+                project_id,
+                period_day="2024-02-02",
+                file_path="02/02/2024 (1 PCAP files)",
+                file_sha256_value="aggregate:two",
+                file_size=800,
+                file_name="02/02/2024 (1 PCAP files)",
+                packet_count=80,
+                wire_bytes=400,
+                first_seen="2024-02-02 01:00:00.000",
+                last_seen="2024-02-02 22:00:00.000",
+                db_path=db_path,
+            )
+
+            sources = list_pcap_sources(project_id, db_path=db_path)
+            saved_days = list_saved_pcap_period_days(project_id, db_path=db_path)
+            profile = build_project_activity_profile(project_id, db_path=db_path)
+
+        self.assertEqual(first, second)
+        self.assertEqual(len(sources), 2)
+        self.assertEqual(saved_days, ["2024-02-01", "2024-02-02"])
+        self.assertEqual(profile["pcap_day_count"], 2)
+        self.assertEqual(profile["total_pcap_packets"], 200)
 
     def test_pcap_sources_are_persisted_per_project(self):
         with temporary_directory() as tmp:

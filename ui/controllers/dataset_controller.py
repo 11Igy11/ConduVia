@@ -249,18 +249,9 @@ class DatasetController(QObject):
                 return None
 
             opened = None
+            self._register_project_evidence_source(folder, scan)
             if json_files:
-                add_dataset_load(self.app.current_project_id, folder)
                 self._upsert_json_ingest_items(folder, scan.json_files)
-                update_dataset_scan_metadata(
-                    self.app.current_project_id,
-                    folder,
-                    json_file_count=len(scan.json_files),
-                    pcap_file_count=len(scan.pcap_files),
-                    total_size=scan.total_size,
-                    first_observed=scan.first_date,
-                    last_observed=scan.last_date,
-                )
                 json_day_groups = group_evidence_by_date(scan.json_files)
                 if self._should_load_folder_interactively(len(json_files), scan.json_size):
                     if len(json_day_groups) > 1:
@@ -310,8 +301,10 @@ class DatasetController(QObject):
 
                 pcap_day_groups = group_evidence_by_date(pending_pcap_files)
                 use_batch = should_batch_pcap_files(len(pending_pcap_files), scan.pcap_size)
+                multi_period = len(pcap_day_groups) > 1
+                save_all_periods = use_batch or multi_period
                 self.app.go_page(self.app.IDX_PCAP, self.app._nav_pcap)
-                if use_batch:
+                if save_all_periods:
                     self.app.pcap_page.load_pcap_queue(
                         evidence_paths(pending_pcap_files),
                         auto_save=True,
@@ -577,6 +570,27 @@ class DatasetController(QObject):
         if not date.isValid():
             return str(value or "")
         return date.toString("dd/MM/yyyy")
+
+    def _register_project_evidence_source(self, folder: str, scan) -> None:
+        """Register imported evidence period on the project (same idea as JSON dataset load)."""
+        project_id = self.app.current_project_id
+        if project_id is None:
+            return
+
+        add_dataset_load(project_id, folder)
+        update_dataset_scan_metadata(
+            project_id,
+            folder,
+            json_file_count=len(scan.json_files),
+            pcap_file_count=len(scan.pcap_files),
+            total_size=scan.total_size,
+            first_observed=scan.first_date,
+            last_observed=scan.last_date,
+        )
+        if hasattr(self.app, "projects_ui_controller"):
+            self.app.projects_ui_controller.sync_project_workspace(project_id)
+            self.app.projects_ui_controller.refresh_recent_datasets(project_id)
+            self.app.projects_ui_controller.refresh_case_dashboard(project_id)
 
     def _mark_large_json_source_indexed(self, folder: str, file_count: int, byte_count: int) -> None:
         if hasattr(self.app, "lbl_path"):
