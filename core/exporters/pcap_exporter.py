@@ -77,8 +77,8 @@ def export_pcap_summary_html(
         _metric_card(text["traffic_volume"], human_bytes(summary.wire_bytes, precision=2)),
         _metric_card(text["likely_device_ip"], summary.likely_device_ip or "-"),
         _metric_card(text["capture_period"], period),
-        _metric_card(text["dns_queries"], len(summary.dns_queries)),
-        _metric_card(text["tls_sni_hosts"], len(summary.tls_sni)),
+        _metric_card(text["dns_queries"], summary.total_dns_names or len(summary.dns_queries)),
+        _metric_card(text["tls_sni_hosts"], summary.total_tls_sni_hosts or len(summary.tls_sni)),
         _metric_card(text["readable_samples"], len(summary.readable_samples)),
     ])
 

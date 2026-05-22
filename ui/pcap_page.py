@@ -37,7 +37,16 @@ from core.exporters.pcap_exporter import export_pcap_summary_html
 from core.exporters.table_exporter import export_table_html
 from core.formatters import format_duration_compact_ms, format_pcap_datetime, human_bytes
 from core.evidence_policy import format_period_day_label, period_combo_label
-from core.pcap_analyzer import PcapSummary, analyze_pcap, analyze_pcap_files, build_investigator_view
+from core.pcap_analyzer import (
+    METADATA_TOP_DNS_ROWS,
+    METADATA_TOP_HTTP_ROWS,
+    METADATA_TOP_TLS_ROWS,
+    PcapSummary,
+    analyze_pcap,
+    analyze_pcap_files,
+    build_investigator_view,
+    metadata_count_label,
+)
 from core.pcap_period import aggregate_hash_for_paths, capture_span_note, resolve_period_day
 from core.protocols import format_ip_proto
 from core.workspace import workspace_export_path
@@ -1535,11 +1544,16 @@ class PcapPage(QWidget):
         self._set_table(self.tbl_visible_metadata, metadata_rows)
         self._set_table(self.tbl_samples, sample_rows)
 
-        self.lbl_visible_metadata_count.setText(f"{len(metadata_rows):,} visible rows")
+        dns_total = int(summary.total_dns_names or len(summary.dns_query_counts or {}) or 0)
+        tls_total = int(summary.total_tls_sni_hosts or len(summary.tls_sni_counts or {}) or 0)
+        http_total = int(summary.total_http_hosts or len(summary.http_host_counts or {}) or 0)
+        self.lbl_visible_metadata_count.setText(
+            f"{len(metadata_rows):,} table rows (top entries per type)"
+        )
         self.lbl_visible_metadata_breakdown.setText(
-            f"DNS: {len(summary.dns_queries or []):,} | "
-            f"TLS SNI: {len(summary.tls_sni or []):,} | "
-            f"HTTP hosts: {len(summary.http_hosts or []):,}"
+            f"DNS: {metadata_count_label(dns_total, len(summary.dns_queries or []))} | "
+            f"TLS SNI: {metadata_count_label(tls_total, len(summary.tls_sni or []))} | "
+            f"HTTP hosts: {metadata_count_label(http_total, len(summary.http_hosts or []))}"
         )
         self.lbl_samples_count.setText(f"{len(sample_rows):,} readable rows")
 
@@ -1954,9 +1968,10 @@ class PcapPage(QWidget):
     def _overview_text(self, summary: PcapSummary) -> str:
         lines = [
             "What is visible:",
-            f"- DNS queries: {len(summary.dns_queries)} unique visible names",
-            f"- TLS SNI hosts: {len(summary.tls_sni)} unique visible host names",
-            f"- HTTP cleartext hosts: {len(summary.http_hosts)} unique hosts",
+            f"- DNS queries: {metadata_count_label(int(summary.total_dns_names or 0), len(summary.dns_queries or []))} unique names",
+            f"- TLS SNI hosts: {metadata_count_label(int(summary.total_tls_sni_hosts or 0), len(summary.tls_sni or []))} unique host names",
+            f"- HTTP cleartext hosts: {metadata_count_label(int(summary.total_http_hosts or 0), len(summary.http_hosts or []))} unique hosts",
+            f"- Evidence table shows top {METADATA_TOP_DNS_ROWS} DNS / {METADATA_TOP_TLS_ROWS} TLS / {METADATA_TOP_HTTP_ROWS} HTTP entries by frequency.",
             f"- Readable payload samples: {len(summary.readable_samples)}",
             "",
             "Important limitation:",

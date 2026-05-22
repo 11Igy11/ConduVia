@@ -43,6 +43,9 @@ APP_PORT_HINTS = {
 PRINTABLE_BYTES = set(bytes(string.printable, "ascii")) | {9, 10, 13}
 
 ARTIFACT_LIMIT_PER_KIND = 300
+METADATA_TOP_DNS_ROWS = 50
+METADATA_TOP_TLS_ROWS = 50
+METADATA_TOP_HTTP_ROWS = 30
 
 
 @dataclass
@@ -66,6 +69,9 @@ class PcapSummary:
     total_dns_names: int = 0
     total_tls_sni_hosts: int = 0
     total_http_hosts: int = 0
+    dns_query_counts: dict[str, int] = field(default_factory=dict)
+    tls_sni_counts: dict[str, int] = field(default_factory=dict)
+    http_host_counts: dict[str, int] = field(default_factory=dict)
     dns_queries: list[dict[str, Any]] = field(default_factory=list)
     tls_sni: list[dict[str, Any]] = field(default_factory=list)
     http_hosts: list[dict[str, Any]] = field(default_factory=list)
@@ -387,17 +393,20 @@ class _PcapAccumulator:
             total_dns_names=len(self.dns_queries),
             total_tls_sni_hosts=len(self.tls_sni),
             total_http_hosts=len(self.http_hosts),
+            dns_query_counts=dict(self.dns_queries),
+            tls_sni_counts=dict(self.tls_sni),
+            http_host_counts=dict(self.http_hosts),
             dns_queries=[
                 {"query": k, "count": v}
-                for k, v in self.dns_queries.most_common(50)
+                for k, v in self.dns_queries.most_common(METADATA_TOP_DNS_ROWS)
             ],
             tls_sni=[
                 {"host": k, "count": v}
-                for k, v in self.tls_sni.most_common(50)
+                for k, v in self.tls_sni.most_common(METADATA_TOP_TLS_ROWS)
             ],
             http_hosts=[
                 {"host": k, "count": v}
-                for k, v in self.http_hosts.most_common(30)
+                for k, v in self.http_hosts.most_common(METADATA_TOP_HTTP_ROWS)
             ],
             readable_samples=self.readable_samples,
             artifacts=sorted(
@@ -512,12 +521,9 @@ def merge_pcap_summaries(summaries: list[PcapSummary], *, label: str = "") -> Pc
             endpoints[str(row.get("ip") or "")] += _safe_int(row.get("packets"))
         for row in summary.top_ports:
             ports[(str(row.get("protocol") or ""), _safe_int(row.get("port")))] += _safe_int(row.get("packets"))
-        for row in summary.dns_queries:
-            dns[str(row.get("query") or "")] += _safe_int(row.get("count"))
-        for row in summary.tls_sni:
-            tls[str(row.get("host") or "")] += _safe_int(row.get("count"))
-        for row in summary.http_hosts:
-            http[str(row.get("host") or "")] += _safe_int(row.get("count"))
+        _merge_metadata_counter(dns, summary.dns_query_counts, summary.dns_queries, key_name="query")
+        _merge_metadata_counter(tls, summary.tls_sni_counts, summary.tls_sni, key_name="host")
+        _merge_metadata_counter(http, summary.http_host_counts, summary.http_hosts, key_name="host")
         for row in summary.hourly_activity:
             hourly[str(row.get("hour") or "")] += _safe_int(row.get("packets") or row.get("count"))
 
@@ -598,19 +604,22 @@ def merge_pcap_summaries(summaries: list[PcapSummary], *, label: str = "") -> Pc
         total_dns_names=len(dns),
         total_tls_sni_hosts=len(tls),
         total_http_hosts=len(http),
+        dns_query_counts=dict(dns),
+        tls_sni_counts=dict(tls),
+        http_host_counts=dict(http),
         dns_queries=[
             {"query": query, "count": count}
-            for query, count in dns.most_common(50)
+            for query, count in dns.most_common(METADATA_TOP_DNS_ROWS)
             if query
         ],
         tls_sni=[
             {"host": host, "count": count}
-            for host, count in tls.most_common(50)
+            for host, count in tls.most_common(METADATA_TOP_TLS_ROWS)
             if host
         ],
         http_hosts=[
             {"host": host, "count": count}
-            for host, count in http.most_common(30)
+            for host, count in http.most_common(METADATA_TOP_HTTP_ROWS)
             if host
         ],
         readable_samples=samples[:300],
@@ -894,8 +903,31 @@ def _visible_count(total: int, shown: int) -> str:
     total = int(total or 0)
     shown = int(shown or 0)
     if total > shown:
-        return f"{total} ({shown} shown)"
-    return str(total or shown)
+        return f"{total:,} ({shown:,} shown)"
+    return f"{total:,}" if total else "0"
+
+
+def _merge_metadata_counter(
+    target: Counter[str],
+    counts: dict[str, int] | None,
+    rows: list[dict[str, Any]] | None,
+    *,
+    key_name: str,
+) -> None:
+    if counts:
+        for key, value in counts.items():
+            name = str(key or "").strip()
+            if name:
+                target[name] += _safe_int(value)
+        return
+    for row in rows or []:
+        name = str(row.get(key_name) or "").strip()
+        if name:
+            target[name] += _safe_int(row.get("count"))
+
+
+def metadata_count_label(total: int, shown: int) -> str:
+    return _visible_count(total, shown)
 
 
 def _fmt_pcap_dt(value: Any) -> str:

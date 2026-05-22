@@ -59,7 +59,15 @@ from core.exporters.pcap_exporter import export_pcap_summary_html
 from core.exporters.registry_exporter import export_registry_html
 from core.loader import list_json_files, list_json_files_recursive, load_folder, load_folder_recursive, load_json_file
 from core.parser import extract_dataset_meta
-from core.pcap_analyzer import analyze_pcap, analyze_pcap_files, build_communication_rows, build_investigator_view
+from core.pcap_analyzer import (
+    METADATA_TOP_DNS_ROWS,
+    PcapSummary,
+    analyze_pcap,
+    analyze_pcap_files,
+    build_communication_rows,
+    build_investigator_view,
+    merge_pcap_summaries,
+)
 from core.pcap_rollup import is_aggregate_pcap_source, rollup_pcap_sources
 from core.project_datasets import count_project_json_datasets, list_project_json_dataset_files, load_project_dataset_flows
 from core.project_behavior_index import build_project_behavior_index
@@ -1377,6 +1385,35 @@ class PcapAnalyzerTests(unittest.TestCase):
         self.assertEqual(rows[0]["activity_type"], "Possible voice/video media session")
         self.assertEqual(rows[0]["confidence"], "medium")
         self.assertTrue(any(row["activity_type"] == "Push/background messaging transport" for row in rows))
+
+    def test_merge_pcap_summaries_uses_full_dns_counters_not_top_rows_only(self):
+        first_counts = {f"host{i}.example": i + 1 for i in range(60)}
+        second_counts = {f"extra{i}.example": 1 for i in range(40)}
+
+        merged = merge_pcap_summaries([
+            PcapSummary(
+                file_name="a.pcap",
+                total_dns_names=len(first_counts),
+                dns_query_counts=first_counts,
+                dns_queries=[
+                    {"query": name, "count": count}
+                    for name, count in sorted(first_counts.items(), key=lambda item: item[1], reverse=True)[:METADATA_TOP_DNS_ROWS]
+                ],
+            ),
+            PcapSummary(
+                file_name="b.pcap",
+                total_dns_names=len(second_counts),
+                dns_query_counts=second_counts,
+                dns_queries=[
+                    {"query": name, "count": count}
+                    for name, count in sorted(second_counts.items(), key=lambda item: item[1], reverse=True)[:METADATA_TOP_DNS_ROWS]
+                ],
+            ),
+        ])
+
+        self.assertEqual(merged.total_dns_names, 100)
+        self.assertEqual(len(merged.dns_query_counts), 100)
+        self.assertEqual(len(merged.dns_queries), METADATA_TOP_DNS_ROWS)
 
     def test_pcap_communication_rows_detect_apple_push_metadata(self):
         flows = [
