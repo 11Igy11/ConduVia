@@ -710,22 +710,46 @@ def build_investigator_view(summary: PcapSummary) -> dict[str, Any]:
     }
 
 
+COMMUNICATION_SERVICE_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("Apple / iCloud", (
+        "apple.com",
+        "icloud",
+        "push.apple",
+        "courier",
+        "itunes",
+        "mzstatic",
+        "apple-dns",
+        "mask-api.icloud",
+        "configuration.apple",
+        "applepush",
+    )),
+    ("WhatsApp", ("whatsapp", "wa.me")),
+    ("Viber", ("viber",)),
+    ("Telegram", ("telegram", "t.me")),
+    ("Signal", ("signal.org", "signal.art", "whispersystems")),
+    ("Facebook / Messenger", ("facebook", "messenger", "edge-mqtt", "fbcdn", "instagram")),
+    ("Microsoft / Teams", ("microsoft", "office365", "outlook", "teams", "skype", "live.com")),
+    ("Snapchat", ("snapchat", "snap.com")),
+    ("TikTok", ("tiktok", "byteoversea")),
+    ("Google / YouTube", ("youtube", "googlevideo", "googleapis", "geller-pa.googleapis.com", "notifications-pa")),
+    ("Spotify", ("spotify",)),
+)
+
+
 def _communication_service(flow: dict[str, Any]) -> str:
     text = " ".join(
         str(flow.get(key) or "")
         for key in ("requested_server_name", "application_name", "pcap_payload_preview")
-    ).lower()
-    checks = [
-        ("WhatsApp", ("whatsapp", "wa.me")),
-        ("Viber", ("viber",)),
-        ("Telegram", ("telegram", "t.me")),
-        ("Facebook / Messenger", ("facebook", "messenger", "edge-mqtt", "fbcdn", "instagram")),
-        ("TikTok", ("tiktok", "byteoversea")),
-        ("Google / YouTube", ("youtube", "googlevideo", "googleapis")),
-        ("Spotify", ("spotify",)),
-    ]
-    for service, needles in checks:
-        if any(needle in text for needle in needles):
+    )
+    return _match_service_rules(text, COMMUNICATION_SERVICE_RULES)
+
+
+def _match_service_rules(text: str, rules: tuple[tuple[str, tuple[str, ...]], ...]) -> str:
+    haystack = (text or "").lower()
+    if not haystack:
+        return ""
+    for service, needles in rules:
+        if any(needle in haystack for needle in needles):
             return service
     return ""
 
@@ -763,13 +787,25 @@ def _communication_activity(flow: dict[str, Any], service: str) -> tuple[str, st
         reasons.append("sustained QUIC/UDP 443 traffic")
         return "Possible app media or heavy encrypted session", "medium", "; ".join(reasons)
 
-    if _is_push_host(host_l) or 5222 in ports:
+    if _is_push_host(host_l) or 5222 in ports or "applepush" in app.lower():
         reasons.append("known push/messaging transport signal")
-        return "Push/background messaging transport", "medium", "; ".join(reasons)
+        confidence = "medium" if service in {"Apple / iCloud", "Facebook / Messenger", "Google / YouTube"} else "low"
+        return "Push/background messaging transport", confidence, "; ".join(reasons)
+
+    if service == "Apple / iCloud" and any(token in host_l for token in ("gateway.icloud", "mask-api", "courier", "push")):
+        reasons.append("Apple cloud/push infrastructure visible in metadata")
+        return "Possible iCloud / device sync or push transport", "medium", "; ".join(reasons)
 
     if _is_messaging_endpoint(host_l, service):
         reasons.append("messaging endpoint name visible in metadata")
-        confidence = "medium" if service in {"WhatsApp", "Viber", "Telegram", "Facebook / Messenger"} else "low"
+        confidence = "medium" if service in {
+            "WhatsApp",
+            "Viber",
+            "Telegram",
+            "Facebook / Messenger",
+            "Signal",
+            "Apple / iCloud",
+        } else "low"
         return "Possible messaging endpoint", confidence, "; ".join(reasons)
 
     if duration_ms >= 120_000 and bytes_count <= 120_000:
@@ -792,7 +828,20 @@ def _communication_activity(flow: dict[str, Any], service: str) -> tuple[str, st
 
 
 def _is_push_host(host: str) -> bool:
-    return any(token in host for token in ("edge-mqtt", "mqtt", "push", "notification", "notify", "fcm"))
+    return any(
+        token in host
+        for token in (
+            "edge-mqtt",
+            "mqtt",
+            "push",
+            "push.apple",
+            "courier",
+            "notification",
+            "notify",
+            "fcm",
+            "apns",
+        )
+    )
 
 
 def _is_messaging_endpoint(host: str, service: str) -> bool:
@@ -877,16 +926,13 @@ def _build_service_rows(summary: PcapSummary) -> list[dict[str, Any]]:
 
 
 def _service_label(host: str) -> str:
+    label = _match_service_rules(host, COMMUNICATION_SERVICE_RULES)
+    if label:
+        return label
     h = (host or "").lower()
     checks = [
-        ("WhatsApp", ("whatsapp", "wa.me")),
-        ("Facebook / Meta", ("facebook", "fbcdn", "fb.com", "edge-mqtt", "graph.instagram", "instagram")),
-        ("Google / YouTube", ("google", "gstatic", "googleapis", "youtube", "ytimg", "doubleclick")),
-        ("TikTok", ("tiktok", "byteoversea", "pangle")),
         ("Samsung", ("samsung",)),
         ("Booking", ("booking.com",)),
-        ("Viber", ("viber",)),
-        ("Spotify / local media", ("spotify",)),
         ("Advertising / tracking", ("adnxs", "adform", "criteo", "rubiconproject", "googlesyndication", "zemanta")),
         ("Certificates / validation", ("ocsp", "cert", "crl", "godaddy")),
         ("Cloudflare / CDN", ("cloudflare", "cloudfront", "akamai", "cdn")),

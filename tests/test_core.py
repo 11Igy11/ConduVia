@@ -1378,6 +1378,50 @@ class PcapAnalyzerTests(unittest.TestCase):
         self.assertEqual(rows[0]["confidence"], "medium")
         self.assertTrue(any(row["activity_type"] == "Push/background messaging transport" for row in rows))
 
+    def test_pcap_communication_rows_detect_apple_push_metadata(self):
+        flows = [
+            {
+                "src_ip": "10.0.0.10",
+                "src_port": 51000,
+                "dst_ip": "17.253.144.10",
+                "dst_port": 443,
+                "protocol": 6,
+                "application_name": "TLS",
+                "requested_server_name": "courier2.push.apple.com",
+                "bidirectional_bytes": 4200,
+                "bidirectional_packets": 12,
+                "bidirectional_duration_ms": 4500,
+                "bidirectional_first_seen_ms": "2024-02-01 09:00:00.000",
+                "bidirectional_last_seen_ms": "2024-02-01 09:00:04.500",
+            },
+            {
+                "src_ip": "10.0.0.10",
+                "src_port": 52000,
+                "dst_ip": "17.253.144.11",
+                "dst_port": 443,
+                "protocol": 6,
+                "application_name": "TLS",
+                "requested_server_name": "gateway.icloud.com",
+                "bidirectional_bytes": 18000,
+                "bidirectional_packets": 24,
+                "bidirectional_duration_ms": 12000,
+                "bidirectional_first_seen_ms": "2024-02-01 10:00:00.000",
+                "bidirectional_last_seen_ms": "2024-02-01 10:00:12.000",
+            },
+        ]
+
+        rows = build_communication_rows(flows)
+
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(rows[0]["service"], "Apple / iCloud")
+        self.assertIn(
+            rows[0]["activity_type"],
+            {
+                "Push/background messaging transport",
+                "Possible iCloud / device sync or push transport",
+            },
+        )
+
     def test_analyze_pcap_extracts_dns_http_and_flows(self):
         with temporary_directory() as tmp:
             path = Path(tmp) / "sample.pcap"

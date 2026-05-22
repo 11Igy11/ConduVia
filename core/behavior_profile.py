@@ -8,6 +8,7 @@ from core.timeutils import parse_timestamp
 
 
 SERVICE_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("Apple / iCloud", ("apple.com", "icloud", "push.apple", "courier", "itunes", "applepush")),
     ("Facebook / Meta", ("facebook", "fbcdn", "fb.com", "instagram", "edge-mqtt", "messenger")),
     ("WhatsApp", ("whatsapp", "wa.me")),
     ("Google / YouTube", ("youtube", "ytimg", "googlevideo", "googleapis", "googleusercontent")),
