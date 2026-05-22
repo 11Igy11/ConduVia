@@ -25,6 +25,13 @@ Thumbs.db
 # Local datasets (do not commit)
 data/
 data/**/*.json
+*.pcap
+*.pcapng
+*.cap
+
+# Local evidence samples (keep outside repo)
+pcap_json_real*/
+**/pcap_json_real*/
 # Runtime notes data
 DataBase/notes/*.txt
 

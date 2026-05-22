@@ -13,6 +13,7 @@ from core.ai.assistant_service import AIAssistantService, AISettings
 from core.ai.context_builder import build_activity_profile_context, build_dataset_context, build_pcap_context
 from core.ai.prompts import build_activity_profile_summary_prompt, build_dataset_summary_prompt, build_pcap_summary_prompt
 from core.behavior_profile import build_flow_behavior_profile
+from core.case_ingest import evidence_paths, filter_case_scan, group_evidence_by_date, scan_case_source
 from core.compare import compare_flows, summarize_new_flows
 from core.db import (
     add_dataset_load,
@@ -23,13 +24,20 @@ from core.db import (
     get_app_setting,
     get_app_settings,
     get_project,
+    get_project_behavior_profile,
     init_db,
     list_pcap_sources,
     list_project_pcap_device_ips,
+    ingest_status_map,
+    list_ingest_items,
+    list_recent_dataset_sources,
     list_recent_datasets,
+    mark_ingest_item,
     set_app_setting,
     set_project_subject,
     set_project_target,
+    update_dataset_scan_metadata,
+    upsert_ingest_items,
 )
 from core.flow_stats import compute_registry_summary, top_field_by_bytes, top_field_values
 from core.formatters import (
@@ -47,10 +55,12 @@ from core.exporters.notes_exporter import export_notes_docx
 from core.exporters.profile_exporter import export_activity_profile_html
 from core.exporters.pcap_exporter import export_pcap_summary_html
 from core.exporters.registry_exporter import export_registry_html
-from core.loader import list_json_files, load_folder, load_json_file
+from core.loader import list_json_files, list_json_files_recursive, load_folder, load_folder_recursive, load_json_file
 from core.parser import extract_dataset_meta
-from core.pcap_analyzer import analyze_pcap, build_communication_rows, build_investigator_view
-from core.project_datasets import list_project_json_dataset_files, load_project_dataset_flows
+from core.pcap_analyzer import analyze_pcap, analyze_pcap_files, build_communication_rows, build_investigator_view
+from core.pcap_rollup import is_aggregate_pcap_source, rollup_pcap_sources
+from core.project_datasets import count_project_json_datasets, list_project_json_dataset_files, load_project_dataset_flows
+from core.project_behavior_index import build_project_behavior_index
 from core.project_identity import identifier_values_match, is_valid_oib, normalize_identifier_value
 from core.project_profile import build_project_activity_profile, format_project_activity_profile
 from core.protocols import describe_ip_proto, format_ip_proto_with_description
@@ -108,6 +118,58 @@ class LoaderTests(unittest.TestCase):
 
         self.assertEqual([p.name for p in files], ["a.json", "b.json"])
         self.assertEqual([f["id"] for f in flows], ["a", "b"])
+
+    def test_recursive_folder_loader_walks_case_tree(self):
+        with temporary_directory() as tmp:
+            root = Path(tmp)
+            day = root / "33007" / "240120"
+            day.mkdir(parents=True)
+            (root / "top.json").write_text(json.dumps([{"id": "top"}]), encoding="utf-8")
+            (day / "33007_167_20240120000000.json").write_text(json.dumps([{"id": "nested"}]), encoding="utf-8")
+            (day / "33007_167_20240120000000.pcap").write_bytes(b"\xd4\xc3\xb2\xa1")
+
+            files = list_json_files_recursive(root)
+            _loaded_files, flows = load_folder_recursive(root)
+            scan = scan_case_source(root)
+
+            self.assertEqual([path.name for path in list_json_files(root)], ["top.json"])
+            self.assertEqual([path.name for path in files], ["33007_167_20240120000000.json", "top.json"])
+            self.assertEqual([flow["id"] for flow in flows], ["nested", "top"])
+            self.assertEqual(len(scan.json_files), 2)
+            self.assertEqual(len(scan.pcap_files), 1)
+            self.assertEqual(scan.first_date, "2024-01-20")
+            self.assertEqual(evidence_paths(scan.pcap_files), [str(day / "33007_167_20240120000000.pcap")])
+
+    def test_case_ingest_scan_can_filter_by_detected_period(self):
+        with temporary_directory() as tmp:
+            root = Path(tmp)
+            day_one = root / "33007" / "240120"
+            day_two = root / "33007" / "240121"
+            day_one.mkdir(parents=True)
+            day_two.mkdir(parents=True)
+            (day_one / "33007_167_20240120000000.json").write_text("[]", encoding="utf-8")
+            (day_one / "33007_167_20240120000000.pcap").write_bytes(b"pcap")
+            (day_two / "33007_167_20240121000000.json").write_text("[]", encoding="utf-8")
+            (root / "undated.json").write_text("[]", encoding="utf-8")
+
+            scan = scan_case_source(root)
+            filtered = filter_case_scan(scan, start_date="2024-01-20", end_date="2024-01-20")
+            filtered_with_undated = filter_case_scan(
+                scan,
+                start_date="2024-01-20",
+                end_date="2024-01-20",
+                include_undated=True,
+            )
+            groups = group_evidence_by_date(scan.pcap_files)
+
+        self.assertEqual([item.path.name for item in filtered.json_files], ["33007_167_20240120000000.json"])
+        self.assertEqual([item.path.name for item in filtered.pcap_files], ["33007_167_20240120000000.pcap"])
+        self.assertEqual(
+            [item.path.name for item in filtered_with_undated.json_files],
+            ["33007_167_20240120000000.json", "undated.json"],
+        )
+        self.assertEqual(list(groups), ["2024-01-20"])
+        self.assertEqual([item.path.name for item in groups["2024-01-20"]], ["33007_167_20240120000000.pcap"])
 
 
 class TimeAndFormatterTests(unittest.TestCase):
@@ -198,6 +260,63 @@ class BehaviorProfileTests(unittest.TestCase):
 
         self.assertEqual(loaded, ["one.pcap"])
         self.assertEqual(page._pcap_queue, ["two.pcap", "three.pcap"])
+        self.assertFalse(page._pcap_queue_auto_process)
+
+    def test_pcap_page_queue_can_auto_process_folder_batches(self):
+        from ui.pcap_page import PcapPage
+
+        page = PcapPage.__new__(PcapPage)
+        started: list[tuple[list[str], bool]] = []
+        page._start_auto_pcap_batch = lambda paths, auto_save=False: started.append((list(paths), bool(auto_save)))
+
+        PcapPage.load_pcap_queue(
+            page,
+            ["one.pcap", "two.pcap", "three.pcap"],
+            auto_save=True,
+            auto_process=True,
+        )
+
+        self.assertEqual(started, [(["one.pcap", "two.pcap", "three.pcap"], True)])
+
+    def test_ingest_items_track_done_and_retry_pending_sources(self):
+        with temporary_directory() as tmp:
+            root = Path(tmp)
+            db_path = root / "ingest-items.db"
+            init_db(db_path)
+            project_id = create_project("Case A", db_path=db_path)
+            one = root / "one.pcap"
+            two = root / "two.pcap"
+            one.write_bytes(b"one")
+            two.write_bytes(b"two")
+
+            upsert_ingest_items(
+                project_id,
+                str(root),
+                [
+                    {"file_path": str(one), "file_type": "pcap", "file_size": one.stat().st_size},
+                    {"file_path": str(two), "file_type": "pcap", "file_size": two.stat().st_size},
+                ],
+                db_path=db_path,
+            )
+            mark_ingest_item(project_id, str(one), "done", db_path=db_path)
+            upsert_ingest_items(
+                project_id,
+                str(root),
+                [
+                    {"file_path": str(one), "file_type": "pcap", "file_size": one.stat().st_size},
+                    {"file_path": str(two), "file_type": "pcap", "file_size": two.stat().st_size},
+                ],
+                db_path=db_path,
+            )
+
+            statuses = ingest_status_map(project_id, [str(one), str(two)], db_path=db_path)
+            pending = list_ingest_items(project_id, file_type="pcap", status="pending", db_path=db_path)
+            done = list_ingest_items(project_id, file_type="pcap", status="done", db_path=db_path)
+
+        self.assertEqual(statuses[str(one)], "done")
+        self.assertEqual(statuses[str(two)], "pending")
+        self.assertEqual([item.file_name for item in pending], ["two.pcap"])
+        self.assertEqual([item.file_name for item in done], ["one.pcap"])
 
     def test_project_dataset_loader_aggregates_saved_project_sources(self):
         with temporary_directory() as tmp:
@@ -236,8 +355,10 @@ class BehaviorProfileTests(unittest.TestCase):
             db_path = root / "project-json-files.db"
             folder = root / "json-folder"
             folder.mkdir()
+            nested = folder / "20240120"
+            nested.mkdir()
             one = folder / "one.json"
-            two = folder / "two.json"
+            two = nested / "two.json"
             one.write_text(json.dumps([{"id": "one"}]), encoding="utf-8")
             two.write_text(json.dumps([{"id": "two"}]), encoding="utf-8")
             init_db(db_path)
@@ -254,6 +375,500 @@ class BehaviorProfileTests(unittest.TestCase):
         self.assertEqual(result["loaded_json_file_count"], 2)
         self.assertEqual(result["json_file_count"], 2)
         self.assertEqual(profile["dataset_count"], 2)
+
+    def test_project_json_dataset_count_uses_cached_large_folder_scan(self):
+        with temporary_directory() as tmp:
+            root = Path(tmp)
+            db_path = root / "project-json-index.db"
+            folder = root / "evidence-disk"
+            folder.mkdir()
+            init_db(db_path)
+            project_id = create_project("Case A", db_path=db_path)
+            add_dataset_load(project_id, str(folder), db_path=db_path)
+            update_dataset_scan_metadata(
+                project_id,
+                str(folder),
+                json_file_count=2500,
+                pcap_file_count=40,
+                total_size=3_500_000_000,
+                first_observed="2024-01-20",
+                last_observed="2024-03-02",
+                db_path=db_path,
+            )
+
+            rows = list_project_json_dataset_files(project_id, db_path=db_path)
+            count = count_project_json_datasets(project_id, db_path=db_path)
+            loaded = load_project_dataset_flows(project_id, db_path=db_path)
+            profile = build_project_activity_profile(project_id, db_path=db_path)
+
+        self.assertEqual(count, 2500)
+        self.assertEqual(profile["dataset_count"], 2500)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["kind"], "Folder index")
+        self.assertEqual(rows[0]["file_count"], 2500)
+        self.assertEqual(loaded["json_file_count"], 2500)
+        self.assertEqual(loaded["flow_count"], 0)
+        self.assertEqual(loaded["source_rows"][0]["status"], "indexed")
+
+    def test_project_behavior_index_persists_profile_from_saved_json_sources(self):
+        with temporary_directory() as tmp:
+            root = Path(tmp)
+            db_path = root / "project-behavior-index.db"
+            folder = root / "json-folder"
+            nested = folder / "20260104"
+            nested.mkdir(parents=True)
+            one = folder / "one.json"
+            two = nested / "two.json"
+            one.write_text(
+                json.dumps([
+                    {
+                        "requested_server_name": "web.facebook.com",
+                        "application_name": "TLS",
+                        "bidirectional_bytes": 2048,
+                        "bidirectional_first_seen_ms": "2026-01-04 07:10:00",
+                    },
+                    {
+                        "requested_server_name": "rr4---sn.googlevideo.com",
+                        "application_name": "TLS",
+                        "bidirectional_bytes": 4096,
+                        "bidirectional_first_seen_ms": "2026-01-04 09:30:00",
+                    },
+                ]),
+                encoding="utf-8",
+            )
+            two.write_text(
+                json.dumps([
+                    {
+                        "requested_server_name": "api.tiktokv.com",
+                        "application_name": "TLS",
+                        "bidirectional_bytes": 512,
+                        "bidirectional_first_seen_ms": "2026-01-04 09:45:00",
+                    }
+                ]),
+                encoding="utf-8",
+            )
+            init_db(db_path)
+            project_id = create_project("Case A", db_path=db_path)
+            add_dataset_load(project_id, str(folder), db_path=db_path)
+
+            profile = build_project_behavior_index(project_id, db_path=db_path)
+            saved = get_project_behavior_profile(project_id, db_path=db_path)
+            cached = build_project_behavior_index(project_id, db_path=db_path)
+
+        self.assertEqual(profile["project_id"], project_id)
+        self.assertEqual(profile["flow_count"], 3)
+        self.assertEqual(profile["json_file_count"], 2)
+        self.assertEqual(saved["flow_count"], 3)
+        self.assertEqual(saved["json_file_count"], 2)
+        self.assertTrue(saved["from_project_index"])
+        self.assertTrue(cached["from_project_index"])
+        self.assertTrue(any(row["label"] == "Facebook / Meta" for row in saved["service_rows"]))
+        self.assertTrue(any(row["label"] == "Google / YouTube" for row in saved["service_rows"]))
+        self.assertTrue(any(row["label"] == "TikTok" for row in saved["service_rows"]))
+        self.assertTrue(any(row["label"] == "09:00" and row["count"] == 2 for row in saved["hour_rows"]))
+        self.assertTrue(any(row["label"] == "04/01/2026" and row["count"] == 3 for row in saved["day_rows"]))
+
+    def test_project_behavior_index_loads_small_indexed_folder_sources(self):
+        with temporary_directory() as tmp:
+            root = Path(tmp)
+            db_path = root / "project-behavior-large-index.db"
+            folder = root / "evidence-disk"
+            nested = folder / "20240317"
+            nested.mkdir(parents=True)
+            json_file = nested / "case.json"
+            json_file.write_text(
+                json.dumps([{
+                    "requested_server_name": "web.facebook.com",
+                    "bidirectional_bytes": 2048,
+                }]),
+                encoding="utf-8",
+            )
+            init_db(db_path)
+            project_id = create_project("Case A", db_path=db_path)
+            add_dataset_load(project_id, str(folder), db_path=db_path)
+            update_dataset_scan_metadata(
+                project_id,
+                str(folder),
+                json_file_count=52,
+                pcap_file_count=52,
+                total_size=16_000_000_000,
+                first_observed="2024-03-17",
+                last_observed="2024-03-23",
+                db_path=db_path,
+            )
+
+            profile = build_project_behavior_index(project_id, db_path=db_path)
+
+        self.assertEqual(profile["json_file_count"], 1)
+        self.assertEqual(profile["loaded_json_file_count"], 1)
+        self.assertEqual(profile["skipped_json_file_count"], 0)
+        self.assertEqual(profile["flow_count"], 1)
+
+    def test_project_behavior_index_skips_large_indexed_folder_sources(self):
+        with temporary_directory() as tmp:
+            root = Path(tmp)
+            db_path = root / "project-behavior-large-index.db"
+            folder = root / "evidence-disk"
+            folder.mkdir(parents=True)
+            init_db(db_path)
+            project_id = create_project("Case A", db_path=db_path)
+            add_dataset_load(project_id, str(folder), db_path=db_path)
+            update_dataset_scan_metadata(
+                project_id,
+                str(folder),
+                json_file_count=501,
+                pcap_file_count=501,
+                total_size=16_000_000_000,
+                first_observed="2024-03-17",
+                last_observed="2024-03-23",
+                db_path=db_path,
+            )
+
+            profile = build_project_behavior_index(project_id, db_path=db_path)
+
+        self.assertEqual(profile["json_file_count"], 501)
+        self.assertEqual(profile["loaded_json_file_count"], 0)
+        self.assertEqual(profile["skipped_json_file_count"], 501)
+        self.assertEqual(profile["flow_count"], 0)
+
+    def test_project_profile_uses_selected_json_ingest_items_for_large_source(self):
+        with temporary_directory() as tmp:
+            root = Path(tmp)
+            db_path = root / "project-selected-ingest.db"
+            folder = root / "evidence-disk"
+            old_day = folder / "20240101"
+            selected_day = folder / "20240201"
+            other_day = folder / "20240301"
+            old_day.mkdir(parents=True)
+            selected_day.mkdir(parents=True)
+            other_day.mkdir(parents=True)
+            first = selected_day / "one.json"
+            second = selected_day / "two.json"
+            first.write_text(
+                json.dumps([{
+                    "requested_server_name": "web.facebook.com",
+                    "bidirectional_bytes": 2048,
+                    "bidirectional_first_seen_ms": "2024-02-01 08:00:00",
+                }]),
+                encoding="utf-8",
+            )
+            second.write_text(
+                json.dumps([{
+                    "requested_server_name": "www.youtube.com",
+                    "bidirectional_bytes": 4096,
+                    "bidirectional_first_seen_ms": "2024-02-01 09:00:00",
+                }]),
+                encoding="utf-8",
+            )
+            stale_items = []
+            for idx in range(520):
+                stale = old_day / f"stale-{idx:03d}.json"
+                stale.write_text("[]", encoding="utf-8")
+                stale_items.append({
+                    "file_path": str(stale),
+                    "file_name": stale.name,
+                    "file_type": "json",
+                    "file_size": stale.stat().st_size,
+                    "observed_date": "2024-01-01",
+                })
+            for idx in range(520):
+                (other_day / f"outside-{idx:03d}.json").write_text("[]", encoding="utf-8")
+
+            init_db(db_path)
+            project_id = create_project("Case A", db_path=db_path)
+            add_dataset_load(project_id, str(folder), db_path=db_path)
+            upsert_ingest_items(
+                project_id,
+                str(folder),
+                stale_items + [
+                    {
+                        "file_path": str(first),
+                        "file_name": first.name,
+                        "file_type": "json",
+                        "file_size": first.stat().st_size,
+                        "observed_date": "2024-02-01",
+                    },
+                    {
+                        "file_path": str(second),
+                        "file_name": second.name,
+                        "file_type": "json",
+                        "file_size": second.stat().st_size,
+                        "observed_date": "2024-02-01",
+                    },
+                ],
+                db_path=db_path,
+            )
+            update_dataset_scan_metadata(
+                project_id,
+                str(folder),
+                json_file_count=522,
+                pcap_file_count=0,
+                total_size=first.stat().st_size + second.stat().st_size,
+                first_observed="2024-02-01",
+                last_observed="2024-02-01",
+                db_path=db_path,
+            )
+
+            rows = list_project_json_dataset_files(project_id, db_path=db_path)
+            loaded = load_project_dataset_flows(project_id, db_path=db_path)
+            behavior = build_project_behavior_index(project_id, db_path=db_path)
+
+        self.assertEqual([row["name"] for row in rows], ["one.json", "two.json"])
+        self.assertEqual(loaded["json_file_count"], 2)
+        self.assertEqual(loaded["loaded_json_file_count"], 2)
+        self.assertEqual(loaded["flow_count"], 2)
+        self.assertEqual(behavior["json_file_count"], 2)
+        self.assertEqual(behavior["loaded_json_file_count"], 2)
+        self.assertEqual(behavior["skipped_json_file_count"], 0)
+        self.assertEqual(behavior["flow_count"], 2)
+
+    def test_done_json_ingest_items_drive_project_profile_across_days(self):
+        with temporary_directory() as tmp:
+            root = Path(tmp)
+            db_path = root / "project-done-ingest.db"
+            folder = root / "evidence-disk"
+            jan = folder / "20240122"
+            feb = folder / "20240201"
+            mar = folder / "20240326"
+            jan.mkdir(parents=True)
+            feb.mkdir(parents=True)
+            mar.mkdir(parents=True)
+            first = jan / "jan.json"
+            second = feb / "feb.json"
+            outside = mar / "outside.json"
+            first.write_text(
+                json.dumps([{
+                    "requested_server_name": "web.facebook.com",
+                    "bidirectional_bytes": 2048,
+                    "bidirectional_first_seen_ms": "2024-01-22 08:00:00",
+                }]),
+                encoding="utf-8",
+            )
+            second.write_text(
+                json.dumps([{
+                    "requested_server_name": "www.youtube.com",
+                    "bidirectional_bytes": 4096,
+                    "bidirectional_first_seen_ms": "2024-02-01 09:00:00",
+                }]),
+                encoding="utf-8",
+            )
+            outside.write_text(
+                json.dumps([{
+                    "requested_server_name": "example.invalid",
+                    "bidirectional_bytes": 8192,
+                    "bidirectional_first_seen_ms": "2024-03-26 22:00:00",
+                }]),
+                encoding="utf-8",
+            )
+
+            init_db(db_path)
+            project_id = create_project("Case A", db_path=db_path)
+            add_dataset_load(project_id, str(folder), db_path=db_path)
+            upsert_ingest_items(
+                project_id,
+                str(folder),
+                [
+                    {
+                        "file_path": str(first),
+                        "file_name": first.name,
+                        "file_type": "json",
+                        "file_size": first.stat().st_size,
+                        "observed_date": "2024-01-22",
+                    },
+                    {
+                        "file_path": str(second),
+                        "file_name": second.name,
+                        "file_type": "json",
+                        "file_size": second.stat().st_size,
+                        "observed_date": "2024-02-01",
+                    },
+                    {
+                        "file_path": str(outside),
+                        "file_name": outside.name,
+                        "file_type": "json",
+                        "file_size": outside.stat().st_size,
+                        "observed_date": "2024-03-26",
+                    },
+                ],
+                db_path=db_path,
+            )
+            mark_ingest_item(project_id, str(first), "done", db_path=db_path)
+            mark_ingest_item(project_id, str(second), "done", db_path=db_path)
+            update_dataset_scan_metadata(
+                project_id,
+                str(folder),
+                json_file_count=3,
+                pcap_file_count=0,
+                total_size=sum(path.stat().st_size for path in (first, second, outside)),
+                first_observed="2024-03-26",
+                last_observed="2024-03-26",
+                db_path=db_path,
+            )
+
+            rows = list_project_json_dataset_files(project_id, db_path=db_path)
+            loaded = load_project_dataset_flows(project_id, db_path=db_path)
+            behavior = build_project_behavior_index(project_id, db_path=db_path)
+
+        self.assertEqual([row["name"] for row in rows], ["feb.json", "jan.json"])
+        self.assertEqual(loaded["json_file_count"], 2)
+        self.assertEqual(loaded["flow_count"], 2)
+        self.assertEqual(behavior["json_file_count"], 2)
+        self.assertEqual(behavior["flow_count"], 2)
+
+    def test_project_behavior_index_recovers_from_stale_source_date_filter(self):
+        with temporary_directory() as tmp:
+            root = Path(tmp)
+            db_path = root / "project-stale-filter.db"
+            folder = root / "evidence-disk"
+            jan = folder / "20240122"
+            feb = folder / "20240201"
+            mar = folder / "20240326"
+            jan.mkdir(parents=True)
+            feb.mkdir(parents=True)
+            mar.mkdir(parents=True)
+            files = [
+                (jan / "jan.json", "web.facebook.com", "2024-01-22 08:00:00"),
+                (feb / "feb.json", "www.youtube.com", "2024-02-01 09:00:00"),
+                (mar / "mar.json", "api.tiktokv.com", "2024-03-26 22:00:00"),
+            ]
+            for path, host, seen in files:
+                path.write_text(
+                    json.dumps([{
+                        "requested_server_name": host,
+                        "bidirectional_bytes": 2048,
+                        "bidirectional_first_seen_ms": seen,
+                    }]),
+                    encoding="utf-8",
+                )
+
+            init_db(db_path)
+            project_id = create_project("Case A", db_path=db_path)
+            add_dataset_load(project_id, str(folder), db_path=db_path)
+            upsert_ingest_items(
+                project_id,
+                str(folder),
+                [
+                    {
+                        "file_path": str(path),
+                        "file_name": path.name,
+                        "file_type": "json",
+                        "file_size": path.stat().st_size,
+                        "observed_date": path.parent.name[:4] + "-" + path.parent.name[4:6] + "-" + path.parent.name[6:8],
+                    }
+                    for path, _, _ in files
+                ],
+                db_path=db_path,
+            )
+            update_dataset_scan_metadata(
+                project_id,
+                str(folder),
+                json_file_count=3,
+                pcap_file_count=0,
+                total_size=sum(path.stat().st_size for path, _, _ in files),
+                first_observed="2024-03-26",
+                last_observed="2024-03-26",
+                db_path=db_path,
+            )
+
+            behavior = build_project_behavior_index(project_id, db_path=db_path)
+
+        self.assertEqual(behavior["json_file_count"], 3)
+        self.assertEqual(behavior["loaded_json_file_count"], 3)
+        self.assertEqual(behavior["flow_count"], 3)
+        self.assertTrue(any(row["label"] == "22/01/2024" for row in behavior["day_rows"]))
+        self.assertTrue(any(row["label"] == "01/02/2024" for row in behavior["day_rows"]))
+        self.assertTrue(any(row["label"] == "26/03/2024" for row in behavior["day_rows"]))
+
+    def test_dataset_scan_metadata_merges_repeated_observed_ranges(self):
+        with temporary_directory() as tmp:
+            db_path = Path(tmp) / "project-merged-range.db"
+            folder = Path(tmp) / "evidence"
+            folder.mkdir()
+            init_db(db_path)
+            project_id = create_project("Case A", db_path=db_path)
+            add_dataset_load(project_id, str(folder), db_path=db_path)
+
+            update_dataset_scan_metadata(
+                project_id,
+                str(folder),
+                json_file_count=5,
+                pcap_file_count=1,
+                total_size=100,
+                first_observed="2024-02-10",
+                last_observed="2024-02-10",
+                db_path=db_path,
+            )
+            update_dataset_scan_metadata(
+                project_id,
+                str(folder),
+                json_file_count=2,
+                pcap_file_count=3,
+                total_size=50,
+                first_observed="2024-02-01",
+                last_observed="2024-02-29",
+                db_path=db_path,
+            )
+
+            rows = list_recent_dataset_sources(project_id, db_path=db_path)
+
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["json_file_count"], 5)
+        self.assertEqual(rows[0]["pcap_file_count"], 3)
+        self.assertEqual(rows[0]["total_size"], 100)
+        self.assertEqual(rows[0]["first_observed"], "2024-02-01")
+        self.assertEqual(rows[0]["last_observed"], "2024-02-29")
+
+    def test_project_behavior_index_uses_first_selected_files_when_period_is_large(self):
+        with temporary_directory() as tmp:
+            root = Path(tmp)
+            db_path = root / "project-selected-large-period.db"
+            folder = root / "evidence-disk"
+            selected_day = folder / "20240201"
+            selected_day.mkdir(parents=True)
+            items = []
+            for idx in range(505):
+                path = selected_day / f"flow-{idx:03d}.json"
+                path.write_text(
+                    json.dumps([{
+                        "requested_server_name": "web.facebook.com",
+                        "bidirectional_bytes": 100 + idx,
+                        "bidirectional_first_seen_ms": "2024-02-01 08:00:00",
+                    }]),
+                    encoding="utf-8",
+                )
+                items.append({
+                    "file_path": str(path),
+                    "file_name": path.name,
+                    "file_type": "json",
+                    "file_size": path.stat().st_size,
+                    "observed_date": "2024-02-01",
+                })
+
+            init_db(db_path)
+            project_id = create_project("Case A", db_path=db_path)
+            add_dataset_load(project_id, str(folder), db_path=db_path)
+            upsert_ingest_items(project_id, str(folder), items, db_path=db_path)
+            update_dataset_scan_metadata(
+                project_id,
+                str(folder),
+                json_file_count=len(items),
+                pcap_file_count=0,
+                total_size=sum(item["file_size"] for item in items),
+                first_observed="2024-02-01",
+                last_observed="2024-02-01",
+                db_path=db_path,
+            )
+
+            loaded = load_project_dataset_flows(project_id, db_path=db_path)
+            behavior = build_project_behavior_index(project_id, db_path=db_path)
+
+        self.assertEqual(loaded["json_file_count"], 505)
+        self.assertEqual(loaded["loaded_json_file_count"], 500)
+        self.assertEqual(loaded["flow_count"], 500)
+        self.assertEqual(behavior["json_file_count"], 505)
+        self.assertEqual(behavior["loaded_json_file_count"], 505)
+        self.assertEqual(behavior["skipped_json_file_count"], 0)
+        self.assertEqual(behavior["flow_count"], 505)
 
     def test_behavior_profile_groups_services_domains_and_hours(self):
         flows = [
@@ -293,6 +908,7 @@ class BehaviorProfileTests(unittest.TestCase):
         self.assertTrue(any(row["label"] == "TikTok" for row in profile["service_rows"]))
         self.assertEqual(profile["domain_rows"][0]["label"], "rr4---sn.googlevideo.com")
         self.assertTrue(any(row["label"] == "23:00" and row["count"] == 2 for row in profile["hour_rows"]))
+        self.assertTrue(any(row["label"] == "04/01/2026" and row["count"] == 4 for row in profile["day_rows"]))
         self.assertTrue(any(line.startswith("Most active hour: 23:00") for line in profile["routine_lines"]))
         self.assertTrue(any("not proof" in line for line in profile["routine_lines"]))
 
@@ -304,6 +920,7 @@ class BehaviorProfileTests(unittest.TestCase):
         self.assertEqual(profile["service_rows"], [])
         self.assertEqual(profile["domain_rows"], [])
         self.assertEqual(profile["hour_rows"], [])
+        self.assertEqual(profile["day_rows"], [])
         self.assertTrue(profile["routine_lines"])
 
     def test_activity_profile_html_export_includes_behavior_sections(self):
@@ -316,11 +933,13 @@ class BehaviorProfileTests(unittest.TestCase):
                 "metrics": [{"label": "JSON Datasets", "value": 1}],
                 "evidence_counts": [{"label": "JSON Datasets", "count": 1}],
                 "pcap_device_ip_rows": [{"label": "10.0.0.10", "count": 1}],
+                "pcap_day_rows": [{"label": "04.01.2026.", "count": 12, "detail": "12 packets / 2.00 KB"}],
                 "capture_range": {"label": "04/01/2026 09:00:00.000"},
                 "total_pcap_bytes_label": "86.10 MB",
                 "behavior_profile": {
                     "service_rows": [{"label": "WhatsApp", "bytes": 2048, "bytes_label": "2.00 KB"}],
                     "domain_rows": [{"label": "web.whatsapp.com", "bytes": 2048, "bytes_label": "2.00 KB"}],
+                    "day_rows": [{"label": "04/01/2026", "count": 4, "detail": "4 flows / 2.00 KB"}],
                     "hour_rows": [{"label": "09:00", "count": 4}],
                     "routine_lines": ["Most active hour: 09:00 (4 flows)."],
                 },
@@ -336,6 +955,8 @@ class BehaviorProfileTests(unittest.TestCase):
         self.assertIn("Case A", content)
         self.assertIn("Behavior Insights", content)
         self.assertIn("WhatsApp", content)
+        self.assertIn("JSON Activity By Day", content)
+        self.assertIn("PCAP Volume By Day", content)
         self.assertIn("Most active hour", content)
         self.assertIn("ViaNyquist profil aktivnosti", hr_content)
         self.assertIn("Pregled dokaza", hr_content)
@@ -780,6 +1401,27 @@ class PcapAnalyzerTests(unittest.TestCase):
         self.assertTrue(investigator["activity_rows"])
         self.assertTrue(investigator["visibility_rows"])
 
+    def test_analyze_pcap_files_merges_daily_capture_rows(self):
+        with temporary_directory() as tmp:
+            root = Path(tmp)
+            one = root / "one.pcap"
+            two = root / "two.pcap"
+            _write_sample_pcap(one)
+            _write_sample_pcap(two)
+
+            summary = analyze_pcap_files([one, two], label="20/01/2024")
+            investigator = build_investigator_view(summary)
+            expected_bytes = analyze_pcap(one).wire_bytes + analyze_pcap(two).wire_bytes
+
+        self.assertEqual(summary.file_name, "20/01/2024")
+        self.assertEqual(len(summary.source_paths), 2)
+        self.assertEqual(summary.packet_count, 4)
+        self.assertEqual(summary.wire_bytes, expected_bytes)
+        self.assertEqual(summary.likely_device_ip, "10.0.0.10")
+        self.assertTrue(summary.dns_queries)
+        self.assertTrue(summary.flows)
+        self.assertTrue(investigator["service_rows"])
+
     def test_pcap_artifacts_redact_sensitive_http_values(self):
         with temporary_directory() as tmp:
             path = Path(tmp) / "sensitive.pcap"
@@ -801,6 +1443,37 @@ class PcapAnalyzerTests(unittest.TestCase):
         self.assertTrue(any(a["type"] == "HTTP Basic credentials" for a in sensitive))
         self.assertTrue(any("[redacted]" in a["value"] or set(a["value"]) == {"*"} for a in sensitive))
         self.assertFalse(any("user:pass" == a["value"] for a in sensitive))
+
+    def test_pcap_rollup_prefers_day_aggregate_over_per_file_rows(self):
+        from types import SimpleNamespace
+
+        aggregate = SimpleNamespace(
+            file_sha256="aggregate:abc",
+            file_path="2026-01-04 (2 PCAP files)",
+            file_name="04/01/2026 (2 PCAP files)",
+            first_seen="2026-01-04 00:00:01.000",
+            last_seen="2026-01-04 23:59:59.000",
+            packet_count=1000,
+            wire_bytes=500_000,
+            likely_device_ip="10.0.0.10",
+        )
+        per_file = SimpleNamespace(
+            file_sha256="deadbeef",
+            file_path=str(Path("C:/captures/one.pcap")),
+            file_name="one.pcap",
+            first_seen="2026-01-04 00:00:02.000",
+            last_seen="2026-01-04 00:00:03.000",
+            packet_count=400,
+            wire_bytes=200_000,
+            likely_device_ip="10.0.0.10",
+        )
+
+        rollup = rollup_pcap_sources([aggregate, per_file])
+
+        self.assertEqual(rollup.total_packets, 1000)
+        self.assertEqual(rollup.total_bytes, 500_000)
+        self.assertTrue(is_aggregate_pcap_source(aggregate))
+        self.assertFalse(is_aggregate_pcap_source(per_file))
 
     def test_pcap_sources_are_persisted_per_project(self):
         with temporary_directory() as tmp:
@@ -955,11 +1628,13 @@ class PcapAnalyzerTests(unittest.TestCase):
         self.assertEqual(profile["finding_count"], 1)
         self.assertEqual(profile["pcap_device_ips"], {"10.0.0.10": 1})
         self.assertEqual(profile["evidence_counts"], [
-            {"label": "JSON Datasets", "count": 1},
-            {"label": "PCAP Sources", "count": 1},
+            {"label": "JSON Files", "count": 1},
+            {"label": "PCAP Periods", "count": 1},
             {"label": "Findings", "count": 1},
         ])
         self.assertEqual(profile["pcap_device_ip_rows"], [{"label": "10.0.0.10", "count": 1}])
+        self.assertTrue(profile["pcap_day_rows"])
+        self.assertEqual(profile["pcap_day_rows"][0]["count"], summary.packet_count)
         self.assertTrue(any(row["label"] == "JSON dataset loaded" for row in profile["activity_type_rows"]))
         self.assertTrue(any(row["label"] == "PCAP saved" for row in profile["activity_type_rows"]))
         self.assertTrue(profile["capture_range"]["first_seen"])
@@ -1089,7 +1764,7 @@ class AIServiceTests(unittest.TestCase):
             "summary_lines": ["Project Activity Profile", "- Target: MSISDN / 123"],
             "evidence_counts": [
                 {"label": "JSON Datasets", "count": 2},
-                {"label": "PCAP Sources", "count": 1},
+                {"label": "PCAP Days", "count": 1},
             ],
             "pcap_device_ip_rows": [{"label": "10.0.0.10", "count": 1}],
             "activity_type_rows": [{"label": "Dataset loaded", "count": 2}],
