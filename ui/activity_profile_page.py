@@ -21,9 +21,9 @@ from PySide6.QtWidgets import (
 )
 
 from core.behavior_profile import build_flow_behavior_profile
-from core.db import get_app_settings, get_project
+from core.db import get_app_settings, get_project, get_project_behavior_profile
 from core.exporters.profile_exporter import export_activity_profile_html
-from core.project_datasets import load_project_dataset_flows
+from core.project_datasets import count_project_json_datasets, load_project_dataset_flows
 from core.project_profile import build_project_activity_profile
 from core.timeutils import parse_timestamp
 from core.workspace import workspace_export_path
@@ -82,6 +82,7 @@ class ActivityProfilePage(QWidget):
         self._behavior_cache_key = ""
         self._behavior_cache_flows = []
         self._project_dataset_info = {}
+        self._behavior_index_requested_project_id = None
 
     def _build_ui(self):
         root = QVBoxLayout(self)
@@ -134,7 +135,7 @@ class ActivityProfilePage(QWidget):
         self.metric_cards: list[QLabel] = []
         metric_grid = QGridLayout()
         metric_grid.setSpacing(10)
-        for title in ("JSON Datasets", "PCAP Sources", "Findings", "Device IPs", "PCAP Volume", "Capture Range"):
+        for title in ("JSON Datasets", "PCAP Days", "Findings", "Device IPs", "PCAP Volume", "Capture Range"):
             card = QLabel(f"{title}\n0")
             card.setObjectName("ProfileMetric")
             card.setAlignment(Qt.AlignCenter)
@@ -170,6 +171,8 @@ class ActivityProfilePage(QWidget):
             stacked_labels=True,
             max_rows=12,
         )
+        self.day_chart = BarChartWidget("JSON activity by day", value_key="count", value_label_key="detail", label_width=110, max_rows=14)
+        self.pcap_day_chart = BarChartWidget("PCAP volume by day", value_key="count", value_label_key="detail", label_width=110, max_rows=14)
         self.hour_chart = BarChartWidget("Activity by hour", value_key="count", max_rows=24)
         self.txt_routine = QTextEdit()
         self.txt_routine.setReadOnly(True)
@@ -180,8 +183,10 @@ class ActivityProfilePage(QWidget):
         behavior_grid.setSpacing(12)
         behavior_grid.addWidget(self.service_chart, 0, 0)
         behavior_grid.addWidget(self.domain_chart, 0, 1)
-        behavior_grid.addWidget(self.hour_chart, 1, 0)
-        behavior_grid.addWidget(self._section("Activity rhythm", self.txt_routine), 1, 1)
+        behavior_grid.addWidget(self.day_chart, 1, 0)
+        behavior_grid.addWidget(self.pcap_day_chart, 1, 1)
+        behavior_grid.addWidget(self.hour_chart, 2, 0)
+        behavior_grid.addWidget(self._section("Activity rhythm", self.txt_routine), 2, 1)
         behavior_grid.setColumnStretch(0, 1)
         behavior_grid.setColumnStretch(1, 1)
         scroll_layout.addLayout(behavior_grid)
@@ -267,6 +272,8 @@ class ActivityProfilePage(QWidget):
         self.activity_chart.set_rows([], empty_text="No activity events yet.")
         self.service_chart.set_rows([], empty_text="No saved project dataset is available for service groups.")
         self.domain_chart.set_rows([], empty_text="No saved project dataset is available for observed domains.")
+        self.day_chart.set_rows([], empty_text="No saved JSON activity is available by day.")
+        self.pcap_day_chart.set_rows([], empty_text="No saved PCAP activity is available by day.")
         self.hour_chart.set_rows([], empty_text="No saved project dataset is available for hourly activity.")
         self.txt_routine.clear()
         self.txt_summary.clear()
@@ -380,7 +387,7 @@ class ActivityProfilePage(QWidget):
     def _set_metrics(self, metrics: list[dict[str, Any]]):
         defaults = [
             {"label": "JSON Datasets", "value": 0, "detail": "loaded"},
-            {"label": "PCAP Sources", "value": 0, "detail": "saved"},
+            {"label": "PCAP Days", "value": 0, "detail": "saved"},
             {"label": "Findings", "value": 0, "detail": "saved"},
             {"label": "Device IPs", "value": 0, "detail": "from PCAP"},
             {"label": "PCAP Volume", "value": "0 B", "detail": "0 packets"},
@@ -410,13 +417,112 @@ class ActivityProfilePage(QWidget):
                 self.metric_cards[idx].setToolTip(metric["detail"])
 
     def _set_behavior_profile(self):
-        behavior = build_flow_behavior_profile(self._current_flows())
+        project_id = getattr(self.app, "current_project_id", None) if self.app else None
+        indexed = get_project_behavior_profile(project_id) if project_id is not None else {}
+        if indexed.get("flow_count"):
+            saved_json_count = int(indexed.get("json_file_count") or 0)
+            loaded_json_count = int(indexed.get("loaded_json_file_count") or 0)
+            skipped_json_count = int(indexed.get("skipped_json_file_count") or 0)
+            actual_json_count = saved_json_count
+            if project_id is not None:
+                try:
+                    actual_json_count = max(saved_json_count, count_project_json_datasets(project_id, limit=50000))
+                except Exception:
+                    actual_json_count = saved_json_count
+            controller = getattr(self.app, "dataset_controller", None) if self.app else None
+            requested = getattr(self, "_behavior_index_requested_project_id", None)
+            if (
+                project_id is not None
+                and actual_json_count
+                and (actual_json_count > saved_json_count or skipped_json_count or loaded_json_count < saved_json_count)
+                and controller
+                and hasattr(controller, "refresh_project_behavior_index")
+                and requested != project_id
+            ):
+                self._behavior_index_requested_project_id = project_id
+                controller.refresh_project_behavior_index(project_id)
+            else:
+                self._behavior_index_requested_project_id = None
+            behavior = indexed
+            self._project_dataset_info = {
+                "json_file_count": saved_json_count,
+                "loaded_json_file_count": loaded_json_count,
+                "skipped_json_file_count": skipped_json_count,
+                "flow_count": int(indexed.get("flow_count") or 0),
+                "source_count": saved_json_count,
+                "loaded_source_count": loaded_json_count,
+                "missing_rows": [],
+            }
+        elif indexed.get("json_file_count"):
+            saved_json_count = int(indexed.get("json_file_count") or 0)
+            loaded_json_count = int(indexed.get("loaded_json_file_count") or 0)
+            skipped_json_count = int(indexed.get("skipped_json_file_count") or 0)
+            if project_id is not None and saved_json_count:
+                controller = getattr(self.app, "dataset_controller", None) if self.app else None
+                requested = getattr(self, "_behavior_index_requested_project_id", None)
+                if controller and hasattr(controller, "refresh_project_behavior_index") and requested != project_id:
+                    self._behavior_index_requested_project_id = project_id
+                    controller.refresh_project_behavior_index(project_id)
+            behavior = {
+                "flow_count": 0,
+                "routine_lines": [
+                    f"Project JSON sources indexed: {saved_json_count:,}.",
+                    "Behavior charts are being rebuilt from the saved project evidence.",
+                    "Refresh Profile after indexing finishes if the charts are still empty.",
+                ],
+            }
+            self._project_dataset_info = {
+                "json_file_count": saved_json_count,
+                "loaded_json_file_count": loaded_json_count,
+                "skipped_json_file_count": skipped_json_count,
+                "flow_count": int(indexed.get("flow_count") or 0),
+                "source_count": saved_json_count,
+                "loaded_source_count": loaded_json_count,
+                "missing_rows": [],
+            }
+        else:
+            saved_json_count = 0
+            if project_id is not None:
+                try:
+                    saved_json_count = count_project_json_datasets(project_id, limit=50000)
+                except Exception:
+                    saved_json_count = int((self.profile or {}).get("dataset_count") or 0)
+
+            if project_id is not None and saved_json_count:
+                controller = getattr(self.app, "dataset_controller", None) if self.app else None
+                if controller and hasattr(controller, "refresh_project_behavior_index"):
+                    controller.refresh_project_behavior_index(project_id)
+                self._project_dataset_info = {
+                    "json_file_count": saved_json_count,
+                    "loaded_json_file_count": 0,
+                    "skipped_json_file_count": 0,
+                    "flow_count": 0,
+                    "source_count": saved_json_count,
+                    "loaded_source_count": 0,
+                    "missing_rows": [],
+                }
+                behavior = {
+                    "flow_count": 0,
+                    "routine_lines": [
+                        f"Project JSON sources indexed: {saved_json_count:,}.",
+                        "Behavior charts are being prepared from the saved project evidence.",
+                        "Refresh Profile after indexing finishes if the charts are still empty.",
+                    ],
+                }
+            else:
+                flows = self._current_flows()
+                behavior = build_flow_behavior_profile(flows)
         behavior["project_dataset_info"] = dict(self._project_dataset_info or {})
         if self.profile is not None:
             self.profile["behavior_profile"] = behavior
         if not behavior.get("flow_count"):
             self.service_chart.set_rows([], empty_text="No saved project dataset is available for service groups.")
             self.domain_chart.set_rows([], empty_text="No saved project dataset is available for observed domains.")
+            self.day_chart.set_rows([], empty_text="No saved JSON activity is available by day.")
+            self.pcap_day_chart.set_rows(
+                (self.profile or {}).get("pcap_day_rows") or [],
+                empty_text="No saved PCAP activity is available by day.",
+            )
             self.hour_chart.set_rows([], empty_text="No saved project dataset is available for hourly activity.")
             self._set_behavior_routine_text(behavior)
             return
@@ -428,6 +534,14 @@ class ActivityProfilePage(QWidget):
         self.domain_chart.set_rows(
             behavior.get("domain_rows") or [],
             empty_text="No visible hostnames found in the loaded dataset.",
+        )
+        self.day_chart.set_rows(
+            behavior.get("day_rows") or [],
+            empty_text="No daily JSON activity found in the loaded dataset.",
+        )
+        self.pcap_day_chart.set_rows(
+            (self.profile or {}).get("pcap_day_rows") or [],
+            empty_text="No saved PCAP activity is available by day.",
         )
         self.hour_chart.set_rows(
             behavior.get("hour_rows") or [],
@@ -481,6 +595,9 @@ class ActivityProfilePage(QWidget):
                 f"{loaded_files} / {file_count}; "
                 f"flow records: {int(info.get('flow_count') or 0):,}."
             )
+            skipped_files = int(info.get("skipped_json_file_count") or 0)
+            if skipped_files:
+                lines.append(f"Additional selected JSON files indexed but not loaded into behavior charts: {skipped_files:,}.")
             source_count = int(info.get("source_count") or 0)
             if source_count != file_count:
                 lines.append(

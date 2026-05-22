@@ -11,6 +11,7 @@ from core.db import (
     get_project_notes,
     list_recent_datasets,
     list_pcap_sources,
+    list_ingest_items,
     list_activity,
     list_findings,
     touch_project,
@@ -18,7 +19,7 @@ from core.db import (
 )
 from core.formatters import format_duration_compact_ms, format_pcap_datetime, human_bytes
 from core.project_identity import project_identifiers_text, subject_display_label
-from core.project_datasets import list_project_json_dataset_files
+from core.project_datasets import count_project_json_datasets, list_project_json_dataset_files
 from core.project_profile import build_project_activity_profile, format_project_activity_profile
 from core.workspace import (
     ensure_workspace_structure,
@@ -46,6 +47,7 @@ class ProjectsUIController:
 
         self.app.projects_info.setText("Select a project to see details.")
         self.app.project_recent_json_rows = []
+        self.app.project_recent_json_total_count = 0
         self.app.project_recent_pcap_rows = []
         self.app.project_activity_rows = []
         self._refresh_project_launcher_cards()
@@ -396,6 +398,8 @@ class ProjectsUIController:
         self.app.refresh_notes_ui()
         self.app.refresh_activity_profile_ui()
         self.sync_project_workspace(p.id)
+        if hasattr(self.app, "dataset_controller"):
+            self.app.dataset_controller.refresh_project_behavior_index(p.id)
 
     def sync_project_workspace(self, project_id: int | None) -> None:
         if project_id is None:
@@ -532,27 +536,10 @@ class ProjectsUIController:
         return f"{ip}:{port}" if port else ip
 
     def refresh_recent_datasets(self, project_id: int):
-        self.app.project_recent_json_rows = list_project_json_dataset_files(project_id, limit=500)[:100]
+        self.app.project_recent_json_total_count = count_project_json_datasets(project_id, limit=50000)
+        self.app.project_recent_json_rows = list_project_json_dataset_files(project_id, limit=50000)[:100]
 
-        pcap_sources = list_pcap_sources(project_id, limit=500)
-        self.app.project_recent_pcap_rows = []
-        for source in pcap_sources:
-            period = " - ".join(
-                value
-                for value in (
-                    format_pcap_datetime(source.first_seen),
-                    format_pcap_datetime(source.last_seen),
-                )
-                if value
-            )
-            self.app.project_recent_pcap_rows.append({
-                "name": source.file_name or Path(source.file_path).name,
-                "packets": f"{source.packet_count:,}",
-                "volume": human_bytes(source.wire_bytes, precision=2),
-                "device_ip": source.likely_device_ip or "-",
-                "period": period or "-",
-                "path": source.file_path,
-            })
+        self.app.project_recent_pcap_rows = self._project_pcap_day_rows(project_id)
 
         activity_rows = list_activity(project_id, limit=500)
         self.app.project_activity_rows = []
@@ -566,9 +553,117 @@ class ProjectsUIController:
 
         self._refresh_project_launcher_cards()
 
+    def _project_pcap_day_rows(self, project_id: int) -> list[dict]:
+        ingest_days: dict[str, list[str]] = {}
+        for item in list_ingest_items(project_id, file_type="pcap", status="done", limit=50000):
+            day = str(item.observed_date or "").strip() or self._date_from_name(item.file_name) or "undated"
+            ingest_days.setdefault(day, [])
+            if item.file_path and Path(item.file_path).is_file() and item.file_path not in ingest_days[day]:
+                ingest_days[day].append(item.file_path)
+
+        source_days: dict[str, dict] = {}
+        for source in list_pcap_sources(project_id, limit=50000):
+            day = self._date_from_pcap_source(source) or self._date_from_name(source.file_name) or "undated"
+            row = source_days.setdefault(day, {
+                "packet_count": 0,
+                "wire_bytes": 0,
+                "first_seen": "",
+                "last_seen": "",
+                "device_ips": {},
+                "paths": [],
+                "source_count": 0,
+            })
+            row["source_count"] += 1
+            row["packet_count"] += int(source.packet_count or 0)
+            row["wire_bytes"] += int(source.wire_bytes or 0)
+            row["first_seen"] = self._min_text_time(row["first_seen"], source.first_seen)
+            row["last_seen"] = self._max_text_time(row["last_seen"], source.last_seen)
+            if source.likely_device_ip:
+                row["device_ips"][source.likely_device_ip] = row["device_ips"].get(source.likely_device_ip, 0) + 1
+            if source.file_path and Path(source.file_path).is_file() and source.file_path not in row["paths"]:
+                row["paths"].append(source.file_path)
+
+        all_days = set(ingest_days) | set(source_days)
+        rows: list[dict] = []
+        for day in sorted(all_days, reverse=True):
+            data = source_days.get(day, {})
+            paths = list(ingest_days.get(day) or []) + list(data.get("paths") or [])
+            seen_paths: set[str] = set()
+            paths = [
+                path
+                for path in paths
+                if path and Path(path).is_file() and not (path in seen_paths or seen_paths.add(path))
+            ]
+            file_count = len(paths) or int(data.get("source_count") or 0) or 1
+            device_ips = data.get("device_ips") or {}
+            device_ip = "-"
+            if device_ips:
+                device_ip = sorted(device_ips.items(), key=lambda item: (-item[1], item[0]))[0][0]
+            period = " - ".join(
+                value
+                for value in (
+                    format_pcap_datetime(data.get("first_seen", "")),
+                    format_pcap_datetime(data.get("last_seen", "")),
+                )
+                if value
+            )
+            rows.append({
+                "name": f"{self._display_day(day)} ({file_count:,} PCAP files)",
+                "file_count": file_count,
+                "packets": f"{int(data.get('packet_count') or 0):,}",
+                "volume": human_bytes(int(data.get("wire_bytes") or 0), precision=2),
+                "device_ip": device_ip,
+                "period": period or "-",
+                "path": paths[0] if len(paths) == 1 else "",
+                "paths": paths,
+                "day": day,
+            })
+        return rows[:500]
+
+    def _date_from_pcap_source(self, source) -> str:
+        raw = str(source.first_seen or source.last_seen or "").strip()
+        if len(raw) >= 10 and raw[4] == "-" and raw[7] == "-":
+            return raw[:10]
+        return ""
+
+    def _date_from_name(self, value: str) -> str:
+        text = str(value or "")
+        for token in text.replace("\\", "_").replace("/", "_").split("_"):
+            if len(token) >= 8 and token[:8].isdigit():
+                raw = token[:8]
+                return f"{raw[:4]}-{raw[4:6]}-{raw[6:8]}"
+        return ""
+
+    def _display_day(self, day: str) -> str:
+        if day == "undated":
+            return "Undated"
+        if len(day) == 10 and day[4] == "-" and day[7] == "-":
+            return f"{day[8:10]}/{day[5:7]}/{day[:4]}"
+        return day
+
+    def _min_text_time(self, current: str, candidate: str) -> str:
+        if not candidate:
+            return current or ""
+        if not current:
+            return candidate
+        return min(str(current), str(candidate))
+
+    def _max_text_time(self, current: str, candidate: str) -> str:
+        if not candidate:
+            return current or ""
+        if not current:
+            return candidate
+        return max(str(current), str(candidate))
+
     def _refresh_project_launcher_cards(self) -> None:
         json_rows = getattr(self.app, "project_recent_json_rows", []) or []
-        json_count = sum(1 for row in json_rows if row.get("status") == "Available")
+        json_count = int(getattr(self.app, "project_recent_json_total_count", 0) or 0)
+        if not json_count:
+            json_count = sum(
+                int(row.get("file_count") or 1)
+                for row in json_rows
+                if row.get("status") == "Available"
+            )
         pcap_count = len(getattr(self.app, "project_recent_pcap_rows", []) or [])
         activity_count = len(getattr(self.app, "project_activity_rows", []) or [])
 
@@ -582,12 +677,12 @@ class ProjectsUIController:
                 self.app.lbl_recent_json_detail.setText("No JSON datasets saved for this project.")
 
         if hasattr(self.app, "lbl_recent_pcap_count"):
-            self.app.lbl_recent_pcap_count.setText(f"{pcap_count:,} PCAP datasets")
+            self.app.lbl_recent_pcap_count.setText(f"{pcap_count:,} PCAP days")
             if pcap_count:
                 newest = self._short_text(self.app.project_recent_pcap_rows[0].get("name") or "-")
                 self.app.lbl_recent_pcap_detail.setText(f"Most recent: {newest}")
             else:
-                self.app.lbl_recent_pcap_detail.setText("No PCAP sources saved for this project.")
+                self.app.lbl_recent_pcap_detail.setText("No PCAP days saved for this project.")
 
         if hasattr(self.app, "lbl_recent_activity_count"):
             self.app.lbl_recent_activity_count.setText(f"{activity_count:,} events")
@@ -604,7 +699,7 @@ class ProjectsUIController:
         if project_id is None:
             self.app.lbl_case_dashboard_title.setText("Case Dashboard")
             self.app.lbl_case_dashboard_subject.setText("Select a project to see case context.")
-            for idx, title in enumerate(("JSON Datasets", "PCAP", "Findings", "Device IPs")):
+            for idx, title in enumerate(("JSON Datasets", "PCAP Days", "Findings", "Device IPs")):
                 self.app.case_metric_cards[idx].setText(f"{title}: 0")
             return
 
@@ -623,7 +718,7 @@ class ProjectsUIController:
 
         values = [
             ("JSON Datasets", profile.get("dataset_count", 0)),
-            ("PCAP", profile.get("pcap_count", 0)),
+            ("PCAP Days", profile.get("pcap_day_count", 0)),
             ("Findings", profile.get("finding_count", 0)),
             ("Device IPs", len(profile.get("pcap_device_ips") or {})),
         ]
@@ -636,16 +731,8 @@ class ProjectsUIController:
             warnings.append("add known identifiers")
         if not profile.get("dataset_count"):
             warnings.append("no JSON datasets saved")
-        if not profile.get("pcap_count"):
-            warnings.append("no PCAP sources saved")
-
-        pcap_ips = profile.get("pcap_device_ips") or {}
-        if len(pcap_ips) > 1:
-            warnings.append("multiple PCAP device IPs observed")
-
-        known_ip = (project.subject_ip or "").strip()
-        if known_ip and pcap_ips and known_ip not in pcap_ips:
-            warnings.append("known project IP differs from saved PCAP device IPs")
+        if not profile.get("pcap_day_count"):
+            warnings.append("no PCAP days saved")
 
         return warnings
 

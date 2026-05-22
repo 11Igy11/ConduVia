@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import hashlib
+import os
+import re
 import webbrowser
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from PySide6.QtCore import QAbstractTableModel, QModelIndex, QObject, QThread, Qt, Signal
+from PySide6.QtCore import QAbstractTableModel, QModelIndex, QObject, QThread, QTimer, Qt, Signal
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -33,7 +36,8 @@ from core.exporters.listing_exporter import export_listing_csv, export_listing_e
 from core.exporters.pcap_exporter import export_pcap_summary_html
 from core.exporters.table_exporter import export_table_html
 from core.formatters import format_duration_compact_ms, format_pcap_datetime, human_bytes
-from core.pcap_analyzer import PcapSummary, analyze_pcap, build_investigator_view
+from core.evidence_policy import format_period_day_label, period_combo_label
+from core.pcap_analyzer import PcapSummary, analyze_pcap, analyze_pcap_files, build_investigator_view
 from core.protocols import format_ip_proto
 from core.workspace import workspace_export_path
 from core.db import (
@@ -43,7 +47,9 @@ from core.db import (
     get_app_settings,
     get_project,
     list_project_pcap_device_ips,
+    mark_ingest_item,
     set_project_subject,
+    upsert_ingest_items,
 )
 from ui.activity_profile_page import BarChartWidget
 from ui.explore_widgets import AITextWorker, CopyableTableView
@@ -53,15 +59,84 @@ class PcapWorker(QObject):
     finished = Signal(object)
     error = Signal(str)
 
-    def __init__(self, path: str):
+    def __init__(self, path: str | list[str], *, label: str = ""):
         super().__init__()
         self.path = path
+        self.label = label
 
     def run(self):
         try:
-            self.finished.emit(analyze_pcap(self.path))
+            if isinstance(self.path, list):
+                self.finished.emit(analyze_pcap_files(self.path, label=self.label))
+            else:
+                self.finished.emit(analyze_pcap(self.path))
         except Exception as exc:
             self.error.emit(str(exc))
+
+
+class PcapBatchWorker(QObject):
+    progress = Signal(int, int, int, str)
+    finished = Signal(object, int, int)
+
+    def __init__(self, paths: list[str], *, project_id: int | None = None, auto_save: bool = False):
+        super().__init__()
+        self.paths = [str(path) for path in paths if str(path or "").strip()]
+        self.project_id = project_id
+        self.auto_save = bool(auto_save)
+        self.stop_requested = False
+
+    def request_stop(self) -> None:
+        self.stop_requested = True
+
+    def run(self) -> None:
+        processed = 0
+        failed = 0
+        last_summary = None
+        total = len(self.paths)
+
+        for path in self.paths:
+            if self.stop_requested:
+                break
+
+            self.progress.emit(processed, total, failed, Path(path).name)
+            try:
+                summary = analyze_pcap(path)
+                last_summary = summary
+                if self.auto_save and self.project_id is not None:
+                    self._save_summary(summary)
+                processed += 1
+                self.progress.emit(processed, total, failed, Path(path).name)
+            except Exception as exc:
+                failed += 1
+                processed += 1
+                if self.project_id is not None:
+                    try:
+                        mark_ingest_item(self.project_id, path, "failed", str(exc))
+                    except Exception:
+                        pass
+                self.progress.emit(processed, total, failed, Path(path).name)
+
+        self.finished.emit(last_summary, processed, failed)
+
+    def _save_summary(self, summary: PcapSummary) -> None:
+        digest = file_sha256(summary.file_path)
+        investigator = build_investigator_view(summary)
+        add_pcap_source(
+            self.project_id,
+            file_path=summary.file_path,
+            file_name=summary.file_name,
+            file_sha256_value=digest,
+            file_size=summary.file_size,
+            format=summary.format,
+            packet_count=summary.packet_count,
+            wire_bytes=summary.wire_bytes,
+            first_seen=summary.first_seen,
+            last_seen=summary.last_seen,
+            duration_seconds=summary.duration_seconds,
+            likely_device_ip=summary.likely_device_ip,
+            summary_text=str(investigator.get("plain_summary") or ""),
+        )
+        mark_ingest_item(self.project_id, summary.file_path, "done", "")
 
 
 class DictTableModel(QAbstractTableModel):
@@ -161,10 +236,20 @@ class PcapPage(QWidget):
         self.summary: PcapSummary | None = None
         self._thread: QThread | None = None
         self._worker: PcapWorker | None = None
+        self._batch_thread: QThread | None = None
+        self._batch_worker: PcapBatchWorker | None = None
         self._ai_thread: QThread | None = None
         self._ai_worker: AITextWorker | None = None
         self._saved_source_id: int | None = None
         self._pcap_queue: list[str] = []
+        self._pcap_queue_auto_save = False
+        self._pcap_queue_auto_process = False
+        self._pcap_batch_total = 0
+        self._pcap_batch_processed = 0
+        self._pcap_batch_failed = 0
+        self._pcap_batch_stop_after_current = False
+        self._pcap_day_groups: dict[str, list[str]] = {}
+        self._pcap_active_day = ""
         self._all_artifacts: list[dict[str, Any]] = []
         self._build_ui()
 
@@ -208,6 +293,28 @@ class PcapPage(QWidget):
         header_layout.addLayout(top)
         header_layout.addWidget(self.lbl_file)
         header_layout.addWidget(self.lbl_stats)
+
+        self.batch_status_panel = QFrame()
+        self.batch_status_panel.setObjectName("InlinePanel")
+        batch_layout = QHBoxLayout(self.batch_status_panel)
+        batch_layout.setContentsMargins(10, 8, 10, 8)
+        batch_layout.setSpacing(10)
+        self.lbl_batch_status = QLabel("")
+        self.lbl_batch_status.setObjectName("MutedLabel")
+        self.lbl_pcap_day = QLabel("Period:")
+        self.lbl_pcap_day.setObjectName("MutedLabel")
+        self.cmb_pcap_day = QComboBox()
+        self.cmb_pcap_day.setMinimumWidth(230)
+        self.lbl_pcap_day.setVisible(False)
+        self.cmb_pcap_day.setVisible(False)
+        self.btn_stop_batch = QPushButton("Stop after current")
+        self.btn_stop_batch.setFixedHeight(32)
+        batch_layout.addWidget(self.lbl_pcap_day)
+        batch_layout.addWidget(self.cmb_pcap_day)
+        batch_layout.addWidget(self.lbl_batch_status, 1)
+        batch_layout.addWidget(self.btn_stop_batch)
+        self.batch_status_panel.setVisible(False)
+        header_layout.addWidget(self.batch_status_panel)
         root.addWidget(header)
 
         self.tabs = QTabWidget()
@@ -224,6 +331,8 @@ class PcapPage(QWidget):
         self.btn_ai_summary.clicked.connect(self.generate_ai_summary)
         self.btn_add_notes.clicked.connect(self.add_summary_to_notes)
         self.btn_export.clicked.connect(self.export_summary)
+        self.btn_stop_batch.clicked.connect(self.stop_after_current_batch)
+        self.cmb_pcap_day.currentIndexChanged.connect(self._on_pcap_day_changed)
 
     def _build_summary_section(self) -> QWidget:
         page = QWidget()
@@ -969,29 +1078,162 @@ class PcapPage(QWidget):
 
     def load_pcap(self, file_path: str):
         self._pcap_queue = []
+        self._pcap_queue_auto_save = False
+        self._pcap_queue_auto_process = False
+        self._clear_day_groups()
+        self._reset_batch_status()
         self._load_pcap_file(file_path)
 
-    def load_pcap_queue(self, file_paths: list[str]) -> None:
+    def load_pcap_queue(
+        self,
+        file_paths: list[str],
+        *,
+        auto_save: bool = False,
+        auto_process: bool = False,
+        day_groups: dict[str, list[str]] | None = None,
+    ) -> None:
         paths = [str(path) for path in (file_paths or []) if str(path or "").strip()]
         if not paths:
             return
 
-        self._pcap_queue = paths[1:]
-        self._load_pcap_file(paths[0])
+        grouped_day = False
+        if day_groups:
+            paths = self._set_day_groups(day_groups) or paths
+            grouped_day = bool(self._pcap_day_groups)
+        else:
+            self._clear_day_groups()
+
+        if auto_process:
+            self._start_auto_pcap_batch(paths, auto_save=auto_save)
+            return
+
+        self._pcap_queue = [] if grouped_day else paths[1:]
+        self._pcap_queue_auto_save = bool(auto_save and not grouped_day)
+        self._pcap_queue_auto_process = bool(auto_process)
+        self._pcap_batch_total = len(paths)
+        self._pcap_batch_processed = 0
+        self._pcap_batch_failed = 0
+        self._pcap_batch_stop_after_current = False
+        if grouped_day and len(paths) > 1:
+            label = f"{self._format_day_label(self._pcap_active_day)} ({len(paths):,} PCAP files)"
+            self._update_batch_status(label)
+            self._load_pcap_files(paths, label=label)
+        else:
+            self._update_batch_status(Path(paths[0]).name)
+            self._load_pcap_file(paths[0])
+
+    def _start_auto_pcap_batch(self, paths: list[str], *, auto_save: bool) -> None:
+        if self._thread is not None or self._batch_thread is not None:
+            QMessageBox.information(self, "PCAP", "PCAP analysis is already running.")
+            return
+
+        project_id = self._current_project_id()
+        self._pcap_queue = []
+        self._pcap_queue_auto_save = bool(auto_save)
+        self._pcap_queue_auto_process = True
+        self._pcap_batch_total = len(paths)
+        self._pcap_batch_processed = 0
+        self._pcap_batch_failed = 0
+        self._pcap_batch_stop_after_current = False
+
+        self.btn_open.setEnabled(False)
+        self.btn_open.setText("Loading...")
+        self.btn_export.setEnabled(False)
+        self.btn_ai_summary.setEnabled(False)
+        self.btn_save_project.setEnabled(False)
+        self.btn_add_notes.setEnabled(False)
+        self.lbl_file.setText(Path(paths[0]).name)
+        self.lbl_stats.setText("Auto analyzing PCAP batch...")
+        self.lbl_stats.setObjectName("PcapLoadingStatus")
+        self._refresh_widget_style(self.lbl_stats)
+        self._update_batch_status(Path(paths[0]).name)
+
+        self._batch_thread = QThread()
+        self._batch_worker = PcapBatchWorker(paths, project_id=project_id, auto_save=auto_save)
+        self._batch_worker.moveToThread(self._batch_thread)
+        self._batch_thread.started.connect(self._batch_worker.run)
+        self._batch_worker.progress.connect(self._on_batch_progress, Qt.QueuedConnection)
+        self._batch_worker.finished.connect(self._on_batch_finished, Qt.QueuedConnection)
+        self._batch_worker.finished.connect(self._batch_thread.quit)
+        self._batch_worker.finished.connect(self._batch_worker.deleteLater)
+        self._batch_thread.finished.connect(self._batch_thread.deleteLater)
+        self._batch_thread.finished.connect(self._cleanup_batch_thread)
+        self._batch_thread.start()
 
     def _load_next_queued_pcap(self) -> None:
         if not self._pcap_queue:
             self._update_open_button_text()
+            self._update_batch_status()
             return
         next_path = self._pcap_queue.pop(0)
+        self._update_batch_status(Path(next_path).name)
         self._load_pcap_file(next_path)
 
+    def _set_day_groups(self, day_groups: dict[str, list[str]]) -> list[str]:
+        cleaned = {
+            str(day): [str(path) for path in paths if str(path or "").strip()]
+            for day, paths in (day_groups or {}).items()
+        }
+        cleaned = {day: paths for day, paths in cleaned.items() if paths}
+        self._pcap_day_groups = dict(sorted(cleaned.items(), key=lambda pair: (pair[0] == "undated", pair[0])))
+        if not self._pcap_day_groups:
+            self._clear_day_groups()
+            return []
+
+        self.cmb_pcap_day.blockSignals(True)
+        self.cmb_pcap_day.clear()
+        for day, paths in self._pcap_day_groups.items():
+            self.cmb_pcap_day.addItem(period_combo_label(day, len(paths), kind="PCAP"), day)
+        self.cmb_pcap_day.blockSignals(False)
+        self.lbl_pcap_day.setVisible(True)
+        self.cmb_pcap_day.setVisible(True)
+        self._pcap_active_day = self.cmb_pcap_day.currentData() or next(iter(self._pcap_day_groups))
+        return list(self._pcap_day_groups.get(self._pcap_active_day, []))
+
+    def _clear_day_groups(self) -> None:
+        self._pcap_day_groups = {}
+        self._pcap_active_day = ""
+        if hasattr(self, "cmb_pcap_day"):
+            self.cmb_pcap_day.blockSignals(True)
+            self.cmb_pcap_day.clear()
+            self.cmb_pcap_day.blockSignals(False)
+            self.cmb_pcap_day.setVisible(False)
+        if hasattr(self, "lbl_pcap_day"):
+            self.lbl_pcap_day.setVisible(False)
+
+    def _on_pcap_day_changed(self, index: int) -> None:
+        if index < 0 or not self._pcap_day_groups:
+            return
+        if self._thread is not None or self._batch_thread is not None:
+            return
+        day = str(self.cmb_pcap_day.itemData(index) or "")
+        paths = list(self._pcap_day_groups.get(day, []))
+        if not paths:
+            return
+        self._pcap_active_day = day
+        self._pcap_queue = []
+        self._pcap_batch_total = len(paths)
+        self._pcap_batch_processed = 0
+        self._pcap_batch_failed = 0
+        self._pcap_batch_stop_after_current = False
+        self._update_batch_status(f"{self._format_day_label(day)} aggregate")
+        self._load_pcap_files(paths, label=f"{self._format_day_label(day)} ({len(paths):,} PCAP files)")
+
+    def _format_day_label(self, day: str) -> str:
+        return format_period_day_label(day)
+
     def _load_pcap_file(self, file_path: str):
+        self._load_pcap_files([file_path], label="")
+
+    def _load_pcap_files(self, file_paths: list[str], *, label: str = ""):
         if not self._ensure_project_workspace():
             return
 
         if self._thread is not None:
             QMessageBox.information(self, "PCAP", "PCAP analysis is already running.")
+            return
+        paths = [str(path) for path in file_paths if str(path or "").strip()]
+        if not paths:
             return
 
         self.btn_open.setEnabled(False)
@@ -999,13 +1241,20 @@ class PcapPage(QWidget):
         self.btn_export.setEnabled(False)
         self.btn_ai_summary.setEnabled(False)
         self.txt_pcap_ai_summary.clear()
-        self.lbl_file.setText(file_path)
-        self.lbl_stats.setText("Analyzing capture...")
+        if len(paths) == 1:
+            self.lbl_file.setText(paths[0])
+            current_text = Path(paths[0]).name
+        else:
+            self.lbl_file.setText(label or f"{len(paths):,} PCAP files")
+            current_text = label or f"{len(paths):,} PCAP files"
+        self.lbl_stats.setText("Analyzing capture..." if len(paths) == 1 else f"Analyzing {len(paths):,} PCAP files for selected day...")
         self.lbl_stats.setObjectName("PcapLoadingStatus")
         self._refresh_widget_style(self.lbl_stats)
+        self._update_batch_status(current_text)
 
         self._thread = QThread()
-        self._worker = PcapWorker(file_path)
+        worker_path: str | list[str] = paths[0] if len(paths) == 1 else paths
+        self._worker = PcapWorker(worker_path, label=label)
         self._worker.moveToThread(self._thread)
         self._thread.started.connect(self._worker.run)
         self._worker.finished.connect(self._on_loaded, Qt.QueuedConnection)
@@ -1019,15 +1268,38 @@ class PcapPage(QWidget):
         self._thread.start()
 
     def _on_loaded(self, summary: PcapSummary):
+        self._render_loaded_summary(summary)
+        if self._pcap_queue_auto_save:
+            saved = self._save_current_to_project(show_dialog=False, check_device=False, refresh_ui=False)
+            self._mark_current_ingest("done" if saved else "failed", "" if saved else "Auto-save failed.")
+        source_count = len(getattr(summary, "source_paths", None) or [])
+        if source_count > 1 and self._pcap_batch_total == source_count:
+            self._pcap_batch_processed = self._pcap_batch_total
+        else:
+            self._pcap_batch_processed += 1
+        self._update_batch_status()
+
+    def _render_loaded_summary(self, summary: PcapSummary) -> None:
         self.summary = summary
         self._saved_source_id = None
         self.btn_export.setEnabled(True)
+        source_count = len(getattr(summary, "source_paths", None) or [])
         self.btn_save_project.setEnabled(True)
-        self.btn_save_project.setText("Save to Project")
+        if source_count > 1:
+            self.btn_save_project.setText("Save Day to Project")
+            self.btn_save_project.setToolTip(
+                "Save this daily aggregate to the project profile. The source files remain indexed individually."
+            )
+        else:
+            self.btn_save_project.setText("Save to Project")
+            self.btn_save_project.setToolTip("")
         self.btn_ai_summary.setEnabled(True)
         self.btn_ai_summary.setText("AI Summary")
         self.btn_add_notes.setEnabled(True)
-        self.lbl_file.setText(summary.file_path)
+        if source_count > 1:
+            self.lbl_file.setText(f"{summary.file_name} | Aggregated from {source_count:,} PCAP files")
+        else:
+            self.lbl_file.setText(summary.file_path)
         self.lbl_stats.setObjectName("HeaderStatLabel")
         self._refresh_widget_style(self.lbl_stats)
         self.lbl_stats.setText(
@@ -1039,6 +1311,7 @@ class PcapPage(QWidget):
             self.lbl_stats.setText(
                 self.lbl_stats.text()
                 + f" | Folder queue: {len(self._pcap_queue)} more"
+                + (" | auto-batch" if self._pcap_queue_auto_process else "")
             )
         investigator = build_investigator_view(summary)
         self._set_highlights(summary)
@@ -1344,22 +1617,151 @@ class PcapPage(QWidget):
         dlg.exec()
 
     def _on_error(self, message: str):
-        QMessageBox.critical(self, "PCAP analysis failed", message)
+        if not self._pcap_queue_auto_process:
+            QMessageBox.critical(self, "PCAP analysis failed", message)
         self.lbl_stats.setObjectName("HeaderStatLabel")
         self._refresh_widget_style(self.lbl_stats)
         self.lbl_stats.setText("PCAP analysis failed.")
+        self._pcap_batch_failed += 1
+        self._pcap_batch_processed += 1
+        if self._pcap_queue_auto_save:
+            self._mark_current_ingest("failed", message)
+        self._update_batch_status(error_text=message)
+
+    def _on_batch_progress(self, processed: int, total: int, failed: int, current_file: str) -> None:
+        self._pcap_batch_processed = processed
+        self._pcap_batch_total = total
+        self._pcap_batch_failed = failed
+        if current_file:
+            self.lbl_file.setText(current_file)
+        self._update_batch_status(current_file)
+
+    def _on_batch_finished(self, last_summary: object, processed: int, failed: int) -> None:
+        self._pcap_batch_processed = processed
+        self._pcap_batch_failed = failed
+        self._pcap_queue_auto_process = False
+        self._pcap_queue = []
+
+        self.btn_open.setEnabled(True)
+        self.btn_save_project.setEnabled(bool(last_summary))
+        self.btn_export.setEnabled(bool(last_summary))
+        self.btn_ai_summary.setEnabled(bool(last_summary))
+        self.btn_add_notes.setEnabled(bool(last_summary))
+        self._update_open_button_text()
+
+        self.lbl_stats.setObjectName("HeaderStatLabel")
+        self._refresh_widget_style(self.lbl_stats)
+        if isinstance(last_summary, PcapSummary):
+            self._render_loaded_summary(last_summary)
+            if self._pcap_queue_auto_save:
+                self.btn_save_project.setText("Saved to Project")
+        else:
+            self.lbl_stats.setText("PCAP batch finished, but no capture was analyzed successfully.")
+
+        self._pcap_queue_auto_save = False
+        self._pcap_batch_stop_after_current = False
+        self._update_batch_status()
+        self._refresh_project_after_batch()
 
     def _cleanup_thread(self):
         self.btn_open.setEnabled(True)
         self._update_open_button_text()
+        if not self._pcap_queue:
+            self._pcap_queue_auto_save = False
+            self._pcap_queue_auto_process = False
+            self._pcap_batch_stop_after_current = False
+            self._update_batch_status()
         self._worker = None
         self._thread = None
+        if self._pcap_batch_stop_after_current:
+            self._pcap_queue_auto_process = False
+            self._update_open_button_text()
+            self._update_batch_status()
+            return
+        if self._pcap_queue_auto_process and self._pcap_queue:
+            QTimer.singleShot(100, self._load_next_queued_pcap)
+
+    def _cleanup_batch_thread(self):
+        self._batch_worker = None
+        self._batch_thread = None
 
     def _update_open_button_text(self) -> None:
         if self._pcap_queue:
             self.btn_open.setText(f"Open next PCAP ({len(self._pcap_queue)})")
         else:
             self.btn_open.setText("Open PCAP")
+
+    def stop_after_current_batch(self) -> None:
+        if self._batch_worker is not None:
+            self._pcap_batch_stop_after_current = True
+            self._batch_worker.request_stop()
+            self.btn_stop_batch.setEnabled(False)
+            self.btn_stop_batch.setText("Stopping...")
+            self._update_batch_status()
+            return
+
+        if not self._pcap_queue:
+            self._reset_batch_status()
+            return
+        self._pcap_batch_stop_after_current = True
+        self._pcap_queue_auto_process = False
+        self.btn_stop_batch.setEnabled(False)
+        self.btn_stop_batch.setText("Stopping...")
+        self._update_batch_status()
+
+    def _reset_batch_status(self) -> None:
+        self._pcap_batch_total = 0
+        self._pcap_batch_processed = 0
+        self._pcap_batch_failed = 0
+        self._pcap_batch_stop_after_current = False
+        if hasattr(self, "batch_status_panel"):
+            self.batch_status_panel.setVisible(False)
+        if hasattr(self, "btn_stop_batch"):
+            self.btn_stop_batch.setEnabled(True)
+            self.btn_stop_batch.setText("Stop after current")
+
+    def _update_batch_status(self, current_file: str = "", error_text: str = "") -> None:
+        if not hasattr(self, "batch_status_panel"):
+            return
+
+        has_batch = self._pcap_batch_total > 1 or bool(self._pcap_queue)
+        if not has_batch:
+            self.batch_status_panel.setVisible(False)
+            return
+
+        remaining = len(self._pcap_queue)
+        mode = "Auto batch" if self._pcap_queue_auto_process else "Manual queue"
+        if self._pcap_active_day:
+            mode = f"{mode} | {self._format_day_label(self._pcap_active_day)}"
+        parts = [
+            f"{mode}: {self._pcap_batch_processed:,} / {self._pcap_batch_total:,} processed",
+            f"{remaining:,} remaining",
+        ]
+        if self._pcap_batch_failed:
+            parts.append(f"{self._pcap_batch_failed:,} failed")
+        if current_file:
+            parts.append(f"current: {current_file}")
+        if self._pcap_batch_stop_after_current:
+            parts.append("will stop after current file")
+        if error_text:
+            parts.append(f"last error: {error_text[:160]}")
+
+        self.lbl_batch_status.setText(" | ".join(parts))
+        self.btn_stop_batch.setVisible(self._pcap_queue_auto_process or self._pcap_batch_stop_after_current)
+        self.btn_stop_batch.setEnabled(self._pcap_queue_auto_process and bool(self._pcap_queue))
+        if not self._pcap_batch_stop_after_current:
+            self.btn_stop_batch.setText("Stop after current")
+        self.batch_status_panel.setVisible(True)
+
+    def _mark_current_ingest(self, status: str, message: str = "") -> None:
+        project_id = self._current_project_id()
+        file_path = self.summary.file_path if self.summary else self.lbl_file.text()
+        if project_id is None or not file_path:
+            return
+        try:
+            mark_ingest_item(project_id, file_path, status, message)
+        except Exception:
+            pass
 
     def _set_table(self, table: QTableView, rows: list[dict[str, Any]]):
         model = table.model()
@@ -1557,31 +1959,53 @@ class PcapPage(QWidget):
             QMessageBox.critical(self, "PCAP export failed", str(exc))
 
     def save_to_project(self):
+        self._save_current_to_project(show_dialog=True, check_device=True)
+
+    def _save_current_to_project(
+        self,
+        *,
+        show_dialog: bool = True,
+        check_device: bool = True,
+        refresh_ui: bool = True,
+    ) -> bool:
         if not self.summary:
-            self._info("PCAP", "Open a PCAP file first.")
-            return
+            if show_dialog:
+                self._info("PCAP", "Open a PCAP file first.")
+            return False
 
         project_id = self._current_project_id()
         if project_id is None:
-            self._info(
-                "PCAP",
-                "Open an active project first.",
-                "PCAP analyses must be tied to a project before they can be used in notes or future activity profiles.",
-            )
-            return
+            if show_dialog:
+                self._info(
+                    "PCAP",
+                    "Open an active project first.",
+                    "PCAP analyses must be tied to a project before they can be used in notes or future activity profiles.",
+                )
+            return False
         if not self._ensure_project_workspace():
-            return
+            return False
 
-        if not self._confirm_project_device_match(project_id):
-            return
+        if check_device and not self._confirm_project_device_match(project_id):
+            return False
 
         try:
-            digest = file_sha256(self.summary.file_path)
+            source_paths = list(getattr(self.summary, "source_paths", None) or [])
+            if not source_paths and getattr(self.summary, "file_path", ""):
+                source_paths = [self.summary.file_path]
+            source_count = len(source_paths)
+            if source_count > 1:
+                digest = self._aggregate_source_hash(source_paths)
+                saved_path = self.summary.file_path or self.summary.file_name
+                saved_name = self.summary.file_name or f"{source_count:,} PCAP files"
+            else:
+                saved_path = self.summary.file_path
+                saved_name = self.summary.file_name
+                digest = file_sha256(saved_path)
             investigator = build_investigator_view(self.summary)
             source_id = add_pcap_source(
                 project_id,
-                file_path=self.summary.file_path,
-                file_name=self.summary.file_name,
+                file_path=saved_path,
+                file_name=saved_name,
                 file_sha256_value=digest,
                 file_size=self.summary.file_size,
                 format=self.summary.format,
@@ -1593,23 +2017,93 @@ class PcapPage(QWidget):
                 likely_device_ip=self.summary.likely_device_ip,
                 summary_text=str(investigator.get("plain_summary") or ""),
             )
+            self._mark_saved_source_paths_done(project_id, source_paths)
             bound_project_ip = self._bind_project_device_ip_if_empty(project_id)
         except Exception as exc:
-            self._error("PCAP", "Failed to save PCAP analysis to project.", str(exc))
-            return
+            if show_dialog:
+                self._error("PCAP", "Failed to save PCAP analysis to project.", str(exc))
+            return False
 
         self._saved_source_id = source_id
         self.btn_save_project.setText("Saved to Project")
+        if refresh_ui:
+            self._refresh_project_after_batch()
+        details = [f"Source id: {source_id}"]
+        if bound_project_ip:
+            details.append(f"Project known IP was set to: {bound_project_ip}")
+        if show_dialog:
+            self._info("PCAP", "PCAP analysis saved to active project.", "\n".join(details))
+        if not refresh_ui:
+            self._refresh_activity()
+        return True
+
+    def _aggregate_source_hash(self, source_paths: list[str]) -> str:
+        digest = hashlib.sha256()
+        for raw_path in sorted(str(path) for path in source_paths if str(path or "").strip()):
+            path = Path(raw_path)
+            try:
+                stat = path.stat()
+                marker = f"{path.resolve()}|{stat.st_size}|{stat.st_mtime_ns}"
+            except Exception:
+                marker = f"{raw_path}|missing"
+            digest.update(marker.encode("utf-8", errors="replace"))
+            digest.update(b"\n")
+        return "aggregate:" + digest.hexdigest()
+
+    def _mark_saved_source_paths_done(self, project_id: int, source_paths: list[str]) -> None:
+        paths = [Path(str(path)) for path in source_paths if str(path or "").strip()]
+        rows = []
+        for path in paths:
+            try:
+                file_size = path.stat().st_size if path.is_file() else 0
+            except Exception:
+                file_size = 0
+            rows.append({
+                "file_path": str(path),
+                "file_name": path.name,
+                "file_type": "pcap",
+                "file_size": file_size,
+                "observed_date": self._observed_date_for_source_path(path),
+            })
+
+        if not rows:
+            return
+
+        source_root = self._common_source_root(paths)
+        upsert_ingest_items(project_id, source_root, rows)
+        for row in rows:
+            mark_ingest_item(project_id, row["file_path"], "done", "")
+
+    def _common_source_root(self, paths: list[Path]) -> str:
+        parents = [str(path.parent) for path in paths]
+        if not parents:
+            return ""
+        try:
+            return str(Path(os.path.commonpath(parents)))
+        except Exception:
+            return parents[0]
+
+    def _observed_date_for_source_path(self, path: Path) -> str:
+        text = str(path)
+        match = re.search(r"(20\d{6})", text)
+        if match:
+            raw = match.group(1)
+            return f"{raw[:4]}-{raw[4:6]}-{raw[6:8]}"
+        first_seen = str(getattr(self.summary, "first_seen", "") or "")
+        if len(first_seen) >= 10 and first_seen[4] == "-" and first_seen[7] == "-":
+            return first_seen[:10]
+        return ""
+
+    def _refresh_project_after_batch(self) -> None:
+        project_id = self._current_project_id()
+        if project_id is None:
+            return
         if hasattr(self.app, "projects_ui_controller"):
             self.app.projects_ui_controller.sync_project_workspace(project_id)
             self.app.projects_ui_controller.refresh_recent_datasets(project_id)
             self.app.projects_ui_controller.refresh_case_dashboard(project_id)
         if hasattr(self.app, "refresh_activity_profile_ui"):
             self.app.refresh_activity_profile_ui()
-        details = [f"Source id: {source_id}"]
-        if bound_project_ip:
-            details.append(f"Project known IP was set to: {bound_project_ip}")
-        self._info("PCAP", "PCAP analysis saved to active project.", "\n".join(details))
         self._refresh_activity()
 
     def add_summary_to_notes(self):
@@ -1709,48 +2203,7 @@ class PcapPage(QWidget):
         ]
 
     def _confirm_project_device_match(self, project_id: int) -> bool:
-        current_ip = (self.summary.likely_device_ip if self.summary else "").strip()
-        if not current_ip:
-            return self._confirm(
-                "PCAP",
-                "Device IP could not be determined.",
-                "The PCAP can still be saved, but ViaNyquist cannot compare it with previous PCAP sources in this project.",
-                ok_text="Save anyway",
-                cancel_text="Cancel",
-            )
-
-        project = get_project(project_id)
-        project_ip = (project.subject_ip if project else "").strip()
-        if project_ip and project_ip.casefold() != current_ip.casefold():
-            ok = self._confirm(
-                "PCAP project IP mismatch",
-                "This PCAP likely describes a different device IP than the active project.",
-                (
-                    f"Project known IP: {project_ip}\n"
-                    f"Current PCAP device IP: {current_ip}\n\n"
-                    "Save only if this capture belongs to the same target/project or if the known project IP should be reviewed."
-                ),
-                ok_text="Save anyway",
-                cancel_text="Cancel",
-            )
-            if not ok:
-                return False
-
-        previous_ips = [ip for ip in list_project_pcap_device_ips(project_id) if ip and ip != current_ip]
-        if not previous_ips:
-            return True
-
-        return self._confirm(
-            "PCAP device mismatch",
-            "This PCAP appears to describe a different device IP than previous PCAP sources in this project.",
-            (
-                f"Current device IP: {current_ip}\n"
-                f"Previous project PCAP device IPs: {', '.join(previous_ips[:8])}\n\n"
-                "Save only if this capture belongs to the same target/project."
-            ),
-            ok_text="Save anyway",
-            cancel_text="Cancel",
-        )
+        return True
 
     def _bind_project_device_ip_if_empty(self, project_id: int) -> str:
         current_ip = (self.summary.likely_device_ip if self.summary else "").strip()

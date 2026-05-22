@@ -109,6 +109,11 @@ QFrame#ListingHeaderCard,
 QFrame#CaseDashboardCompact,
 QFrame#PanelCard,
 QFrame#FlowDetailsCard,
+QFrame#FlowToolbarCard,
+QFrame#NotesEditorPanel,
+QFrame#NotesEditorContent,
+QFrame#NotesListPanel,
+QFrame#NotesPreviewPanel,
 QFrame#PcapInvestigatorCard,
 QGroupBox {
     background: #ffffff;
@@ -123,6 +128,11 @@ QFrame#ListingHeaderCard QLabel,
 QFrame#CaseDashboardCompact QLabel,
 QFrame#PanelCard QLabel,
 QFrame#PcapInvestigatorCard QLabel,
+QFrame#FlowToolbarCard QLabel,
+QFrame#NotesEditorPanel QLabel,
+QFrame#NotesEditorContent QLabel,
+QFrame#NotesListPanel QLabel,
+QFrame#NotesPreviewPanel QLabel,
 QGroupBox QLabel {
     background: transparent;
     color: #111827;
@@ -222,6 +232,13 @@ QTableView {
     border-color: #cbd5e1;
 }
 
+QTextEdit#SummaryTextBox,
+QPlainTextEdit#SummaryTextBox {
+    background: transparent;
+    color: #334155;
+    border: none;
+}
+
 QLineEdit:focus,
 QTextEdit:focus,
 QPlainTextEdit:focus,
@@ -268,6 +285,11 @@ QTableView {
     gridline-color: #cbd5e1;
     selection-background-color: #3b82f6;
     selection-color: #ffffff;
+}
+
+QTableView QTableCornerButton::section {
+    background: #e2e8f0;
+    border: 1px solid #cbd5e1;
 }
 
 QPushButton {
@@ -321,6 +343,42 @@ QScrollArea QWidget {
     background: transparent;
 }
 
+QSplitter::handle {
+    background: #cbd5e1;
+}
+
+QSplitter::handle:hover {
+    background: #94a3b8;
+}
+
+QScrollBar:vertical,
+QScrollBar:horizontal {
+    background: #f1f5f9;
+    border: 1px solid #cbd5e1;
+    margin: 0;
+}
+
+QScrollBar::handle:vertical,
+QScrollBar::handle:horizontal {
+    background: #cbd5e1;
+    border-radius: 4px;
+    min-height: 24px;
+    min-width: 24px;
+}
+
+QScrollBar::handle:vertical:hover,
+QScrollBar::handle:horizontal:hover {
+    background: #94a3b8;
+}
+
+QScrollBar::add-line,
+QScrollBar::sub-line,
+QScrollBar::add-page,
+QScrollBar::sub-page {
+    background: transparent;
+    border: none;
+}
+
 QFrame#FlowToolbarCard,
 QGroupBox#SummaryCard,
 QGroupBox#FlowDetailsCard,
@@ -336,6 +394,10 @@ QGroupBox#SummaryCard::title,
 QGroupBox#FlowDetailsCard::title {
     background: #ffffff;
     color: #0f172a;
+}
+
+QFrame#PcapInvestigatorCard {
+    border: 1px solid #60a5fa;
 }
 
 QLabel#FlowFieldValue {
@@ -596,6 +658,7 @@ class App(QWidget):
         # 6) Paging controls
         self.btn_load_more.clicked.connect(self.explore_ui_controller.load_next_page)
         self.cmb_page_size.currentTextChanged.connect(self.explore_ui_controller.on_page_size_changed)
+        self.cmb_json_day.currentIndexChanged.connect(self.dataset_controller.on_json_day_changed)
 
         # 7) Explore actions
         self.btn_load.clicked.connect(self.dataset_controller.load_dataset_dialog)
@@ -959,14 +1022,14 @@ class App(QWidget):
         )
         self.btn_expand_pcap_datasets.clicked.connect(
             lambda: self._open_project_rows_dialog(
-                "Recent PCAP datasets",
+                "Recent PCAP days",
                 [
                     ("name", "Name"),
+                    ("file_count", "Files"),
                     ("packets", "Packets"),
                     ("volume", "Volume"),
                     ("device_ip", "Device IP"),
                     ("period", "Period"),
-                    ("path", "Path"),
                 ],
                 self.project_recent_pcap_rows,
                 on_double_click=self._open_pcap_dataset_row,
@@ -1024,7 +1087,7 @@ class App(QWidget):
         self.case_metric_cards = []
         case_metrics = QHBoxLayout()
         case_metrics.setSpacing(8)
-        for title in ("JSON Datasets", "PCAP", "Findings", "Device IPs"):
+        for title in ("JSON Datasets", "PCAP Days", "Findings", "Device IPs"):
             card = QLabel(f"{title}: 0")
             card.setObjectName("CaseMetricCompact")
             card.setAlignment(Qt.AlignCenter)
@@ -1062,9 +1125,9 @@ class App(QWidget):
         self.lbl_recent_json_detail.setObjectName("Muted")
         self.lbl_recent_json_detail.setWordWrap(True)
 
-        self.lbl_recent_pcap_count = QLabel("0 PCAP datasets")
+        self.lbl_recent_pcap_count = QLabel("0 PCAP days")
         self.lbl_recent_pcap_count.setObjectName("ProfileMetric")
-        self.lbl_recent_pcap_detail = QLabel("No PCAP sources saved for this project.")
+        self.lbl_recent_pcap_detail = QLabel("No PCAP days saved for this project.")
         self.lbl_recent_pcap_detail.setObjectName("Muted")
         self.lbl_recent_pcap_detail.setWordWrap(True)
 
@@ -1089,8 +1152,8 @@ class App(QWidget):
         )
         bottom_grid.addWidget(
             self._project_launcher_card(
-                "Recent PCAP datasets",
-                "Unique PCAP captures saved to the active project.",
+                "Recent PCAP days",
+                "Unique PCAP capture days saved to the active project.",
                 self.lbl_recent_pcap_count,
                 self.lbl_recent_pcap_detail,
                 [self.btn_expand_pcap_datasets],
@@ -1136,6 +1199,14 @@ class App(QWidget):
 
         self.lbl_showing = QLabel("")
         self.lbl_showing.setObjectName("HeaderStatLabel")
+
+        self.lbl_json_day = QLabel("Period:")
+        self.lbl_json_day.setObjectName("HeaderStatLabel")
+        self.lbl_json_day.setVisible(False)
+
+        self.cmb_json_day = QComboBox()
+        self.cmb_json_day.setMinimumWidth(230)
+        self.cmb_json_day.setVisible(False)
 
         self.lbl_json_meta = QLabel("")
         self.lbl_json_meta.setObjectName("HeaderStatLabel")
@@ -1184,6 +1255,8 @@ class App(QWidget):
         header_bottom.addWidget(self.lbl_stats)
         header_bottom.addWidget(self.lbl_loaded)
         header_bottom.addWidget(self.lbl_showing)
+        header_bottom.addWidget(self.lbl_json_day)
+        header_bottom.addWidget(self.cmb_json_day)
         header_bottom.addStretch()
 
         header_meta = QHBoxLayout()
@@ -1858,15 +1931,76 @@ class App(QWidget):
         self.go_to_json_tab(0)
 
     def _open_pcap_dataset_row(self, row: dict[str, Any], dialog: QDialog) -> None:
+        row = self._resolve_project_pcap_row(row)
+        paths = [str(path) for path in (row.get("paths") or []) if str(path or "").strip()]
+        existing_paths = [path for path in paths if Path(path).is_file()]
+        if existing_paths:
+            dialog.accept()
+            self.go_page(self.IDX_PCAP, self._nav_pcap)
+            if hasattr(self, "pcap_page"):
+                label = str(row.get("name") or "")
+                self.pcap_page._load_pcap_files(existing_paths, label=label)
+            return
+
         path_text = str(row.get("path") or "")
         path = Path(path_text)
         if not path_text or not path.is_file():
+            if row.get("day") or str(row.get("name") or "").strip():
+                self._message_dialog(
+                    "PCAP dataset",
+                    "Saved PCAP day cannot be opened because the original source files are not available at their saved paths.",
+                    str(row.get("name") or row.get("day") or path_text or "-"),
+                    width=560,
+                )
+                return
             self._message_dialog("PCAP dataset", "PCAP file not found.", path_text or "-", width=460)
             return
         dialog.accept()
         self.go_page(self.IDX_PCAP, self._nav_pcap)
         if hasattr(self, "pcap_page"):
             self.pcap_page.load_pcap(str(path))
+
+    def _resolve_project_pcap_row(self, row: dict[str, Any]) -> dict[str, Any]:
+        paths = [str(path) for path in (row.get("paths") or []) if str(path or "").strip()]
+        if any(Path(path).is_file() for path in paths):
+            return row
+
+        project_id = getattr(self, "current_project_id", None)
+        controller = getattr(self, "projects_ui_controller", None)
+        if project_id is None or controller is None or not hasattr(controller, "_project_pcap_day_rows"):
+            return row
+
+        row_day = str(row.get("day") or "").strip()
+        row_name = str(row.get("name") or "").strip()
+        row_path = str(row.get("path") or "").strip()
+        try:
+            candidates = controller._project_pcap_day_rows(project_id)
+        except Exception:
+            return row
+
+        for candidate in candidates:
+            candidate_day = str(candidate.get("day") or "").strip()
+            candidate_name = str(candidate.get("name") or "").strip()
+            labels = {value for value in (row_day, row_name, row_path) if value}
+            if (
+                (row_day and row_day == candidate_day)
+                or (row_name and row_name == candidate_name)
+                or (row_path and row_path == candidate_name)
+                or (candidate_day and candidate_day in labels)
+            ):
+                merged = dict(row)
+                merged.update({
+                    "day": candidate.get("day") or row.get("day"),
+                    "name": candidate.get("name") or row.get("name"),
+                    "paths": candidate.get("paths") or row.get("paths") or [],
+                    "file_count": candidate.get("file_count") or row.get("file_count"),
+                })
+                candidate_path = str(candidate.get("path") or "")
+                row_path_obj = Path(row_path) if row_path else None
+                if candidate_path or not (row_path_obj and row_path_obj.is_file()):
+                    merged["path"] = candidate_path
+                return merged
+        return row
 
     def refresh_activity_profile_ui(self):
         if hasattr(self, "activity_profile_page"):
