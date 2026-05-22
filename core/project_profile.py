@@ -12,9 +12,11 @@ from core.db import (
     list_pcap_sources,
     list_recent_datasets,
 )
-from core.formatters import human_bytes
-from core.project_datasets import list_project_json_dataset_files
+from core.formatters import format_short_date, human_bytes
+from core.pcap_rollup import pcap_day_key, rollup_pcap_sources
+from core.project_datasets import count_project_json_datasets, list_project_json_dataset_files
 from core.project_identity import project_identifiers_text, subject_display_label, target_display_label
+from core.timeutils import parse_timestamp
 
 
 def build_project_activity_profile(
@@ -35,6 +37,7 @@ def build_project_activity_profile(
             "capture_range": {"first_seen": "", "last_seen": "", "label": "-"},
             "dataset_count": 0,
             "pcap_count": 0,
+            "pcap_day_count": 0,
             "finding_count": 0,
             "pcap_device_ips": {},
             "total_pcap_packets": 0,
@@ -42,24 +45,31 @@ def build_project_activity_profile(
             "total_pcap_bytes_label": human_bytes(0, precision=2),
         }
 
-    dataset_sources = list_recent_datasets(project_id, limit=1000, db_path=db_path)
+    dataset_sources = list_recent_datasets(project_id, limit=50000, db_path=db_path)
     dataset_files = [
-        row for row in list_project_json_dataset_files(project_id, limit=1000, db_path=db_path)
+        row for row in list_project_json_dataset_files(project_id, limit=50000, db_path=db_path)
         if row.get("status") == "Available"
     ]
-    dataset_count = len(dataset_files)
-    pcaps = list_pcap_sources(project_id, limit=1000, db_path=db_path)
-    findings = list_findings(project_id, limit=1000, db_path=db_path)
+    dataset_count = count_project_json_datasets(project_id, limit=50000, db_path=db_path)
+    pcaps = list_pcap_sources(project_id, limit=50000, db_path=db_path)
+    findings = list_findings(project_id, limit=50000, db_path=db_path)
     activity = list_activity(project_id, limit=200, db_path=db_path)
 
-    pcap_ips = Counter(src.likely_device_ip for src in pcaps if src.likely_device_ip)
+    pcap_rollup = rollup_pcap_sources(pcaps)
+    pcap_ips = pcap_rollup.device_ips
     capture_starts = [src.first_seen for src in pcaps if src.first_seen]
     capture_ends = [src.last_seen for src in pcaps if src.last_seen]
-    total_packets = sum(src.packet_count for src in pcaps)
-    total_pcap_bytes = sum(src.wire_bytes for src in pcaps)
+    total_packets = pcap_rollup.total_packets
+    total_pcap_bytes = pcap_rollup.total_bytes
     capture_start = min(capture_starts) if capture_starts else ""
     capture_end = max(capture_ends) if capture_ends else ""
     activity_types = Counter(str(row["event_type"] or "event") for row in activity)
+    pcap_day_packets = pcap_rollup.day_packets
+    pcap_day_bytes = pcap_rollup.day_bytes
+    undated_pcap_packets = pcap_rollup.undated_packets
+    undated_pcap_bytes = pcap_rollup.undated_bytes
+    undated_pcap_count = pcap_rollup.undated_day_count
+    pcap_day_count = pcap_rollup.pcap_day_count
 
     summary_lines = [
         "Project Activity Profile",
@@ -67,7 +77,7 @@ def build_project_activity_profile(
         f"- Known identifiers: {project_identifiers_text(project)}",
         f"- Target fallback: {target_display_label(project)}",
         f"- JSON datasets: {dataset_count}",
-        f"- PCAP sources: {len(pcaps)}",
+        f"- PCAP days: {pcap_day_count}",
         f"- Findings: {len(findings)}",
     ]
 
@@ -96,28 +106,49 @@ def build_project_activity_profile(
 
     recommendation_lines = _recommendations(
         dataset_count=dataset_count,
-        pcap_count=len(pcaps),
+        pcap_count=pcap_day_count,
         finding_count=len(findings),
         pcap_ips=pcap_ips,
     )
+    pcap_day_rows = [
+        {
+            "label": format_short_date(day, missing=day),
+            "date": day,
+            "count": packets,
+            "bytes": pcap_day_bytes[day],
+            "bytes_label": human_bytes(pcap_day_bytes[day], precision=2),
+            "detail": f"{packets:,} packets / {human_bytes(pcap_day_bytes[day], precision=2)}",
+        }
+        for day, packets in sorted(pcap_day_packets.items())
+    ]
+    if undated_pcap_count:
+        pcap_day_rows.append({
+            "label": "Undated PCAP",
+            "date": "",
+            "count": undated_pcap_packets,
+            "bytes": undated_pcap_bytes,
+            "bytes_label": human_bytes(undated_pcap_bytes, precision=2),
+            "detail": f"{undated_pcap_packets:,} packets / {human_bytes(undated_pcap_bytes, precision=2)}",
+        })
 
     return {
         "summary_lines": summary_lines,
         "timeline_lines": timeline_lines,
         "recommendation_lines": recommendation_lines,
         "metrics": [
-            {"label": "JSON Datasets", "value": dataset_count, "detail": "loaded"},
-            {"label": "PCAP Sources", "value": len(pcaps), "detail": "saved"},
+            {"label": "JSON Files", "value": dataset_count, "detail": "indexed in project"},
+            {"label": "PCAP Periods", "value": pcap_day_count, "detail": f"{pcap_rollup.pcap_source_rows:,} saved analysis rows"},
             {"label": "Findings", "value": len(findings), "detail": "saved"},
-            {"label": "Device IPs", "value": len(pcap_ips), "detail": "from PCAP"},
+            {"label": "Device IPs", "value": len(pcap_ips), "detail": "from saved PCAP"},
         ],
         "dataset_count": dataset_count,
         "pcap_count": len(pcaps),
+        "pcap_day_count": pcap_day_count,
         "finding_count": len(findings),
         "pcap_device_ips": dict(pcap_ips),
         "evidence_counts": [
-            {"label": "JSON Datasets", "count": dataset_count},
-            {"label": "PCAP Sources", "count": len(pcaps)},
+            {"label": "JSON Files", "count": dataset_count},
+            {"label": "PCAP Periods", "count": pcap_day_count},
             {"label": "Findings", "count": len(findings)},
         ],
         "pcap_device_ip_rows": [
@@ -128,6 +159,7 @@ def build_project_activity_profile(
             {"label": _event_label(event_type), "count": count}
             for event_type, count in activity_types.most_common()
         ],
+        "pcap_day_rows": pcap_day_rows,
         "capture_range": {
             "first_seen": capture_start,
             "last_seen": capture_end,
@@ -153,6 +185,11 @@ def format_project_activity_profile(profile: dict[str, Any]) -> str:
         lines.extend(timeline[:12])
 
     return "\n".join(lines)
+
+
+def _day_key(value: str) -> str:
+    dt = parse_timestamp(value)
+    return "" if dt is None else dt.strftime("%Y-%m-%d")
 
 
 def _counter_label(values: Counter[str]) -> str:
@@ -191,10 +228,8 @@ def _recommendations(
     else:
         recommendations.append("- Load a dataset or save a PCAP source to start building the project profile.")
 
-    if len(pcap_ips) > 1:
-        recommendations.append("- Review PCAP device IP consistency before treating all captures as the same target.")
-    elif len(pcap_ips) == 1:
-        recommendations.append("- Device IP is consistent across saved PCAP sources so far.")
+    if pcap_ips:
+        recommendations.append("- Treat observed PCAP device IPs as session/context indicators; mobile devices may change IP over time.")
 
     if finding_count:
         recommendations.append("- Review saved findings against the newest datasets and PCAP artifacts.")

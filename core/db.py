@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 import os
 import hashlib
+import json
 from typing import Optional, Iterable
 
 # Project root = parent of /core
@@ -48,6 +49,21 @@ class PcapSource:
     duration_seconds: float
     likely_device_ip: str
     summary_text: str
+    created_at: str
+    updated_at: str
+
+@dataclass
+class IngestItem:
+    id: int
+    project_id: int
+    source_root: str
+    file_path: str
+    file_name: str
+    file_type: str
+    file_size: int
+    observed_date: str
+    status: str
+    message: str
     created_at: str
     updated_at: str
 
@@ -182,6 +198,15 @@ def init_db(db_path: Path = DEFAULT_DB_PATH) -> None:
             ("updated_at", "TEXT NOT NULL DEFAULT ''"),
         ])
 
+        _ensure_columns(con, "datasets", [
+            ("json_file_count", "INTEGER NOT NULL DEFAULT 0"),
+            ("pcap_file_count", "INTEGER NOT NULL DEFAULT 0"),
+            ("total_size", "INTEGER NOT NULL DEFAULT 0"),
+            ("first_observed", "TEXT NOT NULL DEFAULT ''"),
+            ("last_observed", "TEXT NOT NULL DEFAULT ''"),
+            ("indexed_at", "TEXT NOT NULL DEFAULT ''"),
+        ])
+
         # backfill updated_at if empty (for old rows)
         if _column_exists(con, "findings", "updated_at"):
             con.execute(
@@ -206,6 +231,42 @@ def init_db(db_path: Path = DEFAULT_DB_PATH) -> None:
             """
         )
 
+        # --- Evidence ingest queue/status ---
+        con.execute(
+            """
+            CREATE TABLE IF NOT EXISTS ingest_items (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_id INTEGER NOT NULL,
+                source_root TEXT NOT NULL DEFAULT '',
+                file_path TEXT NOT NULL,
+                file_name TEXT NOT NULL DEFAULT '',
+                file_type TEXT NOT NULL DEFAULT '',
+                file_size INTEGER NOT NULL DEFAULT 0,
+                observed_date TEXT NOT NULL DEFAULT '',
+                status TEXT NOT NULL DEFAULT 'pending',
+                message TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+                FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE,
+                UNIQUE(project_id, file_path)
+            );
+            """
+        )
+
+        con.execute(
+            """
+            CREATE TABLE IF NOT EXISTS project_behavior_profiles (
+                project_id INTEGER PRIMARY KEY,
+                source_key TEXT NOT NULL DEFAULT '',
+                flow_count INTEGER NOT NULL DEFAULT 0,
+                json_file_count INTEGER NOT NULL DEFAULT 0,
+                profile_json TEXT NOT NULL DEFAULT '{}',
+                updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+                FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
+            );
+            """
+        )
+
         # --- App settings ---
         con.execute(
             """
@@ -223,6 +284,7 @@ def init_db(db_path: Path = DEFAULT_DB_PATH) -> None:
         con.execute("CREATE INDEX IF NOT EXISTS idx_pcap_sources_project_device ON pcap_sources(project_id, likely_device_ip);")
         con.execute("CREATE INDEX IF NOT EXISTS idx_findings_project_created ON findings(project_id, created_at);")
         con.execute("CREATE INDEX IF NOT EXISTS idx_activity_project_created ON activity_log(project_id, created_at);")
+        con.execute("CREATE INDEX IF NOT EXISTS idx_ingest_items_project_status ON ingest_items(project_id, status, file_type);")
 
 # ---------------- App settings ----------------
 def get_app_setting(key: str, default: str = "", db_path: Path = DEFAULT_DB_PATH) -> str:
@@ -595,6 +657,223 @@ def list_activity(project_id: int, limit: int = 200, db_path: Path = DEFAULT_DB_
         ).fetchall()
     return rows
 
+
+# ---------------- Evidence ingest status ----------------
+def upsert_ingest_items(
+    project_id: int,
+    source_root: str,
+    items: Iterable[dict],
+    db_path: Path = DEFAULT_DB_PATH,
+) -> None:
+    source_root = (source_root or "").strip()
+    rows = []
+    for item in items:
+        file_path = str(item.get("file_path") or item.get("path") or "").strip()
+        if not file_path:
+            continue
+        rows.append({
+            "source_root": source_root,
+            "file_path": file_path,
+            "file_name": str(item.get("file_name") or Path(file_path).name),
+            "file_type": str(item.get("file_type") or item.get("kind") or "").strip().lower(),
+            "file_size": max(0, int(item.get("file_size") or item.get("size") or 0)),
+            "observed_date": str(item.get("observed_date") or ""),
+        })
+    if not rows:
+        return
+
+    with _connect(db_path) as con:
+        for row in rows:
+            con.execute(
+                """
+                INSERT INTO ingest_items (
+                    project_id, source_root, file_path, file_name, file_type,
+                    file_size, observed_date, status, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', strftime('%Y-%m-%d %H:%M:%f', 'now'))
+                ON CONFLICT(project_id, file_path) DO UPDATE SET
+                    source_root = excluded.source_root,
+                    file_name = excluded.file_name,
+                    file_type = excluded.file_type,
+                    file_size = excluded.file_size,
+                    observed_date = excluded.observed_date,
+                    status = CASE
+                        WHEN ingest_items.status = 'done' THEN ingest_items.status
+                        ELSE 'pending'
+                    END,
+                    message = CASE
+                        WHEN ingest_items.status = 'done' THEN ingest_items.message
+                        ELSE ''
+                    END,
+                    updated_at = strftime('%Y-%m-%d %H:%M:%f', 'now');
+                """,
+                (
+                    project_id,
+                    row["source_root"],
+                    row["file_path"],
+                    row["file_name"],
+                    row["file_type"],
+                    row["file_size"],
+                    row["observed_date"],
+                ),
+            )
+
+
+def mark_ingest_item(
+    project_id: int,
+    file_path: str,
+    status: str,
+    message: str = "",
+    db_path: Path = DEFAULT_DB_PATH,
+) -> None:
+    file_path = (file_path or "").strip()
+    status = (status or "").strip().lower()
+    if not file_path or not status:
+        return
+
+    with _connect(db_path) as con:
+        con.execute(
+            """
+            UPDATE ingest_items
+            SET status = ?,
+                message = ?,
+                updated_at = strftime('%Y-%m-%d %H:%M:%f', 'now')
+            WHERE project_id = ? AND file_path = ?;
+            """,
+            (status, message or "", project_id, file_path),
+        )
+
+
+def list_ingest_items(
+    project_id: int,
+    *,
+    source_root: str = "",
+    file_type: str = "",
+    status: str = "",
+    limit: int = 10000,
+    db_path: Path = DEFAULT_DB_PATH,
+) -> list[IngestItem]:
+    clauses = ["project_id = ?"]
+    params: list[object] = [project_id]
+    if source_root:
+        clauses.append("source_root = ?")
+        params.append(source_root)
+    if file_type:
+        clauses.append("file_type = ?")
+        params.append(file_type.strip().lower())
+    if status:
+        clauses.append("status = ?")
+        params.append(status.strip().lower())
+    params.append(limit)
+
+    with _connect(db_path) as con:
+        rows = con.execute(
+            f"""
+            SELECT *
+            FROM ingest_items
+            WHERE {' AND '.join(clauses)}
+            ORDER BY observed_date ASC, file_path ASC
+            LIMIT ?;
+            """,
+            tuple(params),
+        ).fetchall()
+    return [_ingest_item_from_row(row) for row in rows]
+
+
+def ingest_status_map(
+    project_id: int,
+    file_paths: Iterable[str],
+    db_path: Path = DEFAULT_DB_PATH,
+) -> dict[str, str]:
+    paths = [str(path or "").strip() for path in file_paths if str(path or "").strip()]
+    if not paths:
+        return {}
+    out: dict[str, str] = {}
+    with _connect(db_path) as con:
+        for path in paths:
+            row = con.execute(
+                """
+                SELECT file_path, status
+                FROM ingest_items
+                WHERE project_id = ? AND file_path = ?;
+                """,
+                (project_id, path),
+            ).fetchone()
+            if row:
+                out[str(row["file_path"])] = str(row["status"] or "")
+    return out
+
+
+def _ingest_item_from_row(row: sqlite3.Row) -> IngestItem:
+    return IngestItem(
+        id=int(row["id"]),
+        project_id=int(row["project_id"]),
+        source_root=str(row["source_root"] or ""),
+        file_path=str(row["file_path"] or ""),
+        file_name=str(row["file_name"] or ""),
+        file_type=str(row["file_type"] or ""),
+        file_size=int(row["file_size"] or 0),
+        observed_date=str(row["observed_date"] or ""),
+        status=str(row["status"] or ""),
+        message=str(row["message"] or ""),
+        created_at=str(row["created_at"] or ""),
+        updated_at=str(row["updated_at"] or ""),
+    )
+
+
+def save_project_behavior_profile(
+    project_id: int,
+    profile: dict,
+    *,
+    source_key: str = "",
+    json_file_count: int = 0,
+    db_path: Path = DEFAULT_DB_PATH,
+) -> None:
+    payload = json.dumps(profile or {}, ensure_ascii=False)
+    flow_count = int((profile or {}).get("flow_count") or 0)
+    with _connect(db_path) as con:
+        con.execute(
+            """
+            INSERT INTO project_behavior_profiles (
+                project_id, source_key, flow_count, json_file_count, profile_json, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, strftime('%Y-%m-%d %H:%M:%f', 'now'))
+            ON CONFLICT(project_id) DO UPDATE SET
+                source_key = excluded.source_key,
+                flow_count = excluded.flow_count,
+                json_file_count = excluded.json_file_count,
+                profile_json = excluded.profile_json,
+                updated_at = strftime('%Y-%m-%d %H:%M:%f', 'now');
+            """,
+            (project_id, source_key or "", flow_count, int(json_file_count or 0), payload),
+        )
+
+
+def get_project_behavior_profile(project_id: int, db_path: Path = DEFAULT_DB_PATH) -> dict:
+    with _connect(db_path) as con:
+        row = con.execute(
+            """
+            SELECT *
+            FROM project_behavior_profiles
+            WHERE project_id = ?;
+            """,
+            (project_id,),
+        ).fetchone()
+    if not row:
+        return {}
+    try:
+        profile = json.loads(str(row["profile_json"] or "{}"))
+    except Exception:
+        profile = {}
+    if isinstance(profile, dict):
+        profile.setdefault("source_key", str(row["source_key"] or ""))
+        profile.setdefault("json_file_count", int(row["json_file_count"] or 0))
+        profile.setdefault("flow_count", int(row["flow_count"] or 0))
+        profile.setdefault("persisted_at", str(row["updated_at"] or ""))
+        profile["from_project_index"] = True
+        return profile
+    return {}
+
 # ---------------- Datasets ----------------
 def _dataset_path_key(path_text: str) -> str:
     text = (path_text or "").strip()
@@ -648,18 +927,102 @@ def add_dataset_load(project_id: int, folder_path: str, db_path: Path = DEFAULT_
     touch_project(project_id, db_path=db_path)
     add_activity(project_id, "dataset_loaded", folder_path, db_path=db_path)
 
-def list_recent_datasets(project_id: int, limit: int = 10, db_path: Path = DEFAULT_DB_PATH) -> list[str]:
+
+def update_dataset_scan_metadata(
+    project_id: int,
+    folder_path: str,
+    *,
+    json_file_count: int = 0,
+    pcap_file_count: int = 0,
+    total_size: int = 0,
+    first_observed: str = "",
+    last_observed: str = "",
+    db_path: Path = DEFAULT_DB_PATH,
+) -> None:
+    folder_path = (folder_path or "").strip()
+    if not folder_path:
+        return
+
     with _connect(db_path) as con:
         rows = con.execute(
             """
-            SELECT folder_path
+            SELECT id, folder_path, json_file_count, pcap_file_count, total_size, first_observed, last_observed
+            FROM datasets
+            WHERE project_id = ?;
+            """,
+            (project_id,),
+        ).fetchall()
+        path_key = _dataset_path_key(folder_path)
+        dataset_id = None
+        existing_row = None
+        for row in rows:
+            if _dataset_path_key(str(row["folder_path"] or "")) == path_key:
+                dataset_id = int(row["id"])
+                existing_row = row
+                break
+
+        if dataset_id is None:
+            con.execute(
+                """
+                INSERT INTO datasets (
+                    project_id, folder_path, loaded_at,
+                    json_file_count, pcap_file_count, total_size,
+                    first_observed, last_observed, indexed_at
+                )
+                VALUES (
+                    ?, ?, strftime('%Y-%m-%d %H:%M:%f', 'now'),
+                    ?, ?, ?, ?, ?, strftime('%Y-%m-%d %H:%M:%f', 'now')
+                );
+                """,
+                (
+                    project_id,
+                    folder_path,
+                    max(0, int(json_file_count or 0)),
+                    max(0, int(pcap_file_count or 0)),
+                    max(0, int(total_size or 0)),
+                    first_observed or "",
+                    last_observed or "",
+                ),
+            )
+        else:
+            existing_first = str(existing_row["first_observed"] or "") if existing_row else ""
+            existing_last = str(existing_row["last_observed"] or "") if existing_row else ""
+            merged_first = min([value for value in (existing_first, first_observed or "") if value] or [""])
+            merged_last = max([value for value in (existing_last, last_observed or "") if value] or [""])
+            con.execute(
+                """
+                UPDATE datasets
+                SET json_file_count = ?,
+                    pcap_file_count = ?,
+                    total_size = ?,
+                    first_observed = ?,
+                    last_observed = ?,
+                    indexed_at = strftime('%Y-%m-%d %H:%M:%f', 'now')
+                WHERE id = ?;
+                """,
+                (
+                    max(int(existing_row["json_file_count"] or 0), max(0, int(json_file_count or 0))) if existing_row else max(0, int(json_file_count or 0)),
+                    max(int(existing_row["pcap_file_count"] or 0), max(0, int(pcap_file_count or 0))) if existing_row else max(0, int(pcap_file_count or 0)),
+                    max(int(existing_row["total_size"] or 0), max(0, int(total_size or 0))) if existing_row else max(0, int(total_size or 0)),
+                    merged_first,
+                    merged_last,
+                    dataset_id,
+                ),
+            )
+
+
+def list_recent_dataset_sources(project_id: int, limit: int = 10, db_path: Path = DEFAULT_DB_PATH) -> list[sqlite3.Row]:
+    with _connect(db_path) as con:
+        rows = con.execute(
+            """
+            SELECT *
             FROM datasets
             WHERE project_id = ?
             ORDER BY loaded_at DESC, id DESC
             """,
             (project_id,),
         ).fetchall()
-    recent: list[str] = []
+    recent: list[sqlite3.Row] = []
     seen: set[str] = set()
     for row in rows:
         path = str(row["folder_path"] or "")
@@ -667,10 +1030,16 @@ def list_recent_datasets(project_id: int, limit: int = 10, db_path: Path = DEFAU
         if not key or key in seen:
             continue
         seen.add(key)
-        recent.append(path)
+        recent.append(row)
         if len(recent) >= limit:
             break
     return recent
+
+def list_recent_datasets(project_id: int, limit: int = 10, db_path: Path = DEFAULT_DB_PATH) -> list[str]:
+    return [
+        str(row["folder_path"] or "")
+        for row in list_recent_dataset_sources(project_id, limit=limit, db_path=db_path)
+    ]
 
 # ---------------- PCAP sources ----------------
 def file_sha256(file_path: str | Path, *, chunk_size: int = 1024 * 1024) -> str:

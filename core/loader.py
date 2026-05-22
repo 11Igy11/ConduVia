@@ -17,6 +17,19 @@ def list_json_files(folder: str | Path) -> list[Path]:
         key=lambda x: x.name,
     )
 
+def list_json_files_recursive(folder: str | Path) -> list[Path]:
+    """
+    Return all .json files below folder, recursively, sorted by path.
+    """
+    p = Path(folder)
+    if not p.exists() or not p.is_dir():
+        raise FileNotFoundError(f"Folder not found: {p}")
+
+    return sorted(
+        [x for x in p.rglob("*.json") if x.is_file()],
+        key=lambda x: (x.name.casefold(), str(x).casefold()),
+    )
+
 def load_json_file(path: str | Path, *, debug: bool = False) -> list[dict[str, Any]]:
     """
     Load one JSON file and return a list of flow dicts.
@@ -70,6 +83,19 @@ def load_folder(folder: str | Path, *, debug: bool = False) -> tuple[list[Path],
     Returns: (files, flows)
     """
     files = list_json_files(folder)
+    all_flows: list[dict[str, Any]] = []
+
+    for fp in files:
+        flows = load_json_file(fp, debug=debug)
+        all_flows.extend(flows)
+
+    return files, all_flows
+
+def load_folder_recursive(folder: str | Path, *, debug: bool = False) -> tuple[list[Path], list[dict[str, Any]]]:
+    """
+    Load all JSON files below a folder and merge flows into one list.
+    """
+    files = list_json_files_recursive(folder)
     all_flows: list[dict[str, Any]] = []
 
     for fp in files:
