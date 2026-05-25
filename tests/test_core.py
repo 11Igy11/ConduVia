@@ -28,6 +28,7 @@ from core.db import (
     get_project,
     get_project_behavior_profile,
     init_db,
+    list_activity,
     list_pcap_sources,
     list_project_pcap_device_ips,
     ingest_status_map,
@@ -1607,12 +1608,14 @@ class PcapAnalyzerTests(unittest.TestCase):
             sources = list_pcap_sources(project_id, db_path=db_path)
             saved_days = list_saved_pcap_period_days(project_id, db_path=db_path)
             profile = build_project_activity_profile(project_id, db_path=db_path)
+            activities = list_activity(project_id, limit=100, db_path=db_path)
 
         self.assertEqual(first, second)
         self.assertEqual(len(sources), 2)
         self.assertEqual(saved_days, ["2024-02-01", "2024-02-02"])
         self.assertEqual(profile["pcap_day_count"], 2)
         self.assertEqual(profile["total_pcap_packets"], 200)
+        self.assertEqual(len([row for row in activities if str(row["event_type"]) == "pcap_saved"]), 2)
 
     def test_pcap_sources_are_persisted_per_project(self):
         with temporary_directory() as tmp:
@@ -1775,7 +1778,7 @@ class PcapAnalyzerTests(unittest.TestCase):
         self.assertTrue(profile["pcap_day_rows"])
         self.assertEqual(profile["pcap_day_rows"][0]["count"], summary.packet_count)
         self.assertTrue(any(row["label"] == "JSON dataset loaded" for row in profile["activity_type_rows"]))
-        self.assertTrue(any(row["label"] == "PCAP saved" for row in profile["activity_type_rows"]))
+        self.assertTrue(any(row["label"] == "PCAP periods saved" for row in profile["activity_type_rows"]))
         self.assertTrue(profile["capture_range"]["first_seen"])
         self.assertTrue(profile["capture_range"]["last_seen"])
         self.assertEqual(empty_profile["dataset_count"], 0)

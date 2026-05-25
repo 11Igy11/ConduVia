@@ -419,7 +419,7 @@ class ActivityProfilePage(QWidget):
             5: {
                 "label": "Capture Range",
                 "value": _compact_range((profile.get("capture_range") or {}).get("first_seen", ""), (profile.get("capture_range") or {}).get("last_seen", "")),
-                "detail": "Observed PCAP capture period",
+                "detail": "Earliest first packet to latest last packet across all saved daily periods",
             },
         }
         for idx, metric in updates.items():

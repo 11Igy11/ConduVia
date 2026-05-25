@@ -159,10 +159,7 @@ def build_project_activity_profile(
             {"label": ip, "count": count}
             for ip, count in pcap_ips.most_common()
         ],
-        "activity_type_rows": [
-            {"label": _event_label(event_type), "count": count}
-            for event_type, count in activity_types.most_common()
-        ],
+        "activity_type_rows": _activity_type_rows(activity_types, pcap_day_count=pcap_day_count),
         "pcap_day_rows": pcap_day_rows,
         "pcap_period_coverage": pcap_period_coverage,
         "capture_range": {
@@ -232,6 +229,20 @@ def _counter_label(values: Counter[str]) -> str:
     if not values:
         return "-"
     return ", ".join(f"{value} ({count})" for value, count in values.most_common(5))
+
+
+def _activity_type_rows(activity_types: Counter[str], *, pcap_day_count: int) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    pcap_events = int(activity_types.get("pcap_saved") or 0)
+    if pcap_day_count:
+        rows.append({"label": "PCAP periods saved", "count": pcap_day_count})
+    if pcap_events and pcap_events != pcap_day_count:
+        rows.append({"label": "PCAP save log events", "count": pcap_events})
+    for event_type, count in activity_types.most_common():
+        if event_type == "pcap_saved":
+            continue
+        rows.append({"label": _event_label(event_type), "count": count})
+    return rows
 
 
 def _event_label(event_type: str) -> str:

@@ -1567,7 +1567,7 @@ class PcapPage(QWidget):
         tls_total = int(summary.total_tls_sni_hosts or len(summary.tls_sni_counts or {}) or 0)
         http_total = int(summary.total_http_hosts or len(summary.http_host_counts or {}) or 0)
         self.lbl_visible_metadata_count.setText(
-            f"{len(metadata_rows):,} table rows (top entries per type)"
+            f"{len(metadata_rows):,} preview rows (DNS + TLS + HTTP top entries)"
         )
         self.lbl_visible_metadata_breakdown.setText(
             f"DNS: {metadata_count_label(dns_total, len(summary.dns_queries or []))} | "
@@ -1618,7 +1618,9 @@ class PcapPage(QWidget):
         self._set_table(self.tbl_connections, rows)
         payload_rows = sum(1 for row in rows if str(row.get("pcap_payload_preview") or "").strip())
         device_ip = summary.likely_device_ip or "-"
-        self.lbl_connections_count.setText(f"{len(rows):,} connections")
+        flow_cap = 5000
+        flow_note = " (top by volume, max 5,000)" if len(rows) >= flow_cap else ""
+        self.lbl_connections_count.setText(f"{len(rows):,} flow summaries{flow_note}")
         self.lbl_connections_breakdown.setText(
             f"Device IP: {device_ip} | Visible previews: {payload_rows:,} | "
             f"Packets: {summary.packet_count:,} | Volume: {human_bytes(summary.wire_bytes, precision=2)}"
@@ -1900,13 +1902,22 @@ class PcapPage(QWidget):
 
     def _mark_current_ingest(self, status: str, message: str = "") -> None:
         project_id = self._current_project_id()
-        file_path = self.summary.file_path if self.summary else self.lbl_file.text()
-        if project_id is None or not file_path:
+        if project_id is None:
             return
-        try:
-            mark_ingest_item(project_id, file_path, status, message)
-        except Exception:
-            pass
+        paths: list[str] = []
+        if self.summary:
+            paths.extend(str(path) for path in (getattr(self.summary, "source_paths", None) or []) if str(path or "").strip())
+            if not paths and self.summary.file_path:
+                paths.append(self.summary.file_path)
+        if not paths:
+            fallback = (self.lbl_file.text() or "").strip()
+            if fallback:
+                paths.append(fallback)
+        for file_path in paths:
+            try:
+                mark_ingest_item(project_id, file_path, status, message)
+            except Exception:
+                pass
 
     def _set_table(self, table: QTableView, rows: list[dict[str, Any]]):
         model = table.model()

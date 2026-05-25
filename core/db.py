@@ -1173,7 +1173,8 @@ def add_pcap_source(
             source_id = int(cur.lastrowid)
 
     touch_project(project_id, db_path=db_path)
-    add_activity(project_id, "pcap_saved", f"#{source_id} {file_name}", db_path=db_path)
+    if existing is None:
+        add_activity(project_id, "pcap_saved", f"#{source_id} {file_name}", db_path=db_path)
     return source_id
 
 
@@ -1270,7 +1271,6 @@ def save_pcap_period_summary(
             return source_id
 
     touch_project(project_id, db_path=db_path)
-    add_activity(project_id, "pcap_saved", f"#{source_id} {file_name}", db_path=db_path)
     return source_id
 
 
