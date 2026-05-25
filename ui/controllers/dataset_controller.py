@@ -914,7 +914,11 @@ class DatasetController(QObject):
         self.app.lbl_path.setText(str(result["dataset_label"]))
         stats_label = str(result["stats_label"])
         if self._json_active_day:
-            stats_label = f"{stats_label}   |   Day: {self._format_day_label(self._json_active_day)}"
+            day_label = self._format_day_label(self._json_active_day)
+            day_files = len(self._json_day_groups.get(self._json_active_day, []))
+            stats_label = (
+                f"{stats_label}   |   Period: {day_label} ({day_files:,} JSON files)"
+            )
         self.app.lbl_stats.setText(stats_label)
         if hasattr(self.app, "lbl_json_meta"):
             self.app.lbl_json_meta.setText(_json_order_metadata_line(result.get("meta") or {}))

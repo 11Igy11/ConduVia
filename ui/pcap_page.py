@@ -1451,8 +1451,27 @@ class PcapPage(QWidget):
         self._set_evidence_tables(summary)
         self._set_artifact_tables(summary.artifacts)
         self._set_connections_table(summary)
+        self._sync_period_selector_to_summary(summary)
 
-    def refresh_current_view(self) -> None:
+    def _sync_period_selector_to_summary(self, summary: PcapSummary) -> None:
+        if not self._pcap_day_groups or not hasattr(self, "cmb_pcap_day"):
+            return
+        day = resolve_period_day(
+            file_paths=list(getattr(summary, "source_paths", None) or []),
+            first_seen=summary.first_seen,
+            last_seen=summary.last_seen,
+        )
+        if not day or day not in self._pcap_day_groups:
+            return
+        index = self.cmb_pcap_day.findData(day)
+        if index < 0:
+            return
+        if self.cmb_pcap_day.currentIndex() == index and self._pcap_active_day == day:
+            return
+        self.cmb_pcap_day.blockSignals(True)
+        self.cmb_pcap_day.setCurrentIndex(index)
+        self.cmb_pcap_day.blockSignals(False)
+        self._pcap_active_day = day
         if not self.summary:
             return
         summary = self.summary
@@ -1778,12 +1797,15 @@ class PcapPage(QWidget):
             self._render_loaded_summary(last_summary)
             if self._pcap_queue_auto_save:
                 self.btn_save_project.setText("Saved to Project")
+            if self._pcap_day_groups:
+                self._reset_batch_status()
         else:
             self.lbl_stats.setText("PCAP batch finished, but no capture was analyzed successfully.")
 
         self._pcap_queue_auto_save = False
         self._pcap_batch_stop_after_current = False
-        self._update_batch_status()
+        if not self._pcap_day_groups:
+            self._update_batch_status()
         self._refresh_project_after_batch()
 
     def _cleanup_thread(self):
@@ -1968,9 +1990,9 @@ class PcapPage(QWidget):
     def _overview_text(self, summary: PcapSummary) -> str:
         lines = [
             "What is visible:",
-            f"- DNS queries: {metadata_count_label(int(summary.total_dns_names or 0), len(summary.dns_queries or []))} unique names",
-            f"- TLS SNI hosts: {metadata_count_label(int(summary.total_tls_sni_hosts or 0), len(summary.tls_sni or []))} unique host names",
-            f"- HTTP cleartext hosts: {metadata_count_label(int(summary.total_http_hosts or 0), len(summary.http_hosts or []))} unique hosts",
+            f"- DNS names: {metadata_count_label(int(summary.total_dns_names or 0), len(summary.dns_queries or []))}",
+            f"- TLS SNI hosts: {metadata_count_label(int(summary.total_tls_sni_hosts or 0), len(summary.tls_sni or []))}",
+            f"- HTTP cleartext hosts: {metadata_count_label(int(summary.total_http_hosts or 0), len(summary.http_hosts or []))}",
             f"- Evidence table shows top {METADATA_TOP_DNS_ROWS} DNS / {METADATA_TOP_TLS_ROWS} TLS / {METADATA_TOP_HTTP_ROWS} HTTP entries by frequency.",
             f"- Readable payload samples: {len(summary.readable_samples)}",
             "",
