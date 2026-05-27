@@ -11,6 +11,23 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from core.analysis_limits import (
+    MAX_COMMUNICATION_ROWS,
+    MAX_INVESTIGATOR_SERVICE_ROWS,
+    MAX_PCAP_ARTIFACTS_PER_KIND,
+    MAX_PCAP_ENDPOINT_ROWS,
+    MAX_PCAP_FLOWS,
+    MAX_PCAP_PORT_ROWS,
+    MAX_PCAP_PROTOCOL_ROWS,
+    MAX_PCAP_READABLE_SAMPLES,
+    METADATA_TOP_DNS_ROWS,
+    METADATA_TOP_HTTP_ROWS,
+    METADATA_TOP_TLS_ROWS,
+    counter_most_common,
+    slice_rows,
+)
+from core.formatters import format_pcap_datetime, human_bytes
+
 
 PCAPNG_MAGIC = b"\x0a\x0d\x0d\x0a"
 PCAP_MAGIC_ENDIAN = {
@@ -40,7 +57,7 @@ APP_PORT_HINTS = {
 
 PRINTABLE_BYTES = set(bytes(string.printable, "ascii")) | {9, 10, 13}
 
-ARTIFACT_LIMIT_PER_KIND = 300
+ARTIFACT_LIMIT_PER_KIND = MAX_PCAP_ARTIFACTS_PER_KIND
 
 
 @dataclass
@@ -48,6 +65,7 @@ class PcapSummary:
     file_path: str = ""
     file_name: str = ""
     file_size: int = 0
+    source_paths: list[str] = field(default_factory=list)
     format: str = "Unknown"
     packet_count: int = 0
     wire_bytes: int = 0
@@ -60,6 +78,12 @@ class PcapSummary:
     protocols: list[dict[str, Any]] = field(default_factory=list)
     top_endpoints: list[dict[str, Any]] = field(default_factory=list)
     top_ports: list[dict[str, Any]] = field(default_factory=list)
+    total_dns_names: int = 0
+    total_tls_sni_hosts: int = 0
+    total_http_hosts: int = 0
+    dns_query_counts: dict[str, int] = field(default_factory=dict)
+    tls_sni_counts: dict[str, int] = field(default_factory=dict)
+    http_host_counts: dict[str, int] = field(default_factory=dict)
     dns_queries: list[dict[str, Any]] = field(default_factory=list)
     tls_sni: list[dict[str, Any]] = field(default_factory=list)
     http_hosts: list[dict[str, Any]] = field(default_factory=list)
@@ -69,6 +93,8 @@ class PcapSummary:
     hourly_activity: list[dict[str, Any]] = field(default_factory=list)
     flows: list[dict[str, Any]] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
+    total_flows: int = 0
+    total_readable_samples: int = 0
 
 
 @dataclass
@@ -108,6 +134,7 @@ class _PcapAccumulator:
         self.http_hosts: Counter[str] = Counter()
         self.hourly_activity: Counter[str] = Counter()
         self.readable_samples: list[dict[str, Any]] = []
+        self.total_readable_samples = 0
         self.artifacts: dict[tuple[str, str, str], dict[str, Any]] = {}
         self.flow_map: dict[tuple[Any, ...], dict[str, Any]] = {}
 
@@ -285,7 +312,7 @@ class _PcapAccumulator:
             for item in self.artifacts.values()
             if item.get("category") == category and item.get("type") == artifact_type
         )
-        if kind_count >= ARTIFACT_LIMIT_PER_KIND:
+        if ARTIFACT_LIMIT_PER_KIND > 0 and kind_count >= ARTIFACT_LIMIT_PER_KIND:
             return
 
         self.artifacts[key] = {
@@ -304,7 +331,8 @@ class _PcapAccumulator:
         }
 
     def _store_sample(self, packet: _Packet, evidence_type: str, value: str) -> None:
-        if len(self.readable_samples) >= self.max_evidence:
+        self.total_readable_samples += 1
+        if self.max_evidence > 0 and len(self.readable_samples) >= self.max_evidence:
             return
 
         self.readable_samples.append({
@@ -333,11 +361,12 @@ class _PcapAccumulator:
             flow["pcap_payload_preview"] = f"{evidence_type}: {value[:220]}"
 
     def build_summary(self, path: Path, file_format: str) -> PcapSummary:
-        flows = sorted(
+        all_flows = sorted(
             self.flow_map.values(),
             key=lambda f: int(f.get("bidirectional_bytes") or 0),
             reverse=True,
-        )[: self.max_flows]
+        )
+        flows = slice_rows(all_flows, self.max_flows)
 
         likely_device = self.endpoints.most_common(1)[0][0] if self.endpoints else ""
         first_seen = _format_ts(self.first_ts)
@@ -348,10 +377,13 @@ class _PcapAccumulator:
 
         notes = [
             "Encrypted traffic payload is not readable; ViaNyquist reports metadata such as endpoints, ports, DNS and TLS SNI.",
-            "Readable payload samples are limited previews of bytes visible in the capture.",
         ]
+        if self.max_evidence > 0 and self.total_readable_samples > len(self.readable_samples):
+            notes.append(
+                f"Readable payload samples: {len(self.readable_samples):,} shown of {self.total_readable_samples:,} observed."
+            )
 
-        communication_rows = build_communication_rows(flows)
+        communication_rows = build_communication_rows(all_flows)
 
         return PcapSummary(
             file_path=str(path),
@@ -368,27 +400,33 @@ class _PcapAccumulator:
             likely_device_ip=likely_device,
             protocols=[
                 {"protocol": PROTO_NAMES.get(k, str(k)), "number": k, "packets": v}
-                for k, v in self.protocols.most_common(10)
+                for k, v in counter_most_common(self.protocols, MAX_PCAP_PROTOCOL_ROWS)
             ],
             top_endpoints=[
                 {"ip": k, "packets": v}
-                for k, v in self.endpoints.most_common(20)
+                for k, v in counter_most_common(self.endpoints, MAX_PCAP_ENDPOINT_ROWS)
             ],
             top_ports=[
                 {"protocol": PROTO_NAMES.get(k[0], str(k[0])), "port": k[1], "packets": v}
-                for k, v in self.ports.most_common(25)
+                for k, v in counter_most_common(self.ports, MAX_PCAP_PORT_ROWS)
             ],
+            total_dns_names=len(self.dns_queries),
+            total_tls_sni_hosts=len(self.tls_sni),
+            total_http_hosts=len(self.http_hosts),
+            dns_query_counts=dict(self.dns_queries),
+            tls_sni_counts=dict(self.tls_sni),
+            http_host_counts=dict(self.http_hosts),
             dns_queries=[
                 {"query": k, "count": v}
-                for k, v in self.dns_queries.most_common(50)
+                for k, v in counter_most_common(self.dns_queries, METADATA_TOP_DNS_ROWS)
             ],
             tls_sni=[
                 {"host": k, "count": v}
-                for k, v in self.tls_sni.most_common(50)
+                for k, v in counter_most_common(self.tls_sni, METADATA_TOP_TLS_ROWS)
             ],
             http_hosts=[
                 {"host": k, "count": v}
-                for k, v in self.http_hosts.most_common(30)
+                for k, v in counter_most_common(self.http_hosts, METADATA_TOP_HTTP_ROWS)
             ],
             readable_samples=self.readable_samples,
             artifacts=sorted(
@@ -402,10 +440,12 @@ class _PcapAccumulator:
             ],
             flows=flows,
             notes=notes,
+            total_flows=len(all_flows),
+            total_readable_samples=self.total_readable_samples,
         )
 
 
-def analyze_pcap(path: str | Path, *, max_flows: int = 5000, max_evidence: int = 300) -> PcapSummary:
+def analyze_pcap(path: str | Path, *, max_flows: int = MAX_PCAP_FLOWS, max_evidence: int = MAX_PCAP_READABLE_SAMPLES) -> PcapSummary:
     p = Path(path)
     if not p.exists() or not p.is_file():
         raise FileNotFoundError(f"PCAP file not found: {p}")
@@ -423,10 +463,239 @@ def analyze_pcap(path: str | Path, *, max_flows: int = 5000, max_evidence: int =
         else:
             raise ValueError("Unsupported capture format. Expected PCAP or PCAPNG.")
 
-    return acc.build_summary(p, file_format)
+    summary = acc.build_summary(p, file_format)
+    summary.source_paths = [str(p)]
+    return summary
 
 
-def build_communication_rows(flows: list[dict[str, Any]], *, limit: int = 80) -> list[dict[str, Any]]:
+def analyze_pcap_files(
+    paths: list[str | Path],
+    *,
+    label: str = "",
+    max_flows: int = MAX_PCAP_FLOWS,
+    max_evidence: int = MAX_PCAP_READABLE_SAMPLES,
+) -> PcapSummary:
+    clean_paths = [Path(path) for path in paths if str(path or "").strip()]
+    if not clean_paths:
+        raise FileNotFoundError("No PCAP files were provided.")
+    if len(clean_paths) == 1:
+        return analyze_pcap(clean_paths[0], max_flows=max_flows, max_evidence=max_evidence)
+
+    summaries = [
+        analyze_pcap(path, max_flows=max_flows, max_evidence=max_evidence)
+        for path in clean_paths
+    ]
+    return merge_pcap_summaries(summaries, label=label or f"{len(summaries)} PCAP files")
+
+
+def merge_pcap_summaries(summaries: list[PcapSummary], *, label: str = "") -> PcapSummary:
+    items = [summary for summary in summaries if summary is not None]
+    if not items:
+        return PcapSummary(file_name=label or "PCAP aggregate")
+    if len(items) == 1:
+        return items[0]
+
+    protocols: Counter[tuple[str, int]] = Counter()
+    endpoints: Counter[str] = Counter()
+    ports: Counter[tuple[str, int]] = Counter()
+    dns: Counter[str] = Counter()
+    tls: Counter[str] = Counter()
+    http: Counter[str] = Counter()
+    hourly: Counter[str] = Counter()
+    device_votes: Counter[str] = Counter()
+    flow_map: dict[tuple[Any, ...], dict[str, Any]] = {}
+    artifacts: dict[tuple[str, str, str], dict[str, Any]] = {}
+    samples: list[dict[str, Any]] = []
+    total_readable = 0
+    total_flow_candidates = 0
+    source_paths: list[str] = []
+
+    packet_count = 0
+    wire_bytes = 0
+    file_size = 0
+    truncated = 0
+    malformed = 0
+    first_ts: float | None = None
+    last_ts: float | None = None
+    formats: set[str] = set()
+
+    for summary in items:
+        packet_count += int(summary.packet_count or 0)
+        wire_bytes += int(summary.wire_bytes or 0)
+        file_size += int(summary.file_size or 0)
+        truncated += int(summary.truncated_packets or 0)
+        malformed += int(summary.malformed_blocks or 0)
+        if summary.format:
+            formats.add(summary.format)
+        paths = summary.source_paths or ([summary.file_path] if summary.file_path else [])
+        source_paths.extend(str(path) for path in paths if str(path or "").strip())
+
+        start = _parse_ts(summary.first_seen)
+        end = _parse_ts(summary.last_seen)
+        if start is not None:
+            first_ts = start if first_ts is None else min(first_ts, start)
+        if end is not None:
+            last_ts = end if last_ts is None else max(last_ts, end)
+        if summary.likely_device_ip:
+            device_votes[summary.likely_device_ip] += max(1, int(summary.packet_count or 0))
+
+        for row in summary.protocols:
+            protocols[(str(row.get("protocol") or ""), _safe_int(row.get("number")))] += _safe_int(row.get("packets"))
+        for row in summary.top_endpoints:
+            endpoints[str(row.get("ip") or "")] += _safe_int(row.get("packets"))
+        for row in summary.top_ports:
+            ports[(str(row.get("protocol") or ""), _safe_int(row.get("port")))] += _safe_int(row.get("packets"))
+        _merge_metadata_counter(dns, summary.dns_query_counts, summary.dns_queries, key_name="query")
+        _merge_metadata_counter(tls, summary.tls_sni_counts, summary.tls_sni, key_name="host")
+        _merge_metadata_counter(http, summary.http_host_counts, summary.http_hosts, key_name="host")
+        for row in summary.hourly_activity:
+            hourly[str(row.get("hour") or "")] += _safe_int(row.get("packets") or row.get("count"))
+
+        total_readable += int(getattr(summary, "total_readable_samples", 0) or len(summary.readable_samples or []))
+        total_flow_candidates += int(getattr(summary, "total_flows", 0) or len(summary.flows or []))
+        if MAX_PCAP_READABLE_SAMPLES > 0 and len(samples) < MAX_PCAP_READABLE_SAMPLES:
+            samples.extend(
+                summary.readable_samples[: max(0, MAX_PCAP_READABLE_SAMPLES - len(samples))]
+            )
+        else:
+            samples.extend(summary.readable_samples or [])
+
+        for artifact in summary.artifacts:
+            key = (
+                str(artifact.get("category") or ""),
+                str(artifact.get("type") or ""),
+                str(artifact.get("value") or ""),
+            )
+            existing = artifacts.get(key)
+            if not existing:
+                artifacts[key] = dict(artifact)
+            else:
+                existing["count"] = _safe_int(existing.get("count")) + _safe_int(artifact.get("count"))
+
+        for flow in summary.flows:
+            key = (
+                flow.get("src_ip") or "",
+                flow.get("src_port") or "",
+                flow.get("dst_ip") or "",
+                flow.get("dst_port") or "",
+                flow.get("protocol") or "",
+            )
+            existing = flow_map.get(key)
+            if not existing:
+                flow_map[key] = dict(flow)
+                continue
+            existing["bidirectional_bytes"] = _safe_int(existing.get("bidirectional_bytes")) + _safe_int(flow.get("bidirectional_bytes"))
+            existing["bidirectional_packets"] = _safe_int(existing.get("bidirectional_packets")) + _safe_int(flow.get("bidirectional_packets"))
+            existing["bidirectional_duration_ms"] = max(
+                _safe_int(existing.get("bidirectional_duration_ms")),
+                _safe_int(flow.get("bidirectional_duration_ms")),
+            )
+            if not existing.get("requested_server_name"):
+                existing["requested_server_name"] = flow.get("requested_server_name") or ""
+            if not existing.get("pcap_payload_preview"):
+                existing["pcap_payload_preview"] = flow.get("pcap_payload_preview") or ""
+            existing["bidirectional_first_seen_ms"] = _min_time_text(existing.get("bidirectional_first_seen_ms"), flow.get("bidirectional_first_seen_ms"))
+            existing["bidirectional_last_seen_ms"] = _max_time_text(existing.get("bidirectional_last_seen_ms"), flow.get("bidirectional_last_seen_ms"))
+
+    flow_map_values = sorted(flow_map.values(), key=lambda row: _safe_int(row.get("bidirectional_bytes")), reverse=True)
+    total_flows = len(flow_map_values)
+    flows = slice_rows(flow_map_values, MAX_PCAP_FLOWS)
+    first_seen = _format_ts(first_ts)
+    last_seen = _format_ts(last_ts)
+    duration = max(0.0, (last_ts or 0) - (first_ts or 0)) if first_ts is not None and last_ts is not None else 0.0
+    file_name = label or f"{len(items)} PCAP files"
+    file_path = file_name
+
+    return PcapSummary(
+        file_path=file_path,
+        file_name=file_name,
+        file_size=file_size,
+        source_paths=source_paths,
+        format="Mixed PCAP" if len(formats) > 1 else next(iter(formats), "PCAP"),
+        packet_count=packet_count,
+        wire_bytes=wire_bytes,
+        truncated_packets=truncated,
+        malformed_blocks=malformed,
+        first_seen=first_seen,
+        last_seen=last_seen,
+        duration_seconds=duration,
+        likely_device_ip=device_votes.most_common(1)[0][0] if device_votes else "",
+        protocols=[
+            {"protocol": protocol or PROTO_NAMES.get(number, str(number)), "number": number, "packets": packets}
+            for (protocol, number), packets in counter_most_common(protocols, MAX_PCAP_PROTOCOL_ROWS)
+        ],
+        top_endpoints=[
+            {"ip": ip, "packets": packets}
+            for ip, packets in counter_most_common(endpoints, MAX_PCAP_ENDPOINT_ROWS)
+            if ip
+        ],
+        top_ports=[
+            {"protocol": protocol, "port": port, "packets": packets}
+            for (protocol, port), packets in counter_most_common(ports, MAX_PCAP_PORT_ROWS)
+        ],
+        total_dns_names=len(dns),
+        total_tls_sni_hosts=len(tls),
+        total_http_hosts=len(http),
+        dns_query_counts=dict(dns),
+        tls_sni_counts=dict(tls),
+        http_host_counts=dict(http),
+        dns_queries=[
+            {"query": query, "count": count}
+            for query, count in counter_most_common(dns, METADATA_TOP_DNS_ROWS)
+            if query
+        ],
+        tls_sni=[
+            {"host": host, "count": count}
+            for host, count in counter_most_common(tls, METADATA_TOP_TLS_ROWS)
+            if host
+        ],
+        http_hosts=[
+            {"host": host, "count": count}
+            for host, count in counter_most_common(http, METADATA_TOP_HTTP_ROWS)
+            if host
+        ],
+        readable_samples=slice_rows(samples, MAX_PCAP_READABLE_SAMPLES),
+        artifacts=sorted(
+            artifacts.values(),
+            key=lambda item: (str(item.get("category", "")), str(item.get("type", "")), -_safe_int(item.get("count"))),
+        ),
+        communication_rows=build_communication_rows(flow_map_values),
+        hourly_activity=[
+            {"hour": hour, "packets": packets}
+            for hour, packets in sorted(hourly.items())
+            if hour
+        ],
+        flows=flows,
+        total_flows=max(total_flows, total_flow_candidates),
+        total_readable_samples=max(total_readable, len(samples)),
+        notes=[
+            f"Aggregated PCAP view built from {len(items):,} files.",
+            "Encrypted traffic payload is not readable; ViaNyquist reports metadata such as endpoints, ports, DNS and TLS SNI.",
+        ],
+    )
+
+
+def _min_time_text(left: Any, right: Any) -> str:
+    left_ts = _parse_ts(str(left or ""))
+    right_ts = _parse_ts(str(right or ""))
+    if left_ts is None:
+        return str(right or "")
+    if right_ts is None:
+        return str(left or "")
+    return str(left if left_ts <= right_ts else right)
+
+
+def _max_time_text(left: Any, right: Any) -> str:
+    left_ts = _parse_ts(str(left or ""))
+    right_ts = _parse_ts(str(right or ""))
+    if left_ts is None:
+        return str(right or "")
+    if right_ts is None:
+        return str(left or "")
+    return str(left if left_ts >= right_ts else right)
+
+
+def build_communication_rows(flows: list[dict[str, Any]], *, limit: int = MAX_COMMUNICATION_ROWS) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for flow in flows:
         service = _communication_service(flow)
@@ -458,7 +727,7 @@ def build_communication_rows(flows: list[dict[str, Any]], *, limit: int = 80) ->
             str(row.get("service") or ""),
         )
     )
-    return rows[:limit]
+    return rows[:limit] if limit > 0 else rows
 
 
 def build_investigator_view(summary: PcapSummary) -> dict[str, Any]:
@@ -483,22 +752,46 @@ def build_investigator_view(summary: PcapSummary) -> dict[str, Any]:
     }
 
 
+COMMUNICATION_SERVICE_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("Apple / iCloud", (
+        "apple.com",
+        "icloud",
+        "push.apple",
+        "courier",
+        "itunes",
+        "mzstatic",
+        "apple-dns",
+        "mask-api.icloud",
+        "configuration.apple",
+        "applepush",
+    )),
+    ("WhatsApp", ("whatsapp", "wa.me")),
+    ("Viber", ("viber",)),
+    ("Telegram", ("telegram", "t.me")),
+    ("Signal", ("signal.org", "signal.art", "whispersystems")),
+    ("Facebook / Messenger", ("facebook", "messenger", "edge-mqtt", "fbcdn", "instagram")),
+    ("Microsoft / Teams", ("microsoft", "office365", "outlook", "teams", "skype", "live.com")),
+    ("Snapchat", ("snapchat", "snap.com")),
+    ("TikTok", ("tiktok", "byteoversea")),
+    ("Google / YouTube", ("youtube", "googlevideo", "googleapis", "geller-pa.googleapis.com", "notifications-pa")),
+    ("Spotify", ("spotify",)),
+)
+
+
 def _communication_service(flow: dict[str, Any]) -> str:
     text = " ".join(
         str(flow.get(key) or "")
         for key in ("requested_server_name", "application_name", "pcap_payload_preview")
-    ).lower()
-    checks = [
-        ("WhatsApp", ("whatsapp", "wa.me")),
-        ("Viber", ("viber",)),
-        ("Telegram", ("telegram", "t.me")),
-        ("Facebook / Messenger", ("facebook", "messenger", "edge-mqtt", "fbcdn", "instagram")),
-        ("TikTok", ("tiktok", "byteoversea")),
-        ("Google / YouTube", ("youtube", "googlevideo", "googleapis")),
-        ("Spotify", ("spotify",)),
-    ]
-    for service, needles in checks:
-        if any(needle in text for needle in needles):
+    )
+    return _match_service_rules(text, COMMUNICATION_SERVICE_RULES)
+
+
+def _match_service_rules(text: str, rules: tuple[tuple[str, tuple[str, ...]], ...]) -> str:
+    haystack = (text or "").lower()
+    if not haystack:
+        return ""
+    for service, needles in rules:
+        if any(needle in haystack for needle in needles):
             return service
     return ""
 
@@ -536,13 +829,25 @@ def _communication_activity(flow: dict[str, Any], service: str) -> tuple[str, st
         reasons.append("sustained QUIC/UDP 443 traffic")
         return "Possible app media or heavy encrypted session", "medium", "; ".join(reasons)
 
-    if _is_push_host(host_l) or 5222 in ports:
+    if _is_push_host(host_l) or 5222 in ports or "applepush" in app.lower():
         reasons.append("known push/messaging transport signal")
-        return "Push/background messaging transport", "medium", "; ".join(reasons)
+        confidence = "medium" if service in {"Apple / iCloud", "Facebook / Messenger", "Google / YouTube"} else "low"
+        return "Push/background messaging transport", confidence, "; ".join(reasons)
+
+    if service == "Apple / iCloud" and any(token in host_l for token in ("gateway.icloud", "mask-api", "courier", "push")):
+        reasons.append("Apple cloud/push infrastructure visible in metadata")
+        return "Possible iCloud / device sync or push transport", "medium", "; ".join(reasons)
 
     if _is_messaging_endpoint(host_l, service):
         reasons.append("messaging endpoint name visible in metadata")
-        confidence = "medium" if service in {"WhatsApp", "Viber", "Telegram", "Facebook / Messenger"} else "low"
+        confidence = "medium" if service in {
+            "WhatsApp",
+            "Viber",
+            "Telegram",
+            "Facebook / Messenger",
+            "Signal",
+            "Apple / iCloud",
+        } else "low"
         return "Possible messaging endpoint", confidence, "; ".join(reasons)
 
     if duration_ms >= 120_000 and bytes_count <= 120_000:
@@ -565,7 +870,20 @@ def _communication_activity(flow: dict[str, Any], service: str) -> tuple[str, st
 
 
 def _is_push_host(host: str) -> bool:
-    return any(token in host for token in ("edge-mqtt", "mqtt", "push", "notification", "notify", "fcm"))
+    return any(
+        token in host
+        for token in (
+            "edge-mqtt",
+            "mqtt",
+            "push",
+            "push.apple",
+            "courier",
+            "notification",
+            "notify",
+            "fcm",
+            "apns",
+        )
+    )
 
 
 def _is_messaging_endpoint(host: str, service: str) -> bool:
@@ -603,13 +921,50 @@ def _plain_summary(
 def _key_points(summary: PcapSummary, service_rows: list[dict[str, Any]]) -> list[str]:
     points = [
         f"Device IP: {summary.likely_device_ip or '-'}",
-        f"Capture period: {summary.first_seen or '-'} to {summary.last_seen or '-'}",
-        f"Packets: {summary.packet_count:,}; volume: {summary.wire_bytes:,} bytes",
-        f"Visible DNS names: {len(summary.dns_queries)}; TLS SNI hosts: {len(summary.tls_sni)}; HTTP hosts: {len(summary.http_hosts)}",
+        f"Capture period: {_fmt_pcap_dt(summary.first_seen)} to {_fmt_pcap_dt(summary.last_seen)}",
+        f"Packets: {summary.packet_count:,}; volume: {human_bytes(summary.wire_bytes, precision=2)}",
+        f"Visible DNS names: {_visible_count(summary.total_dns_names, len(summary.dns_queries))}; "
+        f"TLS SNI hosts: {_visible_count(summary.total_tls_sni_hosts, len(summary.tls_sni))}; "
+        f"HTTP hosts: {_visible_count(summary.total_http_hosts, len(summary.http_hosts))}",
     ]
     if service_rows:
         points.append("Most visible service groups: " + ", ".join(row["service"] for row in service_rows[:5]))
     return points
+
+
+def _visible_count(total: int, shown: int) -> str:
+    total = int(total or 0)
+    shown = int(shown or 0)
+    if total > shown:
+        return f"{total:,} ({shown:,} shown)"
+    return f"{total:,}" if total else "0"
+
+
+def _merge_metadata_counter(
+    target: Counter[str],
+    counts: dict[str, int] | None,
+    rows: list[dict[str, Any]] | None,
+    *,
+    key_name: str,
+) -> None:
+    if counts:
+        for key, value in counts.items():
+            name = str(key or "").strip()
+            if name:
+                target[name] += _safe_int(value)
+        return
+    for row in rows or []:
+        name = str(row.get(key_name) or "").strip()
+        if name:
+            target[name] += _safe_int(row.get("count"))
+
+
+def metadata_count_label(total: int, shown: int) -> str:
+    return _visible_count(total, shown)
+
+
+def _fmt_pcap_dt(value: Any) -> str:
+    return format_pcap_datetime(value) or "-"
 
 
 def _build_service_rows(summary: PcapSummary) -> list[dict[str, Any]]:
@@ -630,22 +985,19 @@ def _build_service_rows(summary: PcapSummary) -> list[dict[str, Any]]:
 
     rows = [
         {"service": service, "count": count, "example": examples.get(service, "")}
-        for service, count in counts.most_common(12)
+        for service, count in counter_most_common(counts, MAX_INVESTIGATOR_SERVICE_ROWS)
     ]
     return _with_share(rows, "count")
 
 
 def _service_label(host: str) -> str:
+    label = _match_service_rules(host, COMMUNICATION_SERVICE_RULES)
+    if label:
+        return label
     h = (host or "").lower()
     checks = [
-        ("WhatsApp", ("whatsapp", "wa.me")),
-        ("Facebook / Meta", ("facebook", "fbcdn", "fb.com", "edge-mqtt", "graph.instagram", "instagram")),
-        ("Google / YouTube", ("google", "gstatic", "googleapis", "youtube", "ytimg", "doubleclick")),
-        ("TikTok", ("tiktok", "byteoversea", "pangle")),
         ("Samsung", ("samsung",)),
         ("Booking", ("booking.com",)),
-        ("Viber", ("viber",)),
-        ("Spotify / local media", ("spotify",)),
         ("Advertising / tracking", ("adnxs", "adform", "criteo", "rubiconproject", "googlesyndication", "zemanta")),
         ("Certificates / validation", ("ocsp", "cert", "crl", "godaddy")),
         ("Cloudflare / CDN", ("cloudflare", "cloudfront", "akamai", "cdn")),

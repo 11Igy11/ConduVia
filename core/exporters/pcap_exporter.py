@@ -38,7 +38,7 @@ def export_pcap_summary_html(
         return "".join(f"<th>{html.escape(label)}</th>" for _key, label in columns)
 
     connections = []
-    for flow in summary.flows[:200]:
+    for flow in summary.flows or []:
         connections.append({
             "source": _endpoint(flow.get("src_ip"), flow.get("src_port")),
             "destination": _endpoint(flow.get("dst_ip"), flow.get("dst_port")),
@@ -52,15 +52,15 @@ def export_pcap_summary_html(
             "visible": flow.get("pcap_payload_preview"),
         })
 
-    readable = summary.readable_samples[:200]
-    artifacts = summary.artifacts[:400]
+    readable = summary.readable_samples or []
+    artifacts = summary.artifacts or []
     communications = [
         {
             **row,
             "bytes": human_bytes(row.get("bytes"), precision=2),
             "duration": _duration_compact(row.get("duration_ms")),
         }
-        for row in (summary.communication_rows or [])[:200]
+        for row in (summary.communication_rows or [])
     ]
     communication_brief = _communication_brief(summary.communication_rows or [])
     investigator = build_investigator_view(summary)
@@ -77,8 +77,8 @@ def export_pcap_summary_html(
         _metric_card(text["traffic_volume"], human_bytes(summary.wire_bytes, precision=2)),
         _metric_card(text["likely_device_ip"], summary.likely_device_ip or "-"),
         _metric_card(text["capture_period"], period),
-        _metric_card(text["dns_queries"], len(summary.dns_queries)),
-        _metric_card(text["tls_sni_hosts"], len(summary.tls_sni)),
+        _metric_card(text["dns_queries"], summary.total_dns_names or len(summary.dns_queries)),
+        _metric_card(text["tls_sni_hosts"], summary.total_tls_sni_hosts or len(summary.tls_sni)),
         _metric_card(text["readable_samples"], len(summary.readable_samples)),
     ])
 
@@ -230,7 +230,7 @@ def _communication_rows(items: list[dict[str, Any]], *, text: dict[str, str] | N
         ("first_seen", labels["first_seen"]),
     ]
     parts = []
-    for item in items[:80]:
+    for item in items:
         cells = []
         for key, _label in columns:
             if key == "confidence_html":

@@ -9,6 +9,8 @@ from PySide6.QtWidgets import QTableView
 class ExploreUIController:
     def __init__(self, app):
         self.app = app
+        self._json_stats_base = ""
+        self._json_stats_include_counts = True
 
     def on_page_size_changed(self, txt: str):
         try:
@@ -21,12 +23,32 @@ class ExploreUIController:
         self.update_load_more_enabled()
 
     def update_loaded_label(self):
-        total = self.app.flow_controller.get_total_count()
-        loaded = self.app.flow_controller.get_loaded_count()
-        if total:
-            self.app.lbl_loaded.setText(f"Loaded: {loaded} / {total}")
-        else:
-            self.app.lbl_loaded.setText("")
+        self.refresh_json_header_stats()
+
+    def refresh_json_header_stats(self) -> None:
+        parts: list[str] = []
+        base = str(getattr(self, "_json_stats_base", "") or "").strip()
+        if base:
+            parts.append(base)
+        if getattr(self, "_json_stats_include_counts", True):
+            total = self.app.flow_controller.get_total_count()
+            loaded = self.app.flow_controller.get_loaded_count()
+            if total:
+                parts.append(f"Loaded: {loaded} / {total}")
+            shown_total = self.app.flow_controller.get_loaded_count()
+            shown = self.app.proxy.rowCount()
+            if shown_total:
+                parts.append(f"Showing: {shown} / {shown_total} (loaded)")
+        self.app.lbl_stats.setText(" | ".join(parts))
+        if hasattr(self.app, "lbl_loaded"):
+            self.app.lbl_loaded.clear()
+        if hasattr(self.app, "lbl_showing"):
+            self.app.lbl_showing.clear()
+
+    def set_json_stats_text(self, text: str, *, include_counts: bool = True) -> None:
+        self._json_stats_base = str(text or "")
+        self._json_stats_include_counts = include_counts
+        self.refresh_json_header_stats()
 
     def update_load_more_enabled(self):
         self.app.btn_load_more.setEnabled(
@@ -184,13 +206,7 @@ class ExploreUIController:
         self.app.lbl_conv_summary.show()
 
     def update_showing(self):
-        total = self.app.flow_controller.get_loaded_count()
-        shown = self.app.proxy.rowCount()
-
-        if total:
-            self.app.lbl_showing.setText(f"Showing: {shown} / {total} (loaded)")
-        else:
-            self.app.lbl_showing.setText("")
+        self.refresh_json_header_stats()
 
     def ensure_pair_loaded(self, src: str, dst: str):
         """Ensure at least one flow for (src,dst) exists in loaded flows; expand paging if needed."""

@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import hashlib
+import os
+import re
 import webbrowser
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from PySide6.QtCore import QAbstractTableModel, QModelIndex, QObject, QThread, Qt, Signal
+from PySide6.QtCore import QAbstractTableModel, QModelIndex, QObject, QThread, QTimer, Qt, Signal
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -29,39 +32,242 @@ from PySide6.QtWidgets import (
     QHeaderView,
 )
 
-from core.exporters.listing_exporter import export_listing_csv, export_listing_excel
-from core.exporters.pcap_exporter import export_pcap_summary_html
+from core.analysis_limits import PROFILE_CHART_PREVIEW_ROWS
 from core.exporters.table_exporter import export_table_html
 from core.formatters import format_duration_compact_ms, format_pcap_datetime, human_bytes
-from core.pcap_analyzer import PcapSummary, analyze_pcap, build_investigator_view
+from core.evidence_policy import format_period_day_label, period_combo_label
+from core.pcap_analyzer import (
+    PcapSummary,
+    analyze_pcap,
+    analyze_pcap_files,
+    build_investigator_view,
+)
+from core.pcap_period import resolve_period_day
+from core.period_gaps import format_missing_days_summary, missing_period_days
 from core.protocols import format_ip_proto
 from core.workspace import workspace_export_path
 from core.db import (
     add_activity,
     add_pcap_source,
     file_sha256,
+    save_pcap_period_summary,
     get_app_settings,
     get_project,
     list_project_pcap_device_ips,
+    list_pcap_sources,
+    mark_ingest_item,
     set_project_subject,
+    upsert_ingest_items,
 )
 from ui.activity_profile_page import BarChartWidget
 from ui.explore_widgets import AITextWorker, CopyableTableView
+
+
+class VisibilityIndicatorRow(QFrame):
+    def __init__(self, label: str, value: str, kind: str, opener, parent=None):
+        super().__init__(parent)
+        self._kind = kind
+        self._opener = opener
+        self.setObjectName("ProfileCountRow")
+        self.setCursor(Qt.PointingHandCursor)
+        self.setToolTip(f"Open table for {label}")
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(10, 7, 10, 7)
+        layout.setSpacing(10)
+
+        name = QLabel(label)
+        name.setWordWrap(True)
+        name.setObjectName("ChartLinkLabel")
+
+        badge = QLabel(value)
+        badge.setObjectName("ProfileCountBadge")
+        badge.setAlignment(Qt.AlignCenter)
+        badge.setMinimumWidth(96)
+
+        layout.addWidget(name, 1)
+        layout.addWidget(badge, 0)
+
+    def mousePressEvent(self, event) -> None:
+        if event.button() == Qt.LeftButton:
+            self._opener(self._kind)
+        super().mousePressEvent(event)
 
 
 class PcapWorker(QObject):
     finished = Signal(object)
     error = Signal(str)
 
-    def __init__(self, path: str):
+    def __init__(self, path: str | list[str], *, label: str = ""):
         super().__init__()
         self.path = path
+        self.label = label
 
     def run(self):
         try:
-            self.finished.emit(analyze_pcap(self.path))
+            if isinstance(self.path, list):
+                self.finished.emit(analyze_pcap_files(self.path, label=self.label))
+            else:
+                self.finished.emit(analyze_pcap(self.path))
         except Exception as exc:
             self.error.emit(str(exc))
+
+
+class PcapBatchWorker(QObject):
+    progress = Signal(int, int, int, str)
+    finished = Signal(object, int, int)
+
+    def __init__(
+        self,
+        paths: list[str],
+        *,
+        project_id: int | None = None,
+        auto_save: bool = False,
+        day_groups: dict[str, list[str]] | None = None,
+    ):
+        super().__init__()
+        self.paths = [str(path) for path in paths if str(path or "").strip()]
+        self.project_id = project_id
+        self.auto_save = bool(auto_save)
+        self.day_groups = {
+            str(day): [str(path) for path in day_paths if str(path or "").strip()]
+            for day, day_paths in (day_groups or {}).items()
+            if str(day or "").strip() and day != "undated"
+        }
+        self.stop_requested = False
+
+    def request_stop(self) -> None:
+        self.stop_requested = True
+
+    def run(self) -> None:
+        processed = 0
+        failed = 0
+        last_summary = None
+
+        jobs: list[tuple[str, list[str]]] = []
+        if self.day_groups:
+            for day, day_paths in sorted(self.day_groups.items(), key=lambda pair: pair[0]):
+                jobs.append((day, day_paths))
+        else:
+            jobs.append(("", self.paths))
+
+        total = sum(len(paths) for _day, paths in jobs)
+
+        for period_day, day_paths in jobs:
+            if self.stop_requested:
+                break
+            if not day_paths:
+                continue
+
+            if len(day_paths) > 1 or period_day:
+                self.progress.emit(processed, total, failed, f"{format_period_day_label(period_day) or 'batch'}")
+                try:
+                    label = (
+                        f"{format_period_day_label(period_day)} ({len(day_paths):,} PCAP files)"
+                        if period_day
+                        else f"{len(day_paths):,} PCAP files"
+                    )
+                    summary = analyze_pcap_files(day_paths, label=label)
+                    last_summary = summary
+                    if self.auto_save and self.project_id is not None:
+                        self._save_period_summary(summary, period_day, day_paths)
+                    processed += len(day_paths)
+                except Exception as exc:
+                    failed += len(day_paths)
+                    processed += len(day_paths)
+                    if self.project_id is not None:
+                        for path in day_paths:
+                            try:
+                                mark_ingest_item(self.project_id, path, "failed", str(exc))
+                            except Exception:
+                                pass
+                self.progress.emit(processed, total, failed, Path(day_paths[-1]).name)
+                continue
+
+            for path in day_paths:
+                if self.stop_requested:
+                    break
+
+                self.progress.emit(processed, total, failed, Path(path).name)
+                try:
+                    summary = analyze_pcap(path)
+                    last_summary = summary
+                    if self.auto_save and self.project_id is not None:
+                        self._save_file_summary(summary, path)
+                    processed += 1
+                    self.progress.emit(processed, total, failed, Path(path).name)
+                except Exception as exc:
+                    failed += 1
+                    processed += 1
+                    if self.project_id is not None:
+                        try:
+                            mark_ingest_item(self.project_id, path, "failed", str(exc))
+                        except Exception:
+                            pass
+                    self.progress.emit(processed, total, failed, Path(path).name)
+
+        self.finished.emit(last_summary, processed, failed)
+
+    def _save_period_summary(self, summary: PcapSummary, period_day: str, source_paths: list[str]) -> None:
+        day = resolve_period_day(
+            active_day=period_day,
+            file_paths=source_paths,
+            first_seen=summary.first_seen,
+            last_seen=summary.last_seen,
+        )
+        digest = aggregate_hash_for_paths(source_paths)
+        investigator = build_investigator_view(summary)
+        plain = str(investigator.get("plain_summary") or "")
+        span = capture_span_note(summary.first_seen, summary.last_seen, period_day=day)
+        if span:
+            plain = f"{plain}\n{span}"
+        save_pcap_period_summary(
+            self.project_id,
+            period_day=day,
+            file_path=summary.file_path or summary.file_name,
+            file_sha256_value=digest,
+            file_size=summary.file_size,
+            file_name=summary.file_name,
+            format=summary.format,
+            packet_count=summary.packet_count,
+            wire_bytes=summary.wire_bytes,
+            first_seen=summary.first_seen,
+            last_seen=summary.last_seen,
+            duration_seconds=summary.duration_seconds,
+            likely_device_ip=summary.likely_device_ip,
+            summary_text=plain,
+        )
+        self._mark_paths_done(source_paths)
+
+    def _save_file_summary(self, summary: PcapSummary, source_path: str) -> None:
+        digest = file_sha256(source_path)
+        day = resolve_period_day(
+            file_paths=[source_path],
+            first_seen=summary.first_seen,
+            last_seen=summary.last_seen,
+        )
+        investigator = build_investigator_view(summary)
+        add_pcap_source(
+            self.project_id,
+            file_path=source_path,
+            file_name=summary.file_name,
+            file_sha256_value=digest,
+            file_size=summary.file_size,
+            format=summary.format,
+            packet_count=summary.packet_count,
+            wire_bytes=summary.wire_bytes,
+            first_seen=summary.first_seen,
+            last_seen=summary.last_seen,
+            duration_seconds=summary.duration_seconds,
+            likely_device_ip=summary.likely_device_ip,
+            summary_text=str(investigator.get("plain_summary") or ""),
+            period_day=day,
+        )
+        mark_ingest_item(self.project_id, source_path, "done", "")
+
+    def _mark_paths_done(self, source_paths: list[str]) -> None:
+        for path in source_paths:
+            mark_ingest_item(self.project_id, str(path), "done", "")
 
 
 class DictTableModel(QAbstractTableModel):
@@ -161,10 +367,20 @@ class PcapPage(QWidget):
         self.summary: PcapSummary | None = None
         self._thread: QThread | None = None
         self._worker: PcapWorker | None = None
+        self._batch_thread: QThread | None = None
+        self._batch_worker: PcapBatchWorker | None = None
         self._ai_thread: QThread | None = None
         self._ai_worker: AITextWorker | None = None
         self._saved_source_id: int | None = None
         self._pcap_queue: list[str] = []
+        self._pcap_queue_auto_save = False
+        self._pcap_queue_auto_process = False
+        self._pcap_batch_total = 0
+        self._pcap_batch_processed = 0
+        self._pcap_batch_failed = 0
+        self._pcap_batch_stop_after_current = False
+        self._pcap_day_groups: dict[str, list[str]] = {}
+        self._pcap_active_day = ""
         self._all_artifacts: list[dict[str, Any]] = []
         self._build_ui()
 
@@ -183,7 +399,9 @@ class PcapPage(QWidget):
         self.lbl_title = QLabel("PCAP analysis")
         self.lbl_title.setObjectName("HeaderProjectLabel")
         self.btn_open = QPushButton("Open PCAP")
-        self.btn_save_project = QPushButton("Save to Project")
+        self.btn_save_project = QPushButton("Save Period to Project")
+        self.btn_save_all_periods = QPushButton("Save All Periods")
+        self.btn_save_all_periods.setEnabled(False)
         self.btn_save_project.setEnabled(False)
         self.btn_ai_summary = QPushButton("AI Summary")
         self.btn_ai_summary.setEnabled(False)
@@ -195,6 +413,7 @@ class PcapPage(QWidget):
         top.addStretch()
         top.addWidget(self.btn_open)
         top.addWidget(self.btn_save_project)
+        top.addWidget(self.btn_save_all_periods)
         top.addWidget(self.btn_ai_summary)
         top.addWidget(self.btn_add_notes)
         top.addWidget(self.btn_export)
@@ -204,10 +423,49 @@ class PcapPage(QWidget):
         self.lbl_file.setWordWrap(True)
         self.lbl_stats = QLabel("")
         self.lbl_stats.setObjectName("HeaderStatLabel")
+        self.lbl_period_gaps = QLabel("")
+        self.lbl_period_gaps.setObjectName("MutedLabel")
+        self.lbl_period_gaps.setWordWrap(True)
+        self.btn_expand_period_gaps = QPushButton("Missing days")
+        self.btn_expand_period_gaps.setMinimumHeight(34)
+        self.btn_expand_period_gaps.setVisible(False)
+        self.btn_expand_period_gaps.clicked.connect(self._open_missing_days_dialog)
+        self._period_gap_info: dict[str, object] = {}
 
         header_layout.addLayout(top)
         header_layout.addWidget(self.lbl_file)
         header_layout.addWidget(self.lbl_stats)
+        gap_row = QHBoxLayout()
+        gap_row.setSpacing(10)
+        gap_row.addWidget(self.lbl_period_gaps, 1)
+        gap_row.addWidget(self.btn_expand_period_gaps)
+        header_layout.addLayout(gap_row)
+
+        self.batch_status_panel = QFrame()
+        self.batch_status_panel.setObjectName("InlinePanel")
+        batch_layout = QHBoxLayout(self.batch_status_panel)
+        batch_layout.setContentsMargins(10, 8, 10, 8)
+        batch_layout.setSpacing(10)
+        self.lbl_batch_status = QLabel("")
+        self.lbl_batch_status.setObjectName("MutedLabel")
+        self.lbl_pcap_day = QLabel("Period:")
+        self.lbl_pcap_day.setObjectName("MutedLabel")
+        self.cmb_pcap_day = QComboBox()
+        self.cmb_pcap_day.setMinimumWidth(230)
+        self.lbl_pcap_day.setVisible(False)
+        self.cmb_pcap_day.setVisible(False)
+        self.btn_stop_batch = QPushButton("Stop after current")
+        self.btn_stop_batch.setFixedHeight(32)
+        self.btn_reanalyze_period = QPushButton("Re-analyze Period")
+        self.btn_reanalyze_period.setFixedHeight(32)
+        self.btn_reanalyze_period.setEnabled(False)
+        batch_layout.addWidget(self.lbl_pcap_day)
+        batch_layout.addWidget(self.cmb_pcap_day)
+        batch_layout.addWidget(self.btn_reanalyze_period)
+        batch_layout.addWidget(self.lbl_batch_status, 1)
+        batch_layout.addWidget(self.btn_stop_batch)
+        self.batch_status_panel.setVisible(False)
+        header_layout.addWidget(self.batch_status_panel)
         root.addWidget(header)
 
         self.tabs = QTabWidget()
@@ -221,9 +479,13 @@ class PcapPage(QWidget):
 
         self.btn_open.clicked.connect(self.open_pcap_dialog)
         self.btn_save_project.clicked.connect(self.save_to_project)
+        self.btn_save_all_periods.clicked.connect(self.save_all_periods_to_project)
         self.btn_ai_summary.clicked.connect(self.generate_ai_summary)
         self.btn_add_notes.clicked.connect(self.add_summary_to_notes)
         self.btn_export.clicked.connect(self.export_summary)
+        self.btn_stop_batch.clicked.connect(self.stop_after_current_batch)
+        self.btn_reanalyze_period.clicked.connect(self.reanalyze_current_period)
+        self.cmb_pcap_day.currentIndexChanged.connect(self._on_pcap_day_changed)
 
     def _build_summary_section(self) -> QWidget:
         page = QWidget()
@@ -266,8 +528,18 @@ class PcapPage(QWidget):
 
     def _build_highlights_tab(self) -> QWidget:
         page = QWidget()
-        layout = QVBoxLayout(page)
-        layout.setContentsMargins(14, 14, 14, 14)
+        outer = QVBoxLayout(page)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+
+        content = QWidget()
+        layout = QVBoxLayout(content)
+        layout.setContentsMargins(14, 14, 14, 28)
         layout.setSpacing(14)
 
         self.lbl_highlights_brief = QLabel("Open a PCAP file to see communication highlights.")
@@ -316,11 +588,11 @@ class PcapPage(QWidget):
         self.txt_communication_detail.hide()
 
         self.btn_expand_communications = QPushButton("Open full communication table")
-        self.btn_expand_communications.setFixedHeight(38)
+        self.btn_expand_communications.setMinimumHeight(38)
         self.btn_expand_communications.clicked.connect(self._open_communications_dialog)
 
         brief_group = self._group("Investigation brief", self.lbl_highlights_brief)
-        brief_group.setMaximumHeight(145)
+        brief_group.setMaximumHeight(160)
 
         self.lbl_communication_count = QLabel("0 indicators")
         self.lbl_communication_count.setObjectName("ProfileMetric")
@@ -339,7 +611,8 @@ class PcapPage(QWidget):
         )
         layout.addWidget(brief_group)
         layout.addWidget(communication_card, 0)
-        layout.addStretch()
+        scroll.setWidget(content)
+        outer.addWidget(scroll, 1)
 
         return page
 
@@ -392,7 +665,7 @@ class PcapPage(QWidget):
             value_label_key="value",
             label_width=175,
             label_limit=34,
-            max_rows=24,
+            max_rows=PROFILE_CHART_PREVIEW_ROWS,
         )
         self.chart_activity = BarChartWidget(
             "Activity timeline by hour",
@@ -400,31 +673,24 @@ class PcapPage(QWidget):
             value_label_key="value",
             label_width=175,
             label_limit=28,
-            max_rows=24,
+            max_rows=PROFILE_CHART_PREVIEW_ROWS,
         )
-        self.chart_visibility = BarChartWidget(
-            "Visible vs encrypted indicators",
-            value_key="count",
-            value_label_key="value",
-            count_list=True,
-            max_rows=6,
-        )
+        self.visibility_panel = self._build_visibility_panel()
         self.chart_services.set_rows([], empty_text="Open a PCAP file to show visible service groups.")
         self.chart_activity.set_rows([], empty_text="Open a PCAP file to show hourly packet activity.")
-        self.chart_visibility.set_rows([], empty_text="Open a PCAP file to show readable vs encrypted indicators.")
 
         top = QHBoxLayout()
         top.setSpacing(10)
         self.chart_services.setMinimumHeight(260)
         self.chart_activity.setMinimumHeight(260)
-        self.chart_visibility.setMinimumHeight(170)
+        self.visibility_panel.setMinimumHeight(170)
 
         top.addWidget(self.chart_services, 1)
         top.addWidget(self.chart_activity, 1)
 
         layout.addWidget(self.investigator_card, 0)
         layout.addLayout(top, 2)
-        layout.addWidget(self.chart_visibility, 1)
+        layout.addWidget(self.visibility_panel, 1)
         layout.addStretch()
 
         scroll.setWidget(content)
@@ -516,8 +782,18 @@ class PcapPage(QWidget):
 
     def _build_evidence_tab(self) -> QWidget:
         page = QWidget()
-        layout = QVBoxLayout(page)
-        layout.setContentsMargins(14, 14, 14, 14)
+        outer = QVBoxLayout(page)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+
+        content = QWidget()
+        layout = QVBoxLayout(content)
+        layout.setContentsMargins(14, 14, 14, 28)
         layout.setSpacing(14)
 
         self.lbl_evidence_hint = QLabel(
@@ -608,6 +884,19 @@ class PcapPage(QWidget):
 
         layout.addLayout(cards)
 
+        export_row = QHBoxLayout()
+        export_row.setSpacing(10)
+        self.btn_export_full_dns = QPushButton("Export full DNS CSV")
+        self.btn_export_full_dns.setEnabled(False)
+        self.btn_export_full_tls = QPushButton("Export full TLS CSV")
+        self.btn_export_full_tls.setEnabled(False)
+        self.btn_export_full_dns.clicked.connect(lambda: self._export_full_metadata("dns"))
+        self.btn_export_full_tls.clicked.connect(lambda: self._export_full_metadata("tls"))
+        export_row.addWidget(self.btn_export_full_dns)
+        export_row.addWidget(self.btn_export_full_tls)
+        export_row.addStretch()
+        layout.addLayout(export_row)
+
         workflow_hint = QLabel(
             "Use the full table view for investigation work: sorting, copying values and reading wide columns. "
             "The embedded Evidence page is intentionally a compact overview."
@@ -617,6 +906,9 @@ class PcapPage(QWidget):
         workflow_hint.setTextInteractionFlags(Qt.TextSelectableByMouse)
         layout.addWidget(workflow_hint)
         layout.addStretch()
+
+        scroll.setWidget(content)
+        outer.addWidget(scroll, 1)
         return page
 
     def _evidence_launcher_card(
@@ -629,9 +921,10 @@ class PcapPage(QWidget):
     ) -> QFrame:
         card = QFrame()
         card.setObjectName("Card")
+        card.setMinimumHeight(190)
         layout = QVBoxLayout(card)
-        layout.setContentsMargins(18, 18, 18, 18)
-        layout.setSpacing(10)
+        layout.setContentsMargins(18, 16, 18, 18)
+        layout.setSpacing(8)
 
         lbl_title = QLabel(title)
         lbl_title.setObjectName("SectionTitle")
@@ -641,18 +934,107 @@ class PcapPage(QWidget):
         lbl_description.setWordWrap(True)
         lbl_description.setTextInteractionFlags(Qt.TextSelectableByMouse)
 
+        count_label.setMinimumHeight(28)
+        detail_label.setMinimumHeight(36)
+
         layout.addWidget(lbl_title)
         layout.addWidget(lbl_description)
         layout.addWidget(count_label)
         layout.addWidget(detail_label)
-        layout.addStretch()
-        layout.addWidget(button, 0, Qt.AlignRight)
+
+        button.setMinimumHeight(38)
+        button_row = QHBoxLayout()
+        button_row.setContentsMargins(0, 6, 0, 0)
+        button_row.addStretch()
+        button_row.addWidget(button)
+        layout.addLayout(button_row)
         return card
+
+    def _update_period_gap_banner(self, present_days: list[str] | None = None) -> None:
+        days = list(present_days or self._pcap_day_groups.keys())
+        gap = missing_period_days(days)
+        self._period_gap_info = gap
+        summary = format_missing_days_summary(gap)
+        if hasattr(self, "lbl_period_gaps"):
+            self.lbl_period_gaps.setText(summary)
+            self.lbl_period_gaps.setToolTip(summary)
+        if hasattr(self, "btn_expand_period_gaps"):
+            missing_count = int(gap.get("missing_count") or 0)
+            self.btn_expand_period_gaps.setVisible(missing_count > 0)
+            self.btn_expand_period_gaps.setText(f"Missing days ({missing_count:,})")
+
+    def _open_missing_days_dialog(self) -> None:
+        missing = list(self._period_gap_info.get("missing_days") or [])
+        if not missing:
+            QMessageBox.information(self, "Missing days", "No internal gaps in the indexed period range.")
+            return
+
+        first = self._format_day_label(str(self._period_gap_info.get("first_day") or ""))
+        last = self._format_day_label(str(self._period_gap_info.get("last_day") or ""))
+        rows = [
+            {"label": self._format_day_label(day), "day": day}
+            for day in missing
+        ]
+
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Missing PCAP days")
+        dlg.resize(720, 560)
+        layout = QVBoxLayout(dlg)
+        layout.setContentsMargins(14, 14, 14, 28)
+        hint = QLabel(
+            f"{len(missing):,} indexed days missing between {first} and {last}. "
+            "These are internal gaps — calendar days inside the imported period with no PCAP files."
+        )
+        hint.setWordWrap(True)
+        layout.addWidget(hint)
+        table = self._table([("label", "Missing day"), ("day", "ISO date")], fixed_widths={0: 180, 1: 140})
+        self._set_table(table, rows)
+        layout.addWidget(table, 1)
+        footer = QHBoxLayout()
+        footer.addStretch()
+        close_btn = QPushButton("Close")
+        close_btn.setMinimumHeight(42)
+        close_btn.clicked.connect(dlg.accept)
+        footer.addWidget(close_btn)
+        layout.addLayout(footer)
+        dlg.exec()
+
+    def _build_visibility_panel(self) -> QFrame:
+        panel = QFrame()
+        panel.setObjectName("Card")
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(12, 10, 12, 12)
+        layout.setSpacing(8)
+
+        title = QLabel("Visible vs encrypted indicators")
+        title.setObjectName("SectionTitle")
+        layout.addWidget(title)
+
+        self.lbl_visibility_empty = QLabel("Open a PCAP file to show readable vs encrypted indicators.")
+        self.lbl_visibility_empty.setObjectName("MutedLabel")
+        self.lbl_visibility_empty.setWordWrap(True)
+        layout.addWidget(self.lbl_visibility_empty)
+
+        self.visibility_rows_layout = QVBoxLayout()
+        self.visibility_rows_layout.setSpacing(6)
+        layout.addLayout(self.visibility_rows_layout)
+        layout.addStretch()
+        return panel
 
     def _build_artifacts_tab(self) -> QWidget:
         page = QWidget()
-        layout = QVBoxLayout(page)
-        layout.setContentsMargins(14, 14, 14, 14)
+        outer = QVBoxLayout(page)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+
+        content = QWidget()
+        layout = QVBoxLayout(content)
+        layout.setContentsMargins(14, 14, 14, 28)
         layout.setSpacing(14)
 
         controls = QHBoxLayout()
@@ -671,7 +1053,6 @@ class PcapPage(QWidget):
         controls.addWidget(self.cmb_artifact_category)
         controls.addWidget(self.lbl_artifact_count)
         controls.addStretch()
-        controls.addWidget(self.btn_expand_artifacts)
 
         columns = [
             ("category", "Category"),
@@ -704,29 +1085,47 @@ class PcapPage(QWidget):
         self.lbl_artifact_total = QLabel("0 artifacts")
         self.lbl_artifact_total.setObjectName("ProfileMetric")
         self.lbl_artifact_total.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        self.lbl_artifact_breakdown = QLabel("No artifact categories loaded.")
-        self.lbl_artifact_breakdown.setObjectName("MutedLabel")
-        self.lbl_artifact_breakdown.setWordWrap(True)
-        self.lbl_artifact_breakdown.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self.lbl_artifact_preview = QLabel("No artifact categories loaded.")
+        self.lbl_artifact_preview.setObjectName("SummaryTextBox")
+        self.lbl_artifact_preview.setWordWrap(True)
+        self.lbl_artifact_preview.setMinimumHeight(72)
+        self.lbl_artifact_preview.setTextInteractionFlags(Qt.TextSelectableByMouse)
+
+        artifact_card = QFrame()
+        artifact_card.setObjectName("Card")
+        artifact_card_layout = QVBoxLayout(artifact_card)
+        artifact_card_layout.setContentsMargins(18, 16, 18, 18)
+        artifact_card_layout.setSpacing(8)
+
+        lbl_title = QLabel("Extracted artifacts")
+        lbl_title.setObjectName("SectionTitle")
+        lbl_description = QLabel(
+            "Visible web, local network, credential and Windows/enterprise indicators extracted from readable capture data."
+        )
+        lbl_description.setObjectName("MutedLabel")
+        lbl_description.setWordWrap(True)
+        artifact_card_layout.addWidget(lbl_title)
+        artifact_card_layout.addWidget(lbl_description)
+        artifact_card_layout.addWidget(self.lbl_artifact_total)
+        artifact_card_layout.addWidget(self.lbl_artifact_preview)
+
+        button_row = QHBoxLayout()
+        button_row.addStretch()
+        button_row.addWidget(self.btn_expand_artifacts)
+        artifact_card_layout.addLayout(button_row)
 
         layout.addLayout(controls)
-        layout.addWidget(
-            self._evidence_launcher_card(
-                "Extracted artifacts",
-                "Visible web, local network, credential and Windows/enterprise indicators extracted from readable capture data.",
-                self.lbl_artifact_total,
-                self.lbl_artifact_breakdown,
-                self.btn_expand_artifacts,
-            ),
-            0,
-        )
+        layout.addWidget(artifact_card, 0)
         layout.addStretch()
+
+        scroll.setWidget(content)
+        outer.addWidget(scroll, 1)
         return page
 
     def _build_connections_tab(self) -> QWidget:
         page = QWidget()
         layout = QVBoxLayout(page)
-        layout.setContentsMargins(14, 14, 14, 14)
+        layout.setContentsMargins(14, 14, 14, 28)
         layout.setSpacing(14)
 
         self.btn_expand_connections = QPushButton("Open full connections table")
@@ -830,7 +1229,7 @@ class PcapPage(QWidget):
         dlg.resize(*self._dialog_size(1180, 720))
 
         layout = QVBoxLayout(dlg)
-        layout.setContentsMargins(14, 14, 14, 14)
+        layout.setContentsMargins(14, 14, 14, 28)
         layout.setSpacing(10)
 
         hint = QLabel("Expanded table view. Sort columns, select rows, or right-click to copy values.")
@@ -854,16 +1253,17 @@ class PcapPage(QWidget):
         footer.addWidget(self._export_button("Export HTML", title, table, "html"))
         footer.addStretch()
         btn_close = QPushButton("Close")
-        btn_close.setFixedHeight(34)
+        btn_close.setMinimumHeight(42)
         btn_close.clicked.connect(dlg.accept)
         footer.addWidget(btn_close)
+        layout.addSpacing(6)
         layout.addLayout(footer)
 
         dlg.exec()
 
     def _export_button(self, text: str, title: str, table: QTableView, export_format: str) -> QPushButton:
         button = QPushButton(text)
-        button.setFixedHeight(34)
+        button.setMinimumHeight(42)
         button.clicked.connect(lambda: self._export_table_dialog(title, table, export_format))
         return button
 
@@ -969,43 +1369,311 @@ class PcapPage(QWidget):
 
     def load_pcap(self, file_path: str):
         self._pcap_queue = []
+        self._pcap_queue_auto_save = False
+        self._pcap_queue_auto_process = False
+        self._clear_day_groups()
+        self._reset_batch_status()
         self._load_pcap_file(file_path)
 
-    def load_pcap_queue(self, file_paths: list[str]) -> None:
+    def load_pcap_queue(
+        self,
+        file_paths: list[str],
+        *,
+        auto_save: bool = False,
+        auto_process: bool = False,
+        day_groups: dict[str, list[str]] | None = None,
+    ) -> None:
         paths = [str(path) for path in (file_paths or []) if str(path or "").strip()]
         if not paths:
             return
 
-        self._pcap_queue = paths[1:]
-        self._load_pcap_file(paths[0])
+        grouped_day = False
+        if day_groups:
+            paths = self._set_day_groups(day_groups) or paths
+            grouped_day = bool(self._pcap_day_groups)
+        else:
+            self._clear_day_groups()
+
+        if auto_process:
+            self._start_auto_pcap_batch(paths, auto_save=auto_save)
+            return
+
+        self._pcap_queue = [] if grouped_day else paths[1:]
+        self._pcap_queue_auto_save = bool(auto_save and not grouped_day)
+        self._pcap_queue_auto_process = bool(auto_process)
+        self._pcap_batch_total = len(paths)
+        self._pcap_batch_processed = 0
+        self._pcap_batch_failed = 0
+        self._pcap_batch_stop_after_current = False
+        if grouped_day and len(paths) > 1:
+            label = f"{self._format_day_label(self._pcap_active_day)} ({len(paths):,} PCAP files)"
+            self._update_batch_status(label)
+            self._load_pcap_files(paths, label=label)
+        else:
+            self._update_batch_status(Path(paths[0]).name)
+            self._load_pcap_file(paths[0])
+
+    def _start_auto_pcap_batch(self, paths: list[str], *, auto_save: bool) -> None:
+        if self._thread is not None or self._batch_thread is not None:
+            QMessageBox.information(self, "PCAP", "PCAP analysis is already running.")
+            return
+
+        project_id = self._current_project_id()
+        self._pcap_queue = []
+        self._pcap_queue_auto_save = bool(auto_save)
+        self._pcap_queue_auto_process = True
+        self._pcap_batch_total = len(paths)
+        self._pcap_batch_processed = 0
+        self._pcap_batch_failed = 0
+        self._pcap_batch_stop_after_current = False
+
+        self.btn_open.setEnabled(False)
+        self.btn_open.setText("Loading...")
+        self.btn_export.setEnabled(False)
+        self.btn_ai_summary.setEnabled(False)
+        self.btn_save_project.setEnabled(False)
+        self.btn_add_notes.setEnabled(False)
+        self.lbl_file.setText(Path(paths[0]).name)
+        self.lbl_stats.setText("Auto analyzing PCAP batch...")
+        self.lbl_stats.setObjectName("PcapLoadingStatus")
+        self._refresh_widget_style(self.lbl_stats)
+        self._update_batch_status(Path(paths[0]).name)
+
+        self._batch_thread = QThread()
+        self._batch_worker = PcapBatchWorker(
+            paths,
+            project_id=project_id,
+            auto_save=auto_save,
+            day_groups=self._pcap_day_groups or None,
+        )
+        self._batch_worker.moveToThread(self._batch_thread)
+        self._batch_thread.started.connect(self._batch_worker.run)
+        self._batch_worker.progress.connect(self._on_batch_progress, Qt.QueuedConnection)
+        self._batch_worker.finished.connect(self._on_batch_finished, Qt.QueuedConnection)
+        self._batch_worker.finished.connect(self._batch_thread.quit)
+        self._batch_worker.finished.connect(self._batch_worker.deleteLater)
+        self._batch_thread.finished.connect(self._batch_thread.deleteLater)
+        self._batch_thread.finished.connect(self._cleanup_batch_thread)
+        self._batch_thread.start()
 
     def _load_next_queued_pcap(self) -> None:
         if not self._pcap_queue:
             self._update_open_button_text()
+            self._update_batch_status()
             return
         next_path = self._pcap_queue.pop(0)
+        self._update_batch_status(Path(next_path).name)
         self._load_pcap_file(next_path)
 
+    def _set_day_groups(self, day_groups: dict[str, list[str]], *, allow_empty_days: bool = False) -> list[str]:
+        cleaned = {
+            str(day): [str(path) for path in paths if str(path or "").strip()]
+            for day, paths in (day_groups or {}).items()
+        }
+        if allow_empty_days:
+            cleaned = {day: paths for day, paths in cleaned.items() if day}
+        else:
+            cleaned = {day: paths for day, paths in cleaned.items() if paths}
+        self._pcap_day_groups = dict(sorted(cleaned.items(), key=lambda pair: (pair[0] == "undated", pair[0])))
+        if not self._pcap_day_groups:
+            self._clear_day_groups()
+            return []
+
+        self.cmb_pcap_day.blockSignals(True)
+        self.cmb_pcap_day.clear()
+        for day, paths in self._pcap_day_groups.items():
+            label = period_combo_label(day, len(paths) or 1, kind="PCAP")
+            if not paths:
+                label = f"{format_period_day_label(day) or day} (saved)"
+            self.cmb_pcap_day.addItem(label, day)
+        self.cmb_pcap_day.blockSignals(False)
+        self._pcap_active_day = self.cmb_pcap_day.currentData() or next(iter(self._pcap_day_groups))
+        self._sync_period_selector_panel()
+        if hasattr(self, "btn_save_all_periods"):
+            self.btn_save_all_periods.setEnabled(True)
+        self._update_reanalyze_button_state()
+        self._update_period_gap_banner()
+        return list(self._pcap_day_groups.get(self._pcap_active_day, []))
+
+    def _sync_period_selector_panel(self) -> None:
+        has_periods = bool(self._pcap_day_groups)
+        has_batch = self._pcap_batch_total > 1 or bool(self._pcap_queue)
+        self.lbl_pcap_day.setVisible(has_periods)
+        self.cmb_pcap_day.setVisible(has_periods)
+        if hasattr(self, "batch_status_panel"):
+            self.batch_status_panel.setVisible(has_periods or has_batch)
+
+    def load_active_period(self, *, prefer_saved: bool = False) -> None:
+        if not self._pcap_day_groups:
+            return
+        if self._thread is not None or self._batch_thread is not None:
+            return
+        day = str(self._pcap_active_day or self.cmb_pcap_day.currentData() or "")
+        if not day:
+            return
+        if prefer_saved and self._try_load_saved_pcap_period(day):
+            return
+        paths = list(self._pcap_day_groups.get(day, []))
+        if paths:
+            self._load_pcap_files(paths, label=f"{self._format_day_label(day)} ({len(paths):,} PCAP files)")
+        elif prefer_saved:
+            self._try_load_saved_pcap_period(day)
+
+    def _try_load_saved_pcap_period(self, day: str) -> bool:
+        project_id = self._current_project_id()
+        if project_id is None or not day:
+            return False
+
+        matches = [
+            source
+            for source in list_pcap_sources(project_id, limit=50000)
+            if str(source.period_day or "").strip() == day
+        ]
+        if not matches:
+            return False
+
+        source = max(matches, key=lambda row: int(row.packet_count or 0))
+        self._render_saved_period_source(source, day)
+        return True
+
+    def _render_saved_period_source(self, source, day: str) -> None:
+        self.summary = None
+        self._saved_source_id = int(source.id or 0) or None
+        self._pcap_active_day = day
+        title = str(source.file_name or source.file_path or self._format_day_label(day))
+        self.lbl_file.setText(title)
+        self.lbl_stats.setObjectName("HeaderStatLabel")
+        self._refresh_widget_style(self.lbl_stats)
+        self.lbl_stats.setText(
+            f"{source.format or 'Saved period'} | Packets: {int(source.packet_count or 0):,} | "
+            f"Volume: {human_bytes(int(source.wire_bytes or 0), precision=2)} | "
+            f"Period: {self._format_pcap_range(source.first_seen, source.last_seen)} | "
+            "Loaded from project save — use Re-analyze Period for full communications view."
+        )
+        plain = str(source.summary_text or "").strip() or "Saved PCAP period is available in the project profile."
+        self._set_investigator_text({"plain_summary": plain})
+        empty_saved = "Open Re-analyze Period to rebuild full tables from source PCAP files."
+        self.lbl_highlights_brief.setText("Saved PCAP period loaded from project profile.")
+        self.lbl_communication_count.setText("Saved summary")
+        self.lbl_communication_breakdown.setText(empty_saved)
+        self._set_table(self.tbl_communications, [])
+        self.txt_communication_detail.clear()
+        self.chart_services.set_rows([], empty_text=empty_saved)
+        self.chart_activity.set_rows([], empty_text=empty_saved)
+        self._set_visibility_indicators([], empty_text=empty_saved)
+        self.lbl_overview_text.setText(
+            f"Saved PCAP period for {self._format_day_label(day)}.\n"
+            f"Device IP: {source.likely_device_ip or '-'}\n"
+            f"Packets: {int(source.packet_count or 0):,}\n"
+            f"Volume: {human_bytes(int(source.wire_bytes or 0), precision=2)}"
+        )
+        self._set_table(self.tbl_network_overview, [])
+        self.lbl_network_overview_count.setText("Saved period")
+        self.lbl_network_overview_breakdown.setText(empty_saved)
+        self._set_table(self.tbl_visible_metadata, [])
+        self.lbl_visible_metadata_count.setText("Saved period")
+        self.lbl_visible_metadata_breakdown.setText(empty_saved)
+        self._set_table(self.tbl_samples, [])
+        self.lbl_samples_count.setText("0 readable rows")
+        self._set_table(self.tbl_connections, [])
+        self.lbl_connections_count.setText("Saved period")
+        self.lbl_connections_breakdown.setText(
+            f"Device IP: {source.likely_device_ip or '-'} | Packets: {int(source.packet_count or 0):,}"
+        )
+        self._set_artifact_tables([])
+        if hasattr(self, "btn_save_all_periods"):
+            self.btn_save_all_periods.setEnabled(bool(self._pcap_day_groups))
+        self.btn_export.setEnabled(False)
+        if hasattr(self, "btn_export_full_dns"):
+            self.btn_export_full_dns.setEnabled(False)
+        if hasattr(self, "btn_export_full_tls"):
+            self.btn_export_full_tls.setEnabled(False)
+        self.btn_save_project.setText("Saved to Project")
+        self.btn_save_project.setEnabled(False)
+        self.btn_ai_summary.setEnabled(bool(plain))
+        self.btn_add_notes.setEnabled(bool(plain))
+        self._sync_period_selector_panel()
+        self._update_reanalyze_button_state()
+
+    def _clear_day_groups(self) -> None:
+        self._pcap_day_groups = {}
+        self._pcap_active_day = ""
+        if hasattr(self, "cmb_pcap_day"):
+            self.cmb_pcap_day.blockSignals(True)
+            self.cmb_pcap_day.clear()
+            self.cmb_pcap_day.blockSignals(False)
+        self._sync_period_selector_panel()
+        if hasattr(self, "btn_save_all_periods"):
+            self.btn_save_all_periods.setEnabled(False)
+        if hasattr(self, "btn_reanalyze_period"):
+            self.btn_reanalyze_period.setEnabled(False)
+        self._update_period_gap_banner([])
+
+    def _on_pcap_day_changed(self, index: int) -> None:
+        if index < 0 or not self._pcap_day_groups:
+            return
+        if self._thread is not None or self._batch_thread is not None:
+            return
+        day = str(self.cmb_pcap_day.itemData(index) or "")
+        if not day:
+            return
+        self._pcap_active_day = day
+        self._pcap_queue = []
+        paths = list(self._pcap_day_groups.get(day, []))
+        if self._try_load_saved_pcap_period(day):
+            return
+        if not paths:
+            self.lbl_stats.setText(f"No source PCAP files remain for {self._format_day_label(day)}.")
+            return
+        self._pcap_batch_total = len(paths)
+        self._pcap_batch_processed = 0
+        self._pcap_batch_failed = 0
+        self._pcap_batch_stop_after_current = False
+        self._update_batch_status(f"{self._format_day_label(day)} aggregate")
+        self._load_pcap_files(paths, label=f"{self._format_day_label(day)} ({len(paths):,} PCAP files)")
+
+    def _format_day_label(self, day: str) -> str:
+        return format_period_day_label(day)
+
     def _load_pcap_file(self, file_path: str):
+        self._load_pcap_files([file_path], label="")
+
+    def _load_pcap_files(self, file_paths: list[str], *, label: str = ""):
         if not self._ensure_project_workspace():
             return
 
         if self._thread is not None:
             QMessageBox.information(self, "PCAP", "PCAP analysis is already running.")
             return
+        paths = [str(path) for path in file_paths if str(path or "").strip()]
+        if not paths:
+            return
 
         self.btn_open.setEnabled(False)
         self.btn_open.setText("Loading...")
         self.btn_export.setEnabled(False)
         self.btn_ai_summary.setEnabled(False)
+        if hasattr(self, "btn_export_full_dns"):
+            self.btn_export_full_dns.setEnabled(False)
+        if hasattr(self, "btn_export_full_tls"):
+            self.btn_export_full_tls.setEnabled(False)
+        if hasattr(self, "btn_reanalyze_period"):
+            self.btn_reanalyze_period.setEnabled(False)
         self.txt_pcap_ai_summary.clear()
-        self.lbl_file.setText(file_path)
-        self.lbl_stats.setText("Analyzing capture...")
+        if len(paths) == 1:
+            self.lbl_file.setText(paths[0])
+            current_text = Path(paths[0]).name
+        else:
+            self.lbl_file.setText(label or f"{len(paths):,} PCAP files")
+            current_text = label or f"{len(paths):,} PCAP files"
+        self.lbl_stats.setText("Analyzing capture..." if len(paths) == 1 else f"Analyzing {len(paths):,} PCAP files for selected day...")
         self.lbl_stats.setObjectName("PcapLoadingStatus")
         self._refresh_widget_style(self.lbl_stats)
+        self._update_batch_status(current_text)
 
         self._thread = QThread()
-        self._worker = PcapWorker(file_path)
+        worker_path: str | list[str] = paths[0] if len(paths) == 1 else paths
+        self._worker = PcapWorker(worker_path, label=label)
         self._worker.moveToThread(self._thread)
         self._thread.started.connect(self._worker.run)
         self._worker.finished.connect(self._on_loaded, Qt.QueuedConnection)
@@ -1019,15 +1687,44 @@ class PcapPage(QWidget):
         self._thread.start()
 
     def _on_loaded(self, summary: PcapSummary):
+        self._render_loaded_summary(summary)
+        if self._pcap_queue_auto_save:
+            saved = self._save_current_to_project(show_dialog=False, check_device=False, refresh_ui=False)
+            self._mark_current_ingest("done" if saved else "failed", "" if saved else "Auto-save failed.")
+        source_count = len(getattr(summary, "source_paths", None) or [])
+        if source_count > 1 and self._pcap_batch_total == source_count:
+            self._pcap_batch_processed = self._pcap_batch_total
+        else:
+            self._pcap_batch_processed += 1
+        self._update_batch_status()
+
+    def _render_loaded_summary(self, summary: PcapSummary) -> None:
         self.summary = summary
         self._saved_source_id = None
         self.btn_export.setEnabled(True)
+        if hasattr(self, "btn_export_full_dns"):
+            self.btn_export_full_dns.setEnabled(True)
+        if hasattr(self, "btn_export_full_tls"):
+            self.btn_export_full_tls.setEnabled(True)
+        source_count = len(getattr(summary, "source_paths", None) or [])
         self.btn_save_project.setEnabled(True)
-        self.btn_save_project.setText("Save to Project")
+        if source_count > 1:
+            self.btn_save_project.setText("Save Period to Project")
+            self.btn_save_all_periods.setEnabled(bool(self._pcap_day_groups))
+            self.btn_save_project.setToolTip(
+                "Save this daily aggregate to the project profile. The source files remain indexed individually."
+            )
+        else:
+            self.btn_save_project.setText("Save Period to Project")
+            self.btn_save_project.setToolTip("")
+            self.btn_save_all_periods.setEnabled(bool(self._pcap_day_groups))
         self.btn_ai_summary.setEnabled(True)
         self.btn_ai_summary.setText("AI Summary")
         self.btn_add_notes.setEnabled(True)
-        self.lbl_file.setText(summary.file_path)
+        if source_count > 1:
+            self.lbl_file.setText(f"{summary.file_name} | Aggregated from {source_count:,} PCAP files")
+        else:
+            self.lbl_file.setText(summary.file_path)
         self.lbl_stats.setObjectName("HeaderStatLabel")
         self._refresh_widget_style(self.lbl_stats)
         self.lbl_stats.setText(
@@ -1039,6 +1736,7 @@ class PcapPage(QWidget):
             self.lbl_stats.setText(
                 self.lbl_stats.text()
                 + f" | Folder queue: {len(self._pcap_queue)} more"
+                + (" | auto-batch" if self._pcap_queue_auto_process else "")
             )
         investigator = build_investigator_view(summary)
         self._set_highlights(summary)
@@ -1051,8 +1749,8 @@ class PcapPage(QWidget):
             self._activity_chart_rows(investigator["activity_rows"]),
             empty_text="No hourly activity timeline is available.",
         )
-        self.chart_visibility.set_rows(
-            self._visibility_chart_rows(investigator["visibility_rows"]),
+        self._set_visibility_indicators(
+            investigator.get("visibility_rows") or [],
             empty_text="No visibility indicators are available.",
         )
         self.lbl_overview_text.setText(self._overview_text(summary))
@@ -1060,8 +1758,99 @@ class PcapPage(QWidget):
         self._set_evidence_tables(summary)
         self._set_artifact_tables(summary.artifacts)
         self._set_connections_table(summary)
+        self._sync_period_selector_to_summary(summary)
+        self._update_reanalyze_button_state()
 
-    def refresh_current_view(self) -> None:
+    def _update_reanalyze_button_state(self) -> None:
+        if not hasattr(self, "btn_reanalyze_period"):
+            return
+        busy = self._thread is not None or self._batch_thread is not None
+        day = str(self._pcap_active_day or self.cmb_pcap_day.currentData() or "")
+        has_day_paths = bool(self._pcap_day_groups.get(day, [])) if day else bool(self._pcap_day_groups)
+        has_summary = bool(getattr(self, "summary", None))
+        self.btn_reanalyze_period.setEnabled(not busy and (has_day_paths or has_summary))
+
+    def reanalyze_current_period(self) -> None:
+        if self._thread is not None or self._batch_thread is not None:
+            QMessageBox.information(self, "PCAP", "PCAP analysis is already running.")
+            return
+
+        day = str(self._pcap_active_day or self.cmb_pcap_day.currentData() or "")
+        paths = list(self._pcap_day_groups.get(day, []))
+        if not paths and getattr(self, "summary", None):
+            paths = list(getattr(self.summary, "source_paths", None) or [])
+        if not paths and getattr(self, "summary", None) and self.summary.file_path:
+            paths = [self.summary.file_path]
+
+        if not paths:
+            QMessageBox.information(self, "PCAP", "No PCAP period is loaded to re-analyze.")
+            return
+
+        label = ""
+        if day:
+            label = f"{self._format_day_label(day)} ({len(paths):,} PCAP files)"
+        elif len(paths) > 1:
+            label = f"{len(paths):,} PCAP files"
+        self._load_pcap_files(paths, label=label)
+
+    def _export_full_metadata(self, kind: str) -> None:
+        if not getattr(self, "summary", None):
+            QMessageBox.information(self, "PCAP export", "Open a PCAP file first.")
+            return
+
+        project = get_project(self._current_project_id()) if self._current_project_id() is not None else None
+        default_name = f"pcap_{kind}_full_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+        default_path = (
+            str(workspace_export_path(project.base_folder, default_name, category="pcap"))
+            if project and project.base_folder
+            else default_name
+        )
+
+        file_path, _selected = QFileDialog.getSaveFileName(
+            self,
+            f"Export full {kind.upper()} metadata",
+            default_path,
+            "CSV files (*.csv)",
+        )
+        if not file_path:
+            return
+
+        try:
+            if kind == "dns":
+                row_count = export_pcap_dns_csv(file_path, self.summary)
+                label = "DNS queries"
+            elif kind == "tls":
+                row_count = export_pcap_tls_csv(file_path, self.summary)
+                label = "TLS SNI hosts"
+            else:
+                raise ValueError(f"Unsupported metadata export: {kind}")
+            QMessageBox.information(
+                self,
+                "PCAP export",
+                f"Exported {row_count:,} {label} to:\n{file_path}",
+            )
+        except Exception as exc:
+            QMessageBox.critical(self, "PCAP export failed", str(exc))
+
+    def _sync_period_selector_to_summary(self, summary: PcapSummary) -> None:
+        if not self._pcap_day_groups or not hasattr(self, "cmb_pcap_day"):
+            return
+        day = resolve_period_day(
+            file_paths=list(getattr(summary, "source_paths", None) or []),
+            first_seen=summary.first_seen,
+            last_seen=summary.last_seen,
+        )
+        if not day or day not in self._pcap_day_groups:
+            return
+        index = self.cmb_pcap_day.findData(day)
+        if index < 0:
+            return
+        if self.cmb_pcap_day.currentIndex() == index and self._pcap_active_day == day:
+            return
+        self.cmb_pcap_day.blockSignals(True)
+        self.cmb_pcap_day.setCurrentIndex(index)
+        self.cmb_pcap_day.blockSignals(False)
+        self._pcap_active_day = day
         if not self.summary:
             return
         summary = self.summary
@@ -1076,8 +1865,8 @@ class PcapPage(QWidget):
             self._activity_chart_rows(investigator["activity_rows"]),
             empty_text="No hourly activity timeline is available.",
         )
-        self.chart_visibility.set_rows(
-            self._visibility_chart_rows(investigator["visibility_rows"]),
+        self._set_visibility_indicators(
+            investigator.get("visibility_rows") or [],
             empty_text="No visibility indicators are available.",
         )
         self.lbl_overview_text.setText(self._overview_text(summary))
@@ -1121,6 +1910,128 @@ class PcapPage(QWidget):
             })
         return chart_rows
 
+    def _open_rows_dialog(self, title: str, columns: list[tuple[str, str]], rows: list[dict[str, Any]]) -> None:
+        if not rows:
+            QMessageBox.information(self, title, "No rows are loaded.")
+            return
+
+        dlg = QDialog(self)
+        dlg.setWindowTitle(title)
+        dlg.resize(*self._dialog_size(1180, 720))
+
+        layout = QVBoxLayout(dlg)
+        layout.setContentsMargins(14, 14, 14, 28)
+        layout.setSpacing(10)
+
+        hint = QLabel("Click an indicator above to inspect the underlying rows. Sort columns or right-click to copy values.")
+        hint.setObjectName("MutedLabel")
+        hint.setWordWrap(True)
+        layout.addWidget(hint)
+
+        table = self._table(columns, stretch_columns=[idx for idx, _ in enumerate(columns)])
+        table.setMinimumHeight(520)
+        self._set_table(table, rows)
+        layout.addWidget(table, 1)
+
+        footer = QHBoxLayout()
+        footer.addStretch()
+        btn_close = QPushButton("Close")
+        btn_close.setMinimumHeight(42)
+        btn_close.clicked.connect(dlg.accept)
+        footer.addWidget(btn_close)
+        layout.addLayout(footer)
+        dlg.exec()
+
+    def _visibility_kind(self, label: str) -> str:
+        text = str(label or "").strip().lower()
+        if text.startswith("encrypted"):
+            return "encrypted"
+        if "dns" in text:
+            return "dns"
+        if "http" in text:
+            return "http"
+        return "other"
+
+    def _set_visibility_indicators(self, rows: list[dict[str, Any]] | None, *, empty_text: str = "") -> None:
+        while self.visibility_rows_layout.count():
+            item = self.visibility_rows_layout.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+            nested = item.layout()
+            if nested is not None:
+                while nested.count():
+                    nested_item = nested.takeAt(0)
+                    nested_widget = nested_item.widget()
+                    if nested_widget is not None:
+                        nested_widget.deleteLater()
+
+        if not rows:
+            self.lbl_visibility_empty.setText(
+                empty_text or "Open a PCAP file to show readable vs encrypted indicators."
+            )
+            self.lbl_visibility_empty.show()
+            return
+
+        self.lbl_visibility_empty.hide()
+        for row in rows:
+            label = str(row.get("label") or "-")
+            count = int(row.get("count") or 0)
+            share = row.get("share")
+            try:
+                share_text = f"{float(share):.1f}%"
+            except Exception:
+                share_text = str(share or "-")
+            kind = self._visibility_kind(label)
+            value = f"{count:,} ({share_text})"
+            self.visibility_rows_layout.addWidget(
+                VisibilityIndicatorRow(label, value, kind, self._open_visibility_data)
+            )
+
+    def _open_visibility_data(self, kind: str) -> None:
+        summary = getattr(self, "summary", None)
+        if summary is None:
+            QMessageBox.information(self, "PCAP", "Open a PCAP file first.")
+            return
+
+        if kind == "encrypted":
+            self._open_table_dialog("Communication indicators", self.tbl_communications)
+            return
+
+        if kind == "dns":
+            rows = [
+                row
+                for row in self._visible_metadata_rows(summary)
+                if "dns" in str(row.get("type") or "").lower()
+            ]
+            self._open_rows_dialog(
+                "DNS metadata",
+                [("type", "Type"), ("value", "Visible Value"), ("count", "Count")],
+                rows,
+            )
+            return
+
+        sample_columns = [
+            ("time", "Time"),
+            ("type", "Type"),
+            ("source", "Source"),
+            ("destination", "Destination"),
+            ("value", "Visible Value"),
+        ]
+        if kind == "http":
+            rows = [
+                row for row in (summary.readable_samples or [])
+                if str(row.get("type") or "") == "HTTP cleartext"
+            ]
+            self._open_rows_dialog("HTTP cleartext samples", sample_columns, rows)
+            return
+
+        rows = [
+            row for row in (summary.readable_samples or [])
+            if str(row.get("type") or "") != "HTTP cleartext"
+        ]
+        self._open_rows_dialog("Other readable samples", sample_columns, rows)
+
     def _visibility_chart_rows(self, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         chart_rows = []
         for row in rows or []:
@@ -1139,12 +2050,34 @@ class PcapPage(QWidget):
 
     def _visible_metadata_rows(self, summary: PcapSummary) -> list[dict[str, Any]]:
         rows: list[dict[str, Any]] = []
-        for item in summary.dns_queries or []:
-            rows.append({"type": "DNS query", "value": item.get("query"), "count": item.get("count")})
-        for item in summary.tls_sni or []:
-            rows.append({"type": "TLS SNI", "value": item.get("host"), "count": item.get("count")})
-        for item in summary.http_hosts or []:
-            rows.append({"type": "HTTP host", "value": item.get("host"), "count": item.get("count")})
+
+        def _append_from_counts(counts: dict[str, int] | None, *, row_type: str, key: str) -> None:
+            if not counts:
+                return
+            for name, count in sorted(counts.items(), key=lambda item: (-item[1], item[0].lower())):
+                if str(name).strip():
+                    rows.append({"type": row_type, "value": name, "count": count})
+
+        dns_items = summary.dns_queries or []
+        if dns_items:
+            for item in dns_items:
+                rows.append({"type": "DNS query", "value": item.get("query"), "count": item.get("count")})
+        else:
+            _append_from_counts(summary.dns_query_counts, row_type="DNS query", key="query")
+
+        tls_items = summary.tls_sni or []
+        if tls_items:
+            for item in tls_items:
+                rows.append({"type": "TLS SNI", "value": item.get("host"), "count": item.get("count")})
+        else:
+            _append_from_counts(summary.tls_sni_counts, row_type="TLS SNI", key="host")
+
+        http_items = summary.http_hosts or []
+        if http_items:
+            for item in http_items:
+                rows.append({"type": "HTTP host", "value": item.get("host"), "count": item.get("count")})
+        else:
+            _append_from_counts(summary.http_host_counts, row_type="HTTP host", key="host")
         return rows
 
     def _set_evidence_tables(self, summary: PcapSummary) -> None:
@@ -1153,11 +2086,12 @@ class PcapPage(QWidget):
         self._set_table(self.tbl_visible_metadata, metadata_rows)
         self._set_table(self.tbl_samples, sample_rows)
 
-        self.lbl_visible_metadata_count.setText(f"{len(metadata_rows):,} visible rows")
+        dns_total = int(summary.total_dns_names or len(summary.dns_query_counts or {}) or 0)
+        tls_total = int(summary.total_tls_sni_hosts or len(summary.tls_sni_counts or {}) or 0)
+        http_total = int(summary.total_http_hosts or len(summary.http_host_counts or {}) or 0)
+        self.lbl_visible_metadata_count.setText(f"{len(metadata_rows):,} metadata rows (DNS + TLS + HTTP)")
         self.lbl_visible_metadata_breakdown.setText(
-            f"DNS: {len(summary.dns_queries or []):,} | "
-            f"TLS SNI: {len(summary.tls_sni or []):,} | "
-            f"HTTP hosts: {len(summary.http_hosts or []):,}"
+            f"DNS: {dns_total:,} | TLS SNI: {tls_total:,} | HTTP hosts: {http_total:,}"
         )
         self.lbl_samples_count.setText(f"{len(sample_rows):,} readable rows")
 
@@ -1203,7 +2137,7 @@ class PcapPage(QWidget):
         self._set_table(self.tbl_connections, rows)
         payload_rows = sum(1 for row in rows if str(row.get("pcap_payload_preview") or "").strip())
         device_ip = summary.likely_device_ip or "-"
-        self.lbl_connections_count.setText(f"{len(rows):,} connections")
+        self.lbl_connections_count.setText(f"{len(rows):,} flow summaries")
         self.lbl_connections_breakdown.setText(
             f"Device IP: {device_ip} | Visible previews: {payload_rows:,} | "
             f"Packets: {summary.packet_count:,} | Volume: {human_bytes(summary.wire_bytes, precision=2)}"
@@ -1222,7 +2156,7 @@ class PcapPage(QWidget):
                 services.append(service)
 
         lines = [
-            f"Visible app/service indicators: {', '.join(services[:8]) if services else '-'}",
+            f"Visible app/service indicators: {', '.join(services) if services else '-'}",
             f"Messaging/push-like indicators: {messaging_like}",
             f"Possible call/media indicators: {media_like}",
             "Classification is based on metadata such as host names, ports, protocol, duration and volume. It is an investigative indicator, not content proof.",
@@ -1286,7 +2220,7 @@ class PcapPage(QWidget):
         dlg.resize(*self._dialog_size(1180, 720))
 
         layout = QVBoxLayout(dlg)
-        layout.setContentsMargins(14, 14, 14, 14)
+        layout.setContentsMargins(14, 14, 14, 28)
         layout.setSpacing(10)
 
         hint = QLabel("Metadata-based communication indicators. Sort columns, select rows, or right-click to copy values.")
@@ -1336,30 +2270,173 @@ class PcapPage(QWidget):
         footer.addWidget(self._export_button("Export HTML", "Communication indicators", table, "html"))
         footer.addStretch()
         btn_close = QPushButton("Close")
-        btn_close.setFixedHeight(34)
+        btn_close.setMinimumHeight(42)
         btn_close.clicked.connect(dlg.accept)
         footer.addWidget(btn_close)
+        layout.addSpacing(6)
         layout.addLayout(footer)
 
         dlg.exec()
 
     def _on_error(self, message: str):
-        QMessageBox.critical(self, "PCAP analysis failed", message)
+        if not self._pcap_queue_auto_process:
+            QMessageBox.critical(self, "PCAP analysis failed", message)
         self.lbl_stats.setObjectName("HeaderStatLabel")
         self._refresh_widget_style(self.lbl_stats)
         self.lbl_stats.setText("PCAP analysis failed.")
+        self._pcap_batch_failed += 1
+        self._pcap_batch_processed += 1
+        if self._pcap_queue_auto_save:
+            self._mark_current_ingest("failed", message)
+        self._update_batch_status(error_text=message)
+
+    def _on_batch_progress(self, processed: int, total: int, failed: int, current_file: str) -> None:
+        self._pcap_batch_processed = processed
+        self._pcap_batch_total = total
+        self._pcap_batch_failed = failed
+        if current_file:
+            self.lbl_file.setText(current_file)
+        self._update_batch_status(current_file)
+
+    def _on_batch_finished(self, last_summary: object, processed: int, failed: int) -> None:
+        self._pcap_batch_processed = processed
+        self._pcap_batch_failed = failed
+        self._pcap_queue_auto_process = False
+        self._pcap_queue = []
+
+        self.btn_open.setEnabled(True)
+        self.btn_save_project.setEnabled(bool(last_summary))
+        self.btn_export.setEnabled(bool(last_summary))
+        self.btn_ai_summary.setEnabled(bool(last_summary))
+        self.btn_add_notes.setEnabled(bool(last_summary))
+        self._update_open_button_text()
+
+        self.lbl_stats.setObjectName("HeaderStatLabel")
+        self._refresh_widget_style(self.lbl_stats)
+        if isinstance(last_summary, PcapSummary):
+            self._render_loaded_summary(last_summary)
+            if self._pcap_queue_auto_save:
+                self.btn_save_project.setText("Saved to Project")
+            if self._pcap_day_groups:
+                self._reset_batch_status()
+        else:
+            self.lbl_stats.setText("PCAP batch finished, but no capture was analyzed successfully.")
+
+        self._pcap_queue_auto_save = False
+        self._pcap_batch_stop_after_current = False
+        if not self._pcap_day_groups:
+            self._update_batch_status()
+        self._refresh_project_after_batch()
 
     def _cleanup_thread(self):
         self.btn_open.setEnabled(True)
         self._update_open_button_text()
+        if not self._pcap_queue:
+            self._pcap_queue_auto_save = False
+            self._pcap_queue_auto_process = False
+            self._pcap_batch_stop_after_current = False
+            self._update_batch_status()
         self._worker = None
         self._thread = None
+        self._update_reanalyze_button_state()
+        if self._pcap_batch_stop_after_current:
+            self._pcap_queue_auto_process = False
+            self._update_open_button_text()
+            self._update_batch_status()
+            return
+        if self._pcap_queue_auto_process and self._pcap_queue:
+            QTimer.singleShot(100, self._load_next_queued_pcap)
+
+    def _cleanup_batch_thread(self):
+        self._batch_worker = None
+        self._batch_thread = None
+        self._update_reanalyze_button_state()
 
     def _update_open_button_text(self) -> None:
         if self._pcap_queue:
             self.btn_open.setText(f"Open next PCAP ({len(self._pcap_queue)})")
         else:
             self.btn_open.setText("Open PCAP")
+
+    def stop_after_current_batch(self) -> None:
+        if self._batch_worker is not None:
+            self._pcap_batch_stop_after_current = True
+            self._batch_worker.request_stop()
+            self.btn_stop_batch.setEnabled(False)
+            self.btn_stop_batch.setText("Stopping...")
+            self._update_batch_status()
+            return
+
+        if not self._pcap_queue:
+            self._reset_batch_status()
+            return
+        self._pcap_batch_stop_after_current = True
+        self._pcap_queue_auto_process = False
+        self.btn_stop_batch.setEnabled(False)
+        self.btn_stop_batch.setText("Stopping...")
+        self._update_batch_status()
+
+    def _reset_batch_status(self) -> None:
+        self._pcap_batch_total = 0
+        self._pcap_batch_processed = 0
+        self._pcap_batch_failed = 0
+        self._pcap_batch_stop_after_current = False
+        self._sync_period_selector_panel()
+        if hasattr(self, "btn_stop_batch"):
+            self.btn_stop_batch.setEnabled(True)
+            self.btn_stop_batch.setText("Stop after current")
+
+    def _update_batch_status(self, current_file: str = "", error_text: str = "") -> None:
+        if not hasattr(self, "batch_status_panel"):
+            return
+
+        has_batch = self._pcap_batch_total > 1 or bool(self._pcap_queue)
+        if not has_batch:
+            self._sync_period_selector_panel()
+            return
+
+        remaining = len(self._pcap_queue)
+        mode = "Auto batch" if self._pcap_queue_auto_process else "Manual queue"
+        if self._pcap_active_day:
+            mode = f"{mode} | {self._format_day_label(self._pcap_active_day)}"
+        parts = [
+            f"{mode}: {self._pcap_batch_processed:,} / {self._pcap_batch_total:,} processed",
+            f"{remaining:,} remaining",
+        ]
+        if self._pcap_batch_failed:
+            parts.append(f"{self._pcap_batch_failed:,} failed")
+        if current_file:
+            parts.append(f"current: {current_file}")
+        if self._pcap_batch_stop_after_current:
+            parts.append("will stop after current file")
+        if error_text:
+            parts.append(f"last error: {error_text[:160]}")
+
+        self.lbl_batch_status.setText(" | ".join(parts))
+        self.btn_stop_batch.setVisible(self._pcap_queue_auto_process or self._pcap_batch_stop_after_current)
+        self.btn_stop_batch.setEnabled(self._pcap_queue_auto_process and bool(self._pcap_queue))
+        if not self._pcap_batch_stop_after_current:
+            self.btn_stop_batch.setText("Stop after current")
+        self.batch_status_panel.setVisible(True)
+
+    def _mark_current_ingest(self, status: str, message: str = "") -> None:
+        project_id = self._current_project_id()
+        if project_id is None:
+            return
+        paths: list[str] = []
+        if self.summary:
+            paths.extend(str(path) for path in (getattr(self.summary, "source_paths", None) or []) if str(path or "").strip())
+            if not paths and self.summary.file_path:
+                paths.append(self.summary.file_path)
+        if not paths:
+            fallback = (self.lbl_file.text() or "").strip()
+            if fallback:
+                paths.append(fallback)
+        for file_path in paths:
+            try:
+                mark_ingest_item(project_id, file_path, status, message)
+            except Exception:
+                pass
 
     def _set_table(self, table: QTableView, rows: list[dict[str, Any]]):
         model = table.model()
@@ -1384,10 +2461,17 @@ class PcapPage(QWidget):
             self.cmb_artifact_category.addItem(f"{category} ({count})", category)
         self.cmb_artifact_category.blockSignals(False)
         if counts:
-            top_categories = ", ".join(f"{category}: {count:,}" for category, count in sorted(counts.items())[:6])
+            preview_lines = [
+                f"{idx}. {category}  {count:,}"
+                for idx, (category, count) in enumerate(
+                    sorted(counts.items(), key=lambda item: (-item[1], item[0]))[:5],
+                    start=1,
+                )
+            ]
+            preview_text = "\n".join(preview_lines)
         else:
-            top_categories = "No artifact categories loaded."
-        self.lbl_artifact_breakdown.setText(top_categories)
+            preview_text = "No artifact categories loaded."
+        self.lbl_artifact_preview.setText(preview_text)
         self._apply_artifact_filter()
 
     def _apply_artifact_filter(self, *args) -> None:
@@ -1443,10 +2527,11 @@ class PcapPage(QWidget):
     def _overview_text(self, summary: PcapSummary) -> str:
         lines = [
             "What is visible:",
-            f"- DNS queries: {len(summary.dns_queries)} unique visible names",
-            f"- TLS SNI hosts: {len(summary.tls_sni)} unique visible host names",
-            f"- HTTP cleartext hosts: {len(summary.http_hosts)} unique hosts",
-            f"- Readable payload samples: {len(summary.readable_samples)}",
+            f"- DNS names: {int(summary.total_dns_names or len(summary.dns_queries or [])):,}",
+            f"- TLS SNI hosts: {int(summary.total_tls_sni_hosts or len(summary.tls_sni or [])):,}",
+            f"- HTTP cleartext hosts: {int(summary.total_http_hosts or len(summary.http_hosts or [])):,}",
+            f"- Flow summaries: {len(summary.flows or []):,}",
+            f"- Readable payload samples: {len(summary.readable_samples or []):,}",
             "",
             "Important limitation:",
             "Encrypted HTTPS, QUIC and application traffic content is not readable from packet capture alone. "
@@ -1556,60 +2641,212 @@ class PcapPage(QWidget):
         except Exception as exc:
             QMessageBox.critical(self, "PCAP export failed", str(exc))
 
-    def save_to_project(self):
-        if not self.summary:
-            self._info("PCAP", "Open a PCAP file first.")
+    def save_all_periods_to_project(self) -> None:
+        if not self._pcap_day_groups:
+            self._info("PCAP", "No period groups are loaded.", "Import a folder with a calendar date range first.")
             return
-
-        project_id = self._current_project_id()
-        if project_id is None:
-            self._info(
-                "PCAP",
-                "Open an active project first.",
-                "PCAP analyses must be tied to a project before they can be used in notes or future activity profiles.",
-            )
+        if self._thread is not None or self._batch_thread is not None:
+            self._info("PCAP", "PCAP analysis is already running.")
             return
         if not self._ensure_project_workspace():
             return
 
-        if not self._confirm_project_device_match(project_id):
+        project_id = self._current_project_id()
+        if project_id is None:
+            self._info("PCAP", "Open an active project first.")
             return
 
+        total_files = sum(len(paths) for paths in self._pcap_day_groups.values())
+        if not self.app._confirm_dialog(
+            title="Save all PCAP periods",
+            message=f"Analyze and save {len(self._pcap_day_groups):,} daily periods to the project?",
+            details=(
+                f"Total PCAP files: {total_files:,}\n"
+                "Each calendar day is saved once to the project profile, matching the JSON period workflow."
+            ),
+            ok_text="Save all",
+            cancel_text="Cancel",
+            width=620,
+        ):
+            return
+
+        all_paths = [path for paths in self._pcap_day_groups.values() for path in paths]
+        self._start_auto_pcap_batch(all_paths, auto_save=True)
+
+    def save_to_project(self):
+        self._save_current_to_project(show_dialog=True, check_device=True)
+
+    def _save_current_to_project(
+        self,
+        *,
+        show_dialog: bool = True,
+        check_device: bool = True,
+        refresh_ui: bool = True,
+    ) -> bool:
+        if not self.summary:
+            if show_dialog:
+                self._info("PCAP", "Open a PCAP file first.")
+            return False
+
+        project_id = self._current_project_id()
+        if project_id is None:
+            if show_dialog:
+                self._info(
+                    "PCAP",
+                    "Open an active project first.",
+                    "PCAP analyses must be tied to a project before they can be used in notes or future activity profiles.",
+                )
+            return False
+        if not self._ensure_project_workspace():
+            return False
+
+        if check_device and not self._confirm_project_device_match(project_id):
+            return False
+
         try:
-            digest = file_sha256(self.summary.file_path)
+            source_paths = list(getattr(self.summary, "source_paths", None) or [])
+            if not source_paths and getattr(self.summary, "file_path", ""):
+                source_paths = [self.summary.file_path]
+            source_count = len(source_paths)
             investigator = build_investigator_view(self.summary)
-            source_id = add_pcap_source(
-                project_id,
-                file_path=self.summary.file_path,
-                file_name=self.summary.file_name,
-                file_sha256_value=digest,
-                file_size=self.summary.file_size,
-                format=self.summary.format,
-                packet_count=self.summary.packet_count,
-                wire_bytes=self.summary.wire_bytes,
+            plain = str(investigator.get("plain_summary") or "")
+            period_day = resolve_period_day(
+                active_day=self._pcap_active_day,
+                file_paths=source_paths,
                 first_seen=self.summary.first_seen,
                 last_seen=self.summary.last_seen,
-                duration_seconds=self.summary.duration_seconds,
-                likely_device_ip=self.summary.likely_device_ip,
-                summary_text=str(investigator.get("plain_summary") or ""),
             )
+            span = capture_span_note(self.summary.first_seen, self.summary.last_seen, period_day=period_day)
+            if span:
+                plain = f"{plain}\n{span}"
+
+            if source_count > 1:
+                digest = aggregate_hash_for_paths(source_paths)
+                saved_path = self.summary.file_path or self.summary.file_name
+                saved_name = self.summary.file_name or f"{source_count:,} PCAP files"
+                source_id = save_pcap_period_summary(
+                    project_id,
+                    period_day=period_day,
+                    file_path=saved_path,
+                    file_name=saved_name,
+                    file_sha256_value=digest,
+                    file_size=self.summary.file_size,
+                    format=self.summary.format,
+                    packet_count=self.summary.packet_count,
+                    wire_bytes=self.summary.wire_bytes,
+                    first_seen=self.summary.first_seen,
+                    last_seen=self.summary.last_seen,
+                    duration_seconds=self.summary.duration_seconds,
+                    likely_device_ip=self.summary.likely_device_ip,
+                    summary_text=plain,
+                )
+            else:
+                saved_path = self.summary.file_path
+                saved_name = self.summary.file_name
+                digest = file_sha256(saved_path)
+                source_id = save_pcap_period_summary(
+                    project_id,
+                    period_day=period_day or resolve_period_day(file_paths=[saved_path], first_seen=self.summary.first_seen),
+                    file_path=saved_path,
+                    file_name=saved_name,
+                    file_sha256_value=digest,
+                    file_size=self.summary.file_size,
+                    format=self.summary.format,
+                    packet_count=self.summary.packet_count,
+                    wire_bytes=self.summary.wire_bytes,
+                    first_seen=self.summary.first_seen,
+                    last_seen=self.summary.last_seen,
+                    duration_seconds=self.summary.duration_seconds,
+                    likely_device_ip=self.summary.likely_device_ip,
+                    summary_text=plain,
+                )
+            self._mark_saved_source_paths_done(project_id, source_paths)
             bound_project_ip = self._bind_project_device_ip_if_empty(project_id)
         except Exception as exc:
-            self._error("PCAP", "Failed to save PCAP analysis to project.", str(exc))
-            return
+            if show_dialog:
+                self._error("PCAP", "Failed to save PCAP analysis to project.", str(exc))
+            return False
 
         self._saved_source_id = source_id
         self.btn_save_project.setText("Saved to Project")
+        if refresh_ui:
+            self._refresh_project_after_batch()
+        details = [f"Source id: {source_id}"]
+        if bound_project_ip:
+            details.append(f"Project known IP was set to: {bound_project_ip}")
+        if show_dialog:
+            self._info("PCAP", "PCAP analysis saved to active project.", "\n".join(details))
+        if not refresh_ui:
+            self._refresh_activity()
+        return True
+
+    def _aggregate_source_hash(self, source_paths: list[str]) -> str:
+        digest = hashlib.sha256()
+        for raw_path in sorted(str(path) for path in source_paths if str(path or "").strip()):
+            path = Path(raw_path)
+            try:
+                stat = path.stat()
+                marker = f"{path.resolve()}|{stat.st_size}|{stat.st_mtime_ns}"
+            except Exception:
+                marker = f"{raw_path}|missing"
+            digest.update(marker.encode("utf-8", errors="replace"))
+            digest.update(b"\n")
+        return "aggregate:" + digest.hexdigest()
+
+    def _mark_saved_source_paths_done(self, project_id: int, source_paths: list[str]) -> None:
+        paths = [Path(str(path)) for path in source_paths if str(path or "").strip()]
+        rows = []
+        for path in paths:
+            try:
+                file_size = path.stat().st_size if path.is_file() else 0
+            except Exception:
+                file_size = 0
+            rows.append({
+                "file_path": str(path),
+                "file_name": path.name,
+                "file_type": "pcap",
+                "file_size": file_size,
+                "observed_date": self._observed_date_for_source_path(path),
+            })
+
+        if not rows:
+            return
+
+        source_root = self._common_source_root(paths)
+        upsert_ingest_items(project_id, source_root, rows)
+        for row in rows:
+            mark_ingest_item(project_id, row["file_path"], "done", "")
+
+    def _common_source_root(self, paths: list[Path]) -> str:
+        parents = [str(path.parent) for path in paths]
+        if not parents:
+            return ""
+        try:
+            return str(Path(os.path.commonpath(parents)))
+        except Exception:
+            return parents[0]
+
+    def _observed_date_for_source_path(self, path: Path) -> str:
+        text = str(path)
+        match = re.search(r"(20\d{6})", text)
+        if match:
+            raw = match.group(1)
+            return f"{raw[:4]}-{raw[4:6]}-{raw[6:8]}"
+        first_seen = str(getattr(self.summary, "first_seen", "") or "")
+        if len(first_seen) >= 10 and first_seen[4] == "-" and first_seen[7] == "-":
+            return first_seen[:10]
+        return ""
+
+    def _refresh_project_after_batch(self) -> None:
+        project_id = self._current_project_id()
+        if project_id is None:
+            return
         if hasattr(self.app, "projects_ui_controller"):
             self.app.projects_ui_controller.sync_project_workspace(project_id)
             self.app.projects_ui_controller.refresh_recent_datasets(project_id)
             self.app.projects_ui_controller.refresh_case_dashboard(project_id)
         if hasattr(self.app, "refresh_activity_profile_ui"):
             self.app.refresh_activity_profile_ui()
-        details = [f"Source id: {source_id}"]
-        if bound_project_ip:
-            details.append(f"Project known IP was set to: {bound_project_ip}")
-        self._info("PCAP", "PCAP analysis saved to active project.", "\n".join(details))
         self._refresh_activity()
 
     def add_summary_to_notes(self):
@@ -1676,7 +2913,7 @@ class PcapPage(QWidget):
                 "",
                 "Communication highlights:",
             ])
-            for row in self.summary.communication_rows[:8]:
+            for row in self.summary.communication_rows or []:
                 lines.append(
                     f"- {row.get('service')}: {row.get('activity_type')} "
                     f"({row.get('confidence')} confidence) - {row.get('evidence')}"
@@ -1709,48 +2946,7 @@ class PcapPage(QWidget):
         ]
 
     def _confirm_project_device_match(self, project_id: int) -> bool:
-        current_ip = (self.summary.likely_device_ip if self.summary else "").strip()
-        if not current_ip:
-            return self._confirm(
-                "PCAP",
-                "Device IP could not be determined.",
-                "The PCAP can still be saved, but ViaNyquist cannot compare it with previous PCAP sources in this project.",
-                ok_text="Save anyway",
-                cancel_text="Cancel",
-            )
-
-        project = get_project(project_id)
-        project_ip = (project.subject_ip if project else "").strip()
-        if project_ip and project_ip.casefold() != current_ip.casefold():
-            ok = self._confirm(
-                "PCAP project IP mismatch",
-                "This PCAP likely describes a different device IP than the active project.",
-                (
-                    f"Project known IP: {project_ip}\n"
-                    f"Current PCAP device IP: {current_ip}\n\n"
-                    "Save only if this capture belongs to the same target/project or if the known project IP should be reviewed."
-                ),
-                ok_text="Save anyway",
-                cancel_text="Cancel",
-            )
-            if not ok:
-                return False
-
-        previous_ips = [ip for ip in list_project_pcap_device_ips(project_id) if ip and ip != current_ip]
-        if not previous_ips:
-            return True
-
-        return self._confirm(
-            "PCAP device mismatch",
-            "This PCAP appears to describe a different device IP than previous PCAP sources in this project.",
-            (
-                f"Current device IP: {current_ip}\n"
-                f"Previous project PCAP device IPs: {', '.join(previous_ips[:8])}\n\n"
-                "Save only if this capture belongs to the same target/project."
-            ),
-            ok_text="Save anyway",
-            cancel_text="Cancel",
-        )
+        return True
 
     def _bind_project_device_ip_if_empty(self, project_id: int) -> str:
         current_ip = (self.summary.likely_device_ip if self.summary else "").strip()

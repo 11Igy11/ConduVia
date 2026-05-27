@@ -16,6 +16,15 @@ from ui.controllers.search_controller import SearchController
 from ui.controllers.projects_ui_controller import ProjectsUIController
 from ui.controllers.dataset_controller import DatasetController
 from ui.controllers.explore_ui_controller import ExploreUIController
+from core.analysis_limits import (
+    EMBEDDED_SUMMARY_TOP_N,
+    SUMMARY_CARD_HEIGHT,
+    SUMMARY_CARD_PADDING,
+    SUMMARY_CARD_WIDTH,
+    SUMMARY_CARDS_WRAP_HEIGHT,
+    SUMMARY_CARDS_WRAP_WIDTH,
+    SUMMARY_VALUE_COL_WIDTH,
+)
 
 from ui.explore_models import FlowTableModel, NumericSortProxy
 from ui.explore_widgets import AITextWorker, CopyableTableView, FlowTableView
@@ -109,6 +118,11 @@ QFrame#ListingHeaderCard,
 QFrame#CaseDashboardCompact,
 QFrame#PanelCard,
 QFrame#FlowDetailsCard,
+QFrame#FlowToolbarCard,
+QFrame#NotesEditorPanel,
+QFrame#NotesEditorContent,
+QFrame#NotesListPanel,
+QFrame#NotesPreviewPanel,
 QFrame#PcapInvestigatorCard,
 QGroupBox {
     background: #ffffff;
@@ -123,6 +137,11 @@ QFrame#ListingHeaderCard QLabel,
 QFrame#CaseDashboardCompact QLabel,
 QFrame#PanelCard QLabel,
 QFrame#PcapInvestigatorCard QLabel,
+QFrame#FlowToolbarCard QLabel,
+QFrame#NotesEditorPanel QLabel,
+QFrame#NotesEditorContent QLabel,
+QFrame#NotesListPanel QLabel,
+QFrame#NotesPreviewPanel QLabel,
 QGroupBox QLabel {
     background: transparent;
     color: #111827;
@@ -222,6 +241,13 @@ QTableView {
     border-color: #cbd5e1;
 }
 
+QTextEdit#SummaryTextBox,
+QPlainTextEdit#SummaryTextBox {
+    background: transparent;
+    color: #334155;
+    border: none;
+}
+
 QLineEdit:focus,
 QTextEdit:focus,
 QPlainTextEdit:focus,
@@ -268,6 +294,11 @@ QTableView {
     gridline-color: #cbd5e1;
     selection-background-color: #3b82f6;
     selection-color: #ffffff;
+}
+
+QTableView QTableCornerButton::section {
+    background: #e2e8f0;
+    border: 1px solid #cbd5e1;
 }
 
 QPushButton {
@@ -321,6 +352,42 @@ QScrollArea QWidget {
     background: transparent;
 }
 
+QSplitter::handle {
+    background: #cbd5e1;
+}
+
+QSplitter::handle:hover {
+    background: #94a3b8;
+}
+
+QScrollBar:vertical,
+QScrollBar:horizontal {
+    background: #f1f5f9;
+    border: 1px solid #cbd5e1;
+    margin: 0;
+}
+
+QScrollBar::handle:vertical,
+QScrollBar::handle:horizontal {
+    background: #cbd5e1;
+    border-radius: 4px;
+    min-height: 24px;
+    min-width: 24px;
+}
+
+QScrollBar::handle:vertical:hover,
+QScrollBar::handle:horizontal:hover {
+    background: #94a3b8;
+}
+
+QScrollBar::add-line,
+QScrollBar::sub-line,
+QScrollBar::add-page,
+QScrollBar::sub-page {
+    background: transparent;
+    border: none;
+}
+
 QFrame#FlowToolbarCard,
 QGroupBox#SummaryCard,
 QGroupBox#FlowDetailsCard,
@@ -336,6 +403,10 @@ QGroupBox#SummaryCard::title,
 QGroupBox#FlowDetailsCard::title {
     background: #ffffff;
     color: #0f172a;
+}
+
+QFrame#PcapInvestigatorCard {
+    border: 1px solid #60a5fa;
 }
 
 QLabel#FlowFieldValue {
@@ -596,6 +667,7 @@ class App(QWidget):
         # 6) Paging controls
         self.btn_load_more.clicked.connect(self.explore_ui_controller.load_next_page)
         self.cmb_page_size.currentTextChanged.connect(self.explore_ui_controller.on_page_size_changed)
+        self.cmb_json_day.currentIndexChanged.connect(self.dataset_controller.on_json_day_changed)
 
         # 7) Explore actions
         self.btn_load.clicked.connect(self.dataset_controller.load_dataset_dialog)
@@ -910,6 +982,8 @@ class App(QWidget):
         # -------- Projects page --------
         projects_page = QWidget()
         projects_layout = QVBoxLayout(projects_page)
+        projects_layout.setContentsMargins(12, 10, 12, 24)
+        projects_layout.setSpacing(12)
 
         self.lbl_active_project = QLabel("Active project: (none)")
 
@@ -942,7 +1016,7 @@ class App(QWidget):
         self.btn_expand_pcap_datasets = QPushButton("Open PCAP list")
         self.btn_expand_project_activity = QPushButton("Open activity log")
         for button in (self.btn_open_new_dataset, self.btn_expand_json_datasets, self.btn_expand_pcap_datasets, self.btn_expand_project_activity):
-            button.setFixedHeight(38)
+            button.setMinimumHeight(42)
 
         self.btn_expand_json_datasets.clicked.connect(
             lambda: self._open_project_rows_dialog(
@@ -959,14 +1033,14 @@ class App(QWidget):
         )
         self.btn_expand_pcap_datasets.clicked.connect(
             lambda: self._open_project_rows_dialog(
-                "Recent PCAP datasets",
+                "Recent PCAP days",
                 [
                     ("name", "Name"),
+                    ("file_count", "Files"),
                     ("packets", "Packets"),
                     ("volume", "Volume"),
                     ("device_ip", "Device IP"),
                     ("period", "Period"),
-                    ("path", "Path"),
                 ],
                 self.project_recent_pcap_rows,
                 on_double_click=self._open_pcap_dataset_row,
@@ -1024,7 +1098,7 @@ class App(QWidget):
         self.case_metric_cards = []
         case_metrics = QHBoxLayout()
         case_metrics.setSpacing(8)
-        for title in ("JSON Datasets", "PCAP", "Findings", "Device IPs"):
+        for title in ("JSON Datasets", "PCAP Days", "Findings", "Device IPs"):
             card = QLabel(f"{title}: 0")
             card.setObjectName("CaseMetricCompact")
             card.setAlignment(Qt.AlignCenter)
@@ -1062,9 +1136,9 @@ class App(QWidget):
         self.lbl_recent_json_detail.setObjectName("Muted")
         self.lbl_recent_json_detail.setWordWrap(True)
 
-        self.lbl_recent_pcap_count = QLabel("0 PCAP datasets")
+        self.lbl_recent_pcap_count = QLabel("0 PCAP days")
         self.lbl_recent_pcap_count.setObjectName("ProfileMetric")
-        self.lbl_recent_pcap_detail = QLabel("No PCAP sources saved for this project.")
+        self.lbl_recent_pcap_detail = QLabel("No PCAP days saved for this project.")
         self.lbl_recent_pcap_detail.setObjectName("Muted")
         self.lbl_recent_pcap_detail.setWordWrap(True)
 
@@ -1089,8 +1163,8 @@ class App(QWidget):
         )
         bottom_grid.addWidget(
             self._project_launcher_card(
-                "Recent PCAP datasets",
-                "Unique PCAP captures saved to the active project.",
+                "Recent PCAP days",
+                "Unique PCAP capture days saved to the active project.",
                 self.lbl_recent_pcap_count,
                 self.lbl_recent_pcap_detail,
                 [self.btn_expand_pcap_datasets],
@@ -1130,6 +1204,7 @@ class App(QWidget):
 
         self.lbl_stats = QLabel("")
         self.lbl_stats.setObjectName("HeaderStatLabel")
+        self.lbl_stats.setWordWrap(False)
 
         self.lbl_loaded = QLabel("")
         self.lbl_loaded.setObjectName("HeaderStatLabel")
@@ -1137,9 +1212,17 @@ class App(QWidget):
         self.lbl_showing = QLabel("")
         self.lbl_showing.setObjectName("HeaderStatLabel")
 
+        self.lbl_json_day = QLabel("Period:")
+        self.lbl_json_day.setObjectName("HeaderStatLabel")
+        self.lbl_json_day.setVisible(False)
+
+        self.cmb_json_day = QComboBox()
+        self.cmb_json_day.setMinimumWidth(230)
+        self.cmb_json_day.setVisible(False)
+
         self.lbl_json_meta = QLabel("")
         self.lbl_json_meta.setObjectName("HeaderStatLabel")
-        self.lbl_json_meta.setWordWrap(True)
+        self.lbl_json_meta.setWordWrap(False)
         self.lbl_json_meta.setTextInteractionFlags(Qt.TextSelectableByMouse)
 
         self.lbl_mode = QLabel("")
@@ -1159,12 +1242,12 @@ class App(QWidget):
         header_card.setObjectName("ExploreHeaderCard")
 
         header_layout = QVBoxLayout(header_card)
-        header_layout.setContentsMargins(14, 14, 14, 14)
-        header_layout.setSpacing(10)
+        header_layout.setContentsMargins(8, 6, 8, 6)
+        header_layout.setSpacing(2)
 
         # row 1
         header_top = QHBoxLayout()
-        header_top.setSpacing(12)
+        header_top.setSpacing(6)
 
         header_top.addWidget(self.lbl_project_banner)
         header_top.addStretch()
@@ -1175,19 +1258,22 @@ class App(QWidget):
         
         # row 2
         header_mid = QHBoxLayout()
-        header_mid.setSpacing(8)
+        header_mid.setSpacing(4)
+        header_mid.setContentsMargins(0, 0, 0, 0)
         header_mid.addWidget(self.lbl_path, 1)
 
         # row 3
         header_bottom = QHBoxLayout()
-        header_bottom.setSpacing(18)
-        header_bottom.addWidget(self.lbl_stats)
-        header_bottom.addWidget(self.lbl_loaded)
-        header_bottom.addWidget(self.lbl_showing)
-        header_bottom.addStretch()
+        header_bottom.setSpacing(4)
+        header_bottom.setContentsMargins(0, 0, 0, 0)
+        header_bottom.addWidget(self.lbl_stats, 1)
+        header_bottom.addSpacing(8)
+        header_bottom.addWidget(self.lbl_json_day)
+        header_bottom.addWidget(self.cmb_json_day)
 
         header_meta = QHBoxLayout()
-        header_meta.setSpacing(8)
+        header_meta.setSpacing(4)
+        header_meta.setContentsMargins(0, 0, 0, 0)
         header_meta.addWidget(self.lbl_json_meta, 1)
 
         header_layout.addLayout(header_top)
@@ -1200,192 +1286,144 @@ class App(QWidget):
         self.search.setMinimumHeight(40)
 
         self.tabs = QTabWidget()
-
-        summary_tab = QWidget()
-        summary_layout = QVBoxLayout(summary_tab)
-        summary_layout.setContentsMargins(8, 8, 8, 8)
-        summary_layout.setSpacing(10)
+        self.tabs.setObjectName("ExploreSubTabs")
+        self.tabs.setDocumentMode(True)
 
         self.btn_ai_summary = QPushButton("Generate AI Summary")
         self.btn_add_ai_to_notes = QPushButton("Add AI to Notes")
         self.btn_add_ai_to_notes.setEnabled(True)
+        for btn in (self.btn_ai_summary, self.btn_add_ai_to_notes):
+            btn.setObjectName("ExploreTabActionButton")
+            btn.setFixedHeight(30)
+            btn.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
 
-        summary_btn_row = QHBoxLayout()
-        summary_btn_row.setSpacing(8)
-        summary_btn_row.addWidget(self.btn_ai_summary)
-        summary_btn_row.addWidget(self.btn_add_ai_to_notes)
-        summary_btn_row.addStretch()
+        summary_tab = QWidget()
+        summary_layout = QVBoxLayout(summary_tab)
+        summary_layout.setContentsMargins(8, 8, 8, 8)
+        summary_layout.setSpacing(8)
 
-        summary_layout.addLayout(summary_btn_row)
+        self.summary_preview_rows: dict[str, list[tuple[QLabel, QLabel]]] = {}
+        self.summary_preview_cards: dict[str, QGroupBox] = {}
+        self.summary_expand_buttons: dict[str, QPushButton] = {}
 
-        summary_split = QSplitter(Qt.Horizontal)
+        summary_row_font = QFont("Consolas", 10)
+        summary_row_font.setStyleHint(QFont.Monospace)
+        summary_row_font.setFixedPitch(True)
 
-        # ----- Left: Dataset summary -----
-        dataset_panel = QWidget()
-        dataset_layout = QVBoxLayout(dataset_panel)
-        dataset_layout.setContentsMargins(0, 0, 0, 0)
-        dataset_layout.setSpacing(8)
+        def _build_summary_card(title: str, key: str) -> QGroupBox:
+            box = QGroupBox(title)
+            box.setObjectName("SummaryCard")
+            box.setFixedSize(SUMMARY_CARD_WIDTH, SUMMARY_CARD_HEIGHT)
+            layout = QVBoxLayout(box)
+            layout.setContentsMargins(8, 8, 8, 8)
+            layout.setSpacing(4)
+
+            rows: list[tuple[QLabel, QLabel]] = []
+            rows_layout = QVBoxLayout()
+            rows_layout.setContentsMargins(0, 0, 0, 0)
+            rows_layout.setSpacing(2)
+            for _row_index in range(EMBEDDED_SUMMARY_TOP_N):
+                row_layout = QHBoxLayout()
+                row_layout.setContentsMargins(0, 0, 0, 0)
+                row_layout.setSpacing(6)
+                lbl_name = QLabel()
+                lbl_name.setObjectName("SummaryPreviewName")
+                lbl_name.setFont(summary_row_font)
+                lbl_name.setWordWrap(False)
+                lbl_name.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+                lbl_name.setMinimumWidth(0)
+                lbl_name.setTextInteractionFlags(Qt.TextSelectableByMouse)
+
+                lbl_count = QLabel()
+                lbl_count.setObjectName("SummaryPreviewCount")
+                lbl_count.setFont(summary_row_font)
+                lbl_count.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+                lbl_count.setFixedWidth(SUMMARY_VALUE_COL_WIDTH)
+                lbl_count.setTextInteractionFlags(Qt.TextSelectableByMouse)
+
+                row_layout.addWidget(lbl_name, 1)
+                row_layout.addWidget(lbl_count, 0)
+                rows.append((lbl_name, lbl_count))
+                rows_layout.addLayout(row_layout)
+
+            self.summary_preview_rows[key] = rows
+            self.summary_preview_cards[key] = box
+            layout.addLayout(rows_layout)
+            layout.addStretch(1)
+
+            expand = QPushButton("Expand table")
+            expand.setObjectName("SummaryExpandButton")
+            expand.setFixedHeight(30)
+            expand.setEnabled(False)
+            expand.clicked.connect(lambda _checked=False, kind=key: self.dataset_controller.expand_dataset_summary(kind))
+            self.summary_expand_buttons[key] = expand
+            expand_row = QHBoxLayout()
+            expand_row.addStretch()
+            expand_row.addWidget(expand)
+            layout.addLayout(expand_row)
+            return box
 
         self.lbl_dataset_summary = QLabel("Dataset summary")
         self.lbl_dataset_summary.setObjectName("SectionTitle")
 
-        dataset_grid = QGridLayout()
-        dataset_grid.setContentsMargins(0, 0, 0, 0)
-        dataset_grid.setHorizontalSpacing(10)
-        dataset_grid.setVerticalSpacing(10)
+        cards_grid = QGridLayout()
+        cards_grid.setContentsMargins(0, 0, 0, 0)
+        cards_grid.setHorizontalSpacing(10)
+        cards_grid.setVerticalSpacing(8)
+        cards_grid.addWidget(_build_summary_card("Top source IPs", "src"), 0, 0)
+        cards_grid.addWidget(_build_summary_card("Top destination IPs", "dst"), 0, 1)
+        cards_grid.addWidget(_build_summary_card("Top protocols", "proto"), 1, 0)
+        cards_grid.addWidget(_build_summary_card("Top applications", "apps"), 1, 1)
 
-        # Top source IPs
-        self.box_top_src = QGroupBox("Top source IPs")
-        self.box_top_src.setObjectName("SummaryCard")
-        box_top_src_layout = QVBoxLayout(self.box_top_src)
+        cards_panel = QWidget()
+        cards_panel.setFixedSize(SUMMARY_CARDS_WRAP_WIDTH, SUMMARY_CARDS_WRAP_HEIGHT)
+        cards_panel.setLayout(cards_grid)
 
-        self.txt_top_src_left = QLabel()
-        self.txt_top_src_right = QLabel()
-
-        for w in (self.txt_top_src_left, self.txt_top_src_right):
-            w.setTextInteractionFlags(Qt.TextSelectableByMouse)
-            w.setWordWrap(False)
-            w.setObjectName("SummaryTextBox")
-
-        self.txt_top_src_left.setAlignment(Qt.AlignTop | Qt.AlignLeft)
-        self.txt_top_src_right.setAlignment(Qt.AlignTop | Qt.AlignRight)
-
-        src_grid = QGridLayout()
-        src_grid.setContentsMargins(6, 0, 6, 0)
-        src_grid.setHorizontalSpacing(18)
-        src_grid.setVerticalSpacing(0)
-        src_grid.addWidget(self.txt_top_src_left, 0, 0)
-        src_grid.addWidget(self.txt_top_src_right, 0, 1)
-        src_grid.setColumnStretch(0, 1)
-        src_grid.setColumnStretch(1, 0)
-
-        box_top_src_layout.addLayout(src_grid)
-
-        # Top destination IPs
-        self.box_top_dst = QGroupBox("Top destination IPs")
-        self.box_top_dst.setObjectName("SummaryCard")
-        box_top_dst_layout = QVBoxLayout(self.box_top_dst)
-
-        self.txt_top_dst_left = QLabel()
-        self.txt_top_dst_right = QLabel()
-
-        for w in (self.txt_top_dst_left, self.txt_top_dst_right):
-            w.setTextInteractionFlags(Qt.TextSelectableByMouse)
-            w.setWordWrap(False)
-            w.setObjectName("SummaryTextBox")
-
-        self.txt_top_dst_left.setAlignment(Qt.AlignTop | Qt.AlignLeft)
-        self.txt_top_dst_right.setAlignment(Qt.AlignTop | Qt.AlignRight)
-
-        dst_grid = QGridLayout()
-        dst_grid.setContentsMargins(6, 0, 6, 0)
-        dst_grid.setHorizontalSpacing(18)
-        dst_grid.setVerticalSpacing(0)
-        dst_grid.addWidget(self.txt_top_dst_left, 0, 0)
-        dst_grid.addWidget(self.txt_top_dst_right, 0, 1)
-        dst_grid.setColumnStretch(0, 1)
-        dst_grid.setColumnStretch(1, 0)
-
-        box_top_dst_layout.addLayout(dst_grid)
-
-        # Top protocols
-        self.box_top_proto = QGroupBox("Top protocols")
-        self.box_top_proto.setObjectName("SummaryCard")
-        box_top_proto_layout = QVBoxLayout(self.box_top_proto)
-
-        self.txt_top_proto_left = QLabel()
-        self.txt_top_proto_right = QLabel()
-
-        for w in (self.txt_top_proto_left, self.txt_top_proto_right):
-            w.setTextInteractionFlags(Qt.TextSelectableByMouse)
-            w.setWordWrap(False)
-            w.setObjectName("SummaryTextBox")
-
-        self.txt_top_proto_left.setAlignment(Qt.AlignTop | Qt.AlignLeft)
-        self.txt_top_proto_right.setAlignment(Qt.AlignTop | Qt.AlignRight)
-
-        proto_grid = QGridLayout()
-        proto_grid.setContentsMargins(6, 0, 6, 0)
-        proto_grid.setHorizontalSpacing(18)
-        proto_grid.setVerticalSpacing(0)
-        proto_grid.addWidget(self.txt_top_proto_left, 0, 0)
-        proto_grid.addWidget(self.txt_top_proto_right, 0, 1)
-        proto_grid.setColumnStretch(0, 1)
-        proto_grid.setColumnStretch(1, 0)
-
-        box_top_proto_layout.addLayout(proto_grid)
-
-        # Top applications
-        self.box_top_apps = QGroupBox("Top applications")
-        self.box_top_apps.setObjectName("SummaryCard")
-        box_top_apps_layout = QVBoxLayout(self.box_top_apps)
-
-        self.txt_top_apps_left = QLabel()
-        self.txt_top_apps_right = QLabel()
-
-        for w in (self.txt_top_apps_left, self.txt_top_apps_right):
-            w.setTextInteractionFlags(Qt.TextSelectableByMouse)
-            w.setWordWrap(False)
-            w.setObjectName("SummaryTextBox")
-
-        self.txt_top_apps_left.setAlignment(Qt.AlignTop | Qt.AlignLeft)
-        self.txt_top_apps_right.setAlignment(Qt.AlignTop | Qt.AlignRight)
-
-        apps_grid = QGridLayout()
-        apps_grid.setContentsMargins(6, 0, 6, 0)
-        apps_grid.setHorizontalSpacing(18)
-        apps_grid.setVerticalSpacing(0)
-        apps_grid.addWidget(self.txt_top_apps_left, 0, 0)
-        apps_grid.addWidget(self.txt_top_apps_right, 0, 1)
-        apps_grid.setColumnStretch(0, 1)
-        apps_grid.setColumnStretch(1, 0)
-
-        box_top_apps_layout.addLayout(apps_grid)
-
-        summary_font = QFont("Consolas", 10)
-        summary_font.setStyleHint(QFont.Monospace)
-
-        for w in (
-            self.txt_top_src_left, self.txt_top_src_right,
-            self.txt_top_dst_left, self.txt_top_dst_right,
-            self.txt_top_proto_left, self.txt_top_proto_right,
-            self.txt_top_apps_left, self.txt_top_apps_right,
-        ):
-            w.setFont(summary_font)
-
-        dataset_grid.addWidget(self.box_top_src, 0, 0)
-        dataset_grid.addWidget(self.box_top_dst, 0, 1)
-        dataset_grid.addWidget(self.box_top_proto, 1, 0)
-        dataset_grid.addWidget(self.box_top_apps, 1, 1)
-
-        dataset_layout.addWidget(self.lbl_dataset_summary)
-        dataset_layout.addLayout(dataset_grid, 1)
-
-        # ----- Right: AI assistant output -----
-        ai_panel = QWidget()
-        ai_layout = QVBoxLayout(ai_panel)
-        ai_layout.setContentsMargins(0, 0, 0, 0)
-        ai_layout.setSpacing(6)
+        dataset_column = QVBoxLayout()
+        dataset_column.setContentsMargins(0, 0, 0, 0)
+        dataset_column.setSpacing(6)
+        dataset_column.addWidget(self.lbl_dataset_summary)
+        dataset_column.addWidget(cards_panel)
 
         self.lbl_ai_summary = QLabel("AI assistant output")
         self.lbl_ai_summary.setObjectName("SectionTitle")
 
         self.txt_ai_summary = QTextEdit()
         self.txt_ai_summary.setReadOnly(True)
-        self.txt_ai_summary.setPlaceholderText("AI summary will appear here...")
-        self.txt_ai_summary.setMinimumWidth(520)
+        self.txt_ai_summary.setPlaceholderText("Generate AI summary to populate this panel.")
 
-        ai_layout.addWidget(self.lbl_ai_summary)
-        ai_layout.addWidget(self.txt_ai_summary, 1)
+        ai_output_card = QFrame()
+        ai_output_card.setObjectName("Card")
+        ai_output_card.setMinimumHeight(SUMMARY_CARDS_WRAP_HEIGHT)
+        ai_output_card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        ai_output_card_layout = QVBoxLayout(ai_output_card)
+        ai_output_card_layout.setContentsMargins(10, 10, 10, 10)
+        ai_output_card_layout.setSpacing(0)
+        ai_output_card_layout.addWidget(self.txt_ai_summary, 1)
 
-        summary_split.addWidget(dataset_panel)
-        summary_split.addWidget(ai_panel)
-        summary_split.setStretchFactor(0, 4)
-        summary_split.setStretchFactor(1, 5)
-        summary_split.setCollapsible(0, False)
-        summary_split.setCollapsible(1, False)
+        ai_column = QVBoxLayout()
+        ai_column.setContentsMargins(0, 0, 0, 0)
+        ai_column.setSpacing(6)
+        ai_column.addWidget(self.lbl_ai_summary)
+        ai_column.addWidget(ai_output_card, 1)
 
-        summary_layout.addWidget(summary_split, 1)
+        dataset_column_widget = QWidget()
+        dataset_column_widget.setLayout(dataset_column)
+        dataset_column_widget.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Expanding)
+        dataset_column_widget.setFixedWidth(SUMMARY_CARDS_WRAP_WIDTH)
+
+        ai_column_widget = QWidget()
+        ai_column_widget.setLayout(ai_column)
+        ai_column_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+
+        summary_content = QHBoxLayout()
+        summary_content.setContentsMargins(0, 0, 0, 0)
+        summary_content.setSpacing(12)
+        summary_content.setAlignment(Qt.AlignTop)
+        summary_content.addWidget(dataset_column_widget, 0)
+        summary_content.addWidget(ai_column_widget, 1)
+
+        summary_layout.addLayout(summary_content, 1)
 
         self.tabs.addTab(summary_tab, "Summary")
 
@@ -1607,6 +1645,17 @@ class App(QWidget):
 
         self.tabs.addTab(self.findings_page, "Findings")
 
+        explore_ai_actions = QHBoxLayout()
+        explore_ai_actions.setContentsMargins(0, 0, 8, 0)
+        explore_ai_actions.setSpacing(6)
+        explore_ai_actions.addWidget(self.btn_ai_summary)
+        explore_ai_actions.addWidget(self.btn_add_ai_to_notes)
+        explore_ai_actions_widget = QWidget()
+        explore_ai_actions_widget.setObjectName("ExploreTabActions")
+        explore_ai_actions_widget.setLayout(explore_ai_actions)
+        explore_ai_actions_widget.setFixedHeight(30)
+        self.tabs.setCornerWidget(explore_ai_actions_widget, Qt.TopRightCorner)
+
         # Notes page
         self.notes_page = NotesPage(self)
         self.txt_notes = self.notes_page.editor
@@ -1667,7 +1716,7 @@ class App(QWidget):
         json_page = QWidget()
         json_layout = QVBoxLayout(json_page)
         json_layout.setContentsMargins(0, 0, 0, 0)
-        json_layout.setSpacing(0)
+        json_layout.setSpacing(4)
         self.json_tabs = QTabWidget()
         self.json_tabs.setDocumentMode(True)
         self.json_tabs.addTab(explore_container, "Explore")
@@ -1735,7 +1784,7 @@ class App(QWidget):
         card = QFrame()
         card.setObjectName("Card")
         layout = QVBoxLayout(card)
-        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setContentsMargins(16, 16, 16, 28)
         layout.setSpacing(10)
 
         lbl_title = QLabel(title)
@@ -1753,9 +1802,10 @@ class App(QWidget):
         detail_label.setWordWrap(False)
         detail_label.setMaximumHeight(24)
         layout.addWidget(detail_label)
-        layout.addStretch()
+        layout.addStretch(1)
 
         button_row = QHBoxLayout()
+        button_row.setContentsMargins(0, 4, 0, 0)
         button_row.addStretch()
         for button in buttons:
             button_row.addWidget(button)
@@ -1783,7 +1833,7 @@ class App(QWidget):
             dlg.resize(1080, 640)
 
         layout = QVBoxLayout(dlg)
-        layout.setContentsMargins(14, 14, 14, 14)
+        layout.setContentsMargins(14, 14, 14, 28)
         layout.setSpacing(10)
 
         hint = QLabel("Expanded project view. Sort columns or right-click to copy values.")
@@ -1838,9 +1888,10 @@ class App(QWidget):
         footer = QHBoxLayout()
         footer.addStretch()
         btn_close = QPushButton("Close")
-        btn_close.setFixedHeight(34)
+        btn_close.setMinimumHeight(42)
         btn_close.clicked.connect(dlg.accept)
         footer.addWidget(btn_close)
+        layout.addSpacing(6)
         layout.addLayout(footer)
         dlg.exec()
 
@@ -1858,15 +1909,76 @@ class App(QWidget):
         self.go_to_json_tab(0)
 
     def _open_pcap_dataset_row(self, row: dict[str, Any], dialog: QDialog) -> None:
+        row = self._resolve_project_pcap_row(row)
+        paths = [str(path) for path in (row.get("paths") or []) if str(path or "").strip()]
+        existing_paths = [path for path in paths if Path(path).is_file()]
+        if existing_paths:
+            dialog.accept()
+            self.go_page(self.IDX_PCAP, self._nav_pcap)
+            if hasattr(self, "pcap_page"):
+                label = str(row.get("name") or "")
+                self.pcap_page._load_pcap_files(existing_paths, label=label)
+            return
+
         path_text = str(row.get("path") or "")
         path = Path(path_text)
         if not path_text or not path.is_file():
+            if row.get("day") or str(row.get("name") or "").strip():
+                self._message_dialog(
+                    "PCAP dataset",
+                    "Saved PCAP day cannot be opened because the original source files are not available at their saved paths.",
+                    str(row.get("name") or row.get("day") or path_text or "-"),
+                    width=560,
+                )
+                return
             self._message_dialog("PCAP dataset", "PCAP file not found.", path_text or "-", width=460)
             return
         dialog.accept()
         self.go_page(self.IDX_PCAP, self._nav_pcap)
         if hasattr(self, "pcap_page"):
             self.pcap_page.load_pcap(str(path))
+
+    def _resolve_project_pcap_row(self, row: dict[str, Any]) -> dict[str, Any]:
+        paths = [str(path) for path in (row.get("paths") or []) if str(path or "").strip()]
+        if any(Path(path).is_file() for path in paths):
+            return row
+
+        project_id = getattr(self, "current_project_id", None)
+        controller = getattr(self, "projects_ui_controller", None)
+        if project_id is None or controller is None or not hasattr(controller, "_project_pcap_day_rows"):
+            return row
+
+        row_day = str(row.get("day") or "").strip()
+        row_name = str(row.get("name") or "").strip()
+        row_path = str(row.get("path") or "").strip()
+        try:
+            candidates = controller._project_pcap_day_rows(project_id)
+        except Exception:
+            return row
+
+        for candidate in candidates:
+            candidate_day = str(candidate.get("day") or "").strip()
+            candidate_name = str(candidate.get("name") or "").strip()
+            labels = {value for value in (row_day, row_name, row_path) if value}
+            if (
+                (row_day and row_day == candidate_day)
+                or (row_name and row_name == candidate_name)
+                or (row_path and row_path == candidate_name)
+                or (candidate_day and candidate_day in labels)
+            ):
+                merged = dict(row)
+                merged.update({
+                    "day": candidate.get("day") or row.get("day"),
+                    "name": candidate.get("name") or row.get("name"),
+                    "paths": candidate.get("paths") or row.get("paths") or [],
+                    "file_count": candidate.get("file_count") or row.get("file_count"),
+                })
+                candidate_path = str(candidate.get("path") or "")
+                row_path_obj = Path(row_path) if row_path else None
+                if candidate_path or not (row_path_obj and row_path_obj.is_file()):
+                    merged["path"] = candidate_path
+                return merged
+        return row
 
     def refresh_activity_profile_ui(self):
         if hasattr(self, "activity_profile_page"):
@@ -2321,7 +2433,7 @@ class App(QWidget):
         self.add_ai_text_to_notes(text)
 
     # ---------- Notes ----------
-    def refresh_notes_ui(self):
+    def refresh_notes_ui(self, *, refresh_profile: bool = True):
         self.txt_notes.blockSignals(True)
 
         if self.current_project_id is None:
@@ -2343,7 +2455,10 @@ class App(QWidget):
         )
         self.txt_notes.blockSignals(False)
 
-        self.refresh_activity_ui()
+        if refresh_profile:
+            self.refresh_activity_ui()
+        else:
+            self.refresh_activity_ui_for_project(self.current_project_id)
 
     def insert_notes_chart(self):
         if self.current_project_id is None:
@@ -2517,25 +2632,19 @@ class App(QWidget):
         self.explore_ui_controller.update_showing()
 
         self.lbl_path.setText("No dataset loaded")
-        self.lbl_stats.setText("")
+        if hasattr(self, "explore_ui_controller"):
+            self.explore_ui_controller.set_json_stats_text("", include_counts=False)
+        elif hasattr(self, "lbl_stats"):
+            self.lbl_stats.setText("")
         if hasattr(self, "lbl_json_meta"):
             self.lbl_json_meta.setText("")
-        self.lbl_showing.setText("")
-        self.lbl_loaded.setText("")
         self.lbl_conv_summary.clear()
         self.lbl_conv_summary.hide()
         self.lbl_mode.clear()
         self.lbl_mode.hide()
 
-        # reset summary cards
-        self.txt_top_src_left.setText("No flows loaded.")
-        self.txt_top_src_right.setText("")
-        self.txt_top_dst_left.setText("No flows loaded.")
-        self.txt_top_dst_right.setText("")
-        self.txt_top_proto_left.setText("No flows loaded.")
-        self.txt_top_proto_right.setText("")
-        self.txt_top_apps_left.setText("No flows loaded.")
-        self.txt_top_apps_right.setText("")
+        for rows in getattr(self, "summary_preview_rows", {}).values():
+            self.dataset_controller.clear_summary_preview_rows(rows)
 
         # reset AI output
         self.txt_ai_summary.clear()

@@ -102,13 +102,13 @@ def _day_activity_html(day_hist: dict[str, Any], day_bytes: dict[str, Any], *, t
     rows = []
     for i, (day, count, total_bytes) in enumerate(items):
 
-        mb = float(total_bytes) / (1024.0 * 1024.0)
+        volume = human_bytes(total_bytes, precision=2)
 
         rows.append(
             "<tr>"
             f"<td style='padding:7px 12px;'>{_esc(_fmt_dt_short(day))}</td>"
             f"<td style='padding:7px 12px;font-weight:700;text-align:right;'>{count}</td>"
-            f"<td style='padding:7px 12px;font-weight:600;text-align:right;'>{mb:.1f} MB</td>"
+            f"<td style='padding:7px 12px;font-weight:600;text-align:right;'>{_esc(volume)}</td>"
             "</tr>"
         )
 
@@ -155,13 +155,13 @@ def _top_active_days_html(day_hist: dict[str, Any], day_bytes: dict[str, Any], *
     rows = []
     for i, (day, count, total_bytes) in enumerate(items):
 
-        mb = float(total_bytes) / (1024.0 * 1024.0)
+        volume = human_bytes(total_bytes, precision=2)
 
         rows.append(
             "<tr>"
             f"<td style='padding:7px 12px;'>{_esc(_fmt_dt_short(day))}</td>"
             f"<td style='padding:7px 12px;font-weight:700;text-align:right;'>{count}</td>"
-            f"<td style='padding:7px 12px;font-weight:600;text-align:right;'>{mb:.1f} MB</td>"
+            f"<td style='padding:7px 12px;font-weight:600;text-align:right;'>{_esc(volume)}</td>"
             "</tr>"
         )
 
@@ -420,8 +420,7 @@ class MiniHistogram24Widget(QWidget):
             if self._mode == "flows":
                 tip = f"{hit:02d}:00 — {v} flows"
             else:
-                mb = v / (1024.0 * 1024.0)
-                tip = f"{hit:02d}:00 — {mb:.1f} MB"
+                tip = f"{hit:02d}:00 — {human_bytes(v, precision=2)}"
 
             QToolTip.showText(e.globalPosition().toPoint(), tip, self)
         else:
@@ -1593,7 +1592,7 @@ class RegistryPage(QWidget):
         dlg.resize(*self._dialog_size(1240, 760))
 
         layout = QVBoxLayout(dlg)
-        layout.setContentsMargins(14, 14, 14, 14)
+        layout.setContentsMargins(14, 14, 14, 28)
         layout.setSpacing(10)
 
         hint = QLabel(
@@ -1635,9 +1634,10 @@ class RegistryPage(QWidget):
         footer.addWidget(self._export_table_button("Export HTML", "Registry dataset", table, "html"))
         footer.addStretch()
         btn_close = QPushButton("Close")
-        btn_close.setFixedHeight(34)
+        btn_close.setMinimumHeight(42)
         btn_close.clicked.connect(dlg.accept)
         footer.addWidget(btn_close)
+        layout.addSpacing(6)
         layout.addLayout(footer)
 
         dlg.exec()
@@ -1678,7 +1678,7 @@ class RegistryPage(QWidget):
 
     def _export_table_button(self, text: str, title: str, table: QTableView, export_format: str) -> QPushButton:
         button = QPushButton(text)
-        button.setFixedHeight(34)
+        button.setMinimumHeight(42)
         button.clicked.connect(lambda: self._export_dataset_table(title, table, export_format))
         return button
 
