@@ -3,6 +3,12 @@ from __future__ import annotations
 from collections import Counter, defaultdict
 from typing import Any
 
+from core.analysis_limits import (
+    MAX_BEHAVIOR_DAY_ROWS,
+    MAX_BEHAVIOR_DOMAIN_ROWS,
+    MAX_BEHAVIOR_SERVICE_ROWS,
+    counter_most_common,
+)
 from core.formatters import human_bytes, safe_int
 from core.timeutils import parse_timestamp
 
@@ -23,7 +29,7 @@ SERVICE_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
 )
 
 
-def build_flow_behavior_profile(flows: list[dict[str, Any]] | None, *, limit: int = 10) -> dict[str, Any]:
+def build_flow_behavior_profile(flows: list[dict[str, Any]] | None, *, limit: int = MAX_BEHAVIOR_SERVICE_ROWS) -> dict[str, Any]:
     accumulator = BehaviorProfileAccumulator()
     accumulator.add_flows(flows or [])
     return accumulator.to_profile(limit=limit)
@@ -55,8 +61,8 @@ class BehaviorProfileAccumulator:
         self.total_bytes += byte_count
 
         domain = _flow_domain(flow)
-        app = str(flow.get("application_name") or "")
-        service = _service_label(domain or app)
+        app = str(flow.get("application_name") or "").strip()
+        service = _service_label(domain) or _service_label(app) or app
         if service:
             self.service_counts[service] += 1
             self.service_bytes[service] += byte_count
@@ -75,7 +81,9 @@ class BehaviorProfileAccumulator:
             self.day_counts[day] += 1
             self.day_bytes[day] += byte_count
 
-    def to_profile(self, *, limit: int = 10) -> dict[str, Any]:
+    def to_profile(self, *, limit: int = MAX_BEHAVIOR_SERVICE_ROWS) -> dict[str, Any]:
+        service_limit = limit if limit > 0 else MAX_BEHAVIOR_SERVICE_ROWS
+        domain_limit = limit if limit > 0 else MAX_BEHAVIOR_DOMAIN_ROWS
         return {
             "flow_count": self.flow_count,
             "timestamp_count": self.timestamp_count,
@@ -86,11 +94,11 @@ class BehaviorProfileAccumulator:
                 self.service_bytes,
                 self.service_examples,
                 self.total_bytes,
-                limit,
+                service_limit,
             ),
-            "domain_rows": _domain_rows(self.domain_counts, self.domain_bytes, self.total_bytes, limit),
+            "domain_rows": _domain_rows(self.domain_counts, self.domain_bytes, self.total_bytes, domain_limit),
             "hour_rows": _hour_rows(self.hour_counts, self.hour_bytes, self.total_bytes),
-            "day_rows": _day_rows(self.day_counts, self.day_bytes, self.total_bytes, limit=31),
+            "day_rows": _day_rows(self.day_counts, self.day_bytes, self.total_bytes, limit=MAX_BEHAVIOR_DAY_ROWS),
             "routine_lines": _routine_lines(self.hour_counts, self.timestamp_count),
         }
 
@@ -136,7 +144,7 @@ def _service_rows(
     limit: int,
 ) -> list[dict[str, Any]]:
     rows = []
-    for label, count in counts.most_common(limit):
+    for label, count in counter_most_common(counts, limit):
         bytes_value = byte_counts[label]
         rows.append({
             "label": label,
@@ -156,7 +164,7 @@ def _domain_rows(
     limit: int,
 ) -> list[dict[str, Any]]:
     rows = []
-    for domain, count in byte_counts.most_common(limit):
+    for domain, count in counter_most_common(byte_counts, limit):
         bytes_value = byte_counts[domain]
         rows.append({
             "label": domain,
@@ -204,7 +212,7 @@ def _day_rows(
             "detail": f"{count:,} flows / {human_bytes(bytes_value, precision=2)}",
             "share": _share(bytes_value, total_bytes),
         })
-    return rows[-limit:]
+    return rows if limit <= 0 else rows[-limit:]
 
 
 def _routine_lines(hour_counts: Counter[int], timestamp_count: int) -> list[str]:

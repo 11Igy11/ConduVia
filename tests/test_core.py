@@ -69,7 +69,10 @@ from core.pcap_analyzer import (
     build_investigator_view,
     merge_pcap_summaries,
 )
-from core.pcap_rollup import is_aggregate_pcap_source, rollup_pcap_sources
+from core.pcap_rollup import collect_device_ip_stats, is_aggregate_pcap_source, rollup_pcap_sources
+from core.period_comparison import build_period_comparison_rows
+from core.exporters.pcap_metadata_exporter import export_pcap_dns_csv, export_pcap_tls_csv
+from core.analysis_limits import MAX_PCAP_FLOWS, MAX_PCAP_READABLE_SAMPLES, PROFILE_CHART_MAX_DAYS
 from core.project_datasets import count_project_json_datasets, list_project_json_dataset_files, load_project_dataset_flows
 from core.project_behavior_index import build_project_behavior_index
 from core.project_identity import identifier_values_match, is_valid_oib, normalize_identifier_value
@@ -1414,7 +1417,7 @@ class PcapAnalyzerTests(unittest.TestCase):
 
         self.assertEqual(merged.total_dns_names, 100)
         self.assertEqual(len(merged.dns_query_counts), 100)
-        self.assertEqual(len(merged.dns_queries), METADATA_TOP_DNS_ROWS)
+        self.assertEqual(len(merged.dns_queries), 100)
 
     def test_pcap_communication_rows_detect_apple_push_metadata(self):
         flows = [
@@ -1774,7 +1777,10 @@ class PcapAnalyzerTests(unittest.TestCase):
             {"label": "PCAP Periods", "count": 1},
             {"label": "Findings", "count": 1},
         ])
-        self.assertEqual(profile["pcap_device_ip_rows"], [{"label": "10.0.0.10", "count": 1}])
+        self.assertEqual(profile["pcap_device_ip_rows"][0]["label"], "10.0.0.10")
+        self.assertGreaterEqual(profile["pcap_device_ip_rows"][0]["count"], 1)
+        self.assertEqual(profile["metrics"][3]["label"], "Device IPs")
+        self.assertEqual(profile["metrics"][3]["value"], len(profile["pcap_device_ip_rows"]))
         self.assertTrue(profile["pcap_day_rows"])
         self.assertEqual(profile["pcap_day_rows"][0]["count"], summary.packet_count)
         self.assertTrue(any(row["label"] == "JSON dataset loaded" for row in profile["activity_type_rows"]))
@@ -1791,6 +1797,70 @@ class PcapAnalyzerTests(unittest.TestCase):
         self.assertIn("MSISDN: 385911234567", rendered)
         self.assertIn("Compare JSON flow datasets", rendered)
         self.assertIn("Recent project activity", rendered)
+
+
+class ProfileComparisonTests(unittest.TestCase):
+    def test_collect_device_ip_stats_counts_all_distinct_ips(self):
+        from types import SimpleNamespace
+
+        sources = [
+            SimpleNamespace(id=1, likely_device_ip="10.0.0.1", period_day="2026-01-01", packet_count=100),
+            SimpleNamespace(id=2, likely_device_ip="10.0.0.2", period_day="2026-01-01", packet_count=80),
+            SimpleNamespace(id=3, likely_device_ip="10.0.0.3", period_day="2026-01-02", packet_count=50),
+            SimpleNamespace(id=4, likely_device_ip="10.0.0.1", period_day="2026-01-02", packet_count=40),
+        ]
+        counter, rows = collect_device_ip_stats(sources)
+
+        self.assertEqual(len(rows), 3)
+        self.assertEqual(len(counter), 3)
+        self.assertEqual({row["label"] for row in rows}, {"10.0.0.1", "10.0.0.2", "10.0.0.3"})
+
+    def test_build_period_comparison_rows_aligns_json_and_pcap_days(self):
+        json_rows = [
+            {"date": "2026-01-01", "count": 100, "bytes": 1_000_000},
+            {"date": "2026-01-02", "count": 50, "bytes": 500_000},
+        ]
+        pcap_rows = [
+            {"date": "2026-01-01", "count": 95, "bytes": 1_020_000},
+            {"date": "2026-01-03", "count": 10, "bytes": 100_000},
+        ]
+        rows = build_period_comparison_rows(json_rows, pcap_rows)
+
+        self.assertEqual(len(rows), 3)
+        self.assertEqual(rows[0]["date"], "2026-01-01")
+        self.assertEqual(rows[0]["status"], "Aligned")
+        self.assertEqual(rows[1]["status"], "JSON only")
+        self.assertEqual(rows[2]["status"], "PCAP only")
+
+    def test_export_pcap_metadata_csv_uses_full_counters(self):
+        with temporary_directory() as tmp:
+            summary = PcapSummary(
+                dns_query_counts={"a.example": 3, "b.example": 1},
+                tls_sni_counts={"tls.example": 2},
+            )
+            dns_path = Path(tmp) / "dns.csv"
+            tls_path = Path(tmp) / "tls.csv"
+            dns_count = export_pcap_dns_csv(str(dns_path), summary)
+            tls_count = export_pcap_tls_csv(str(tls_path), summary)
+            dns_text = dns_path.read_text(encoding="utf-8-sig")
+
+        self.assertEqual(dns_count, 2)
+        self.assertEqual(tls_count, 1)
+        self.assertIn("a.example", dns_text)
+
+    def test_missing_period_days_finds_calendar_gaps(self):
+        from core.period_gaps import format_missing_days_summary, missing_period_days
+
+        gap = missing_period_days(["2026-01-01", "2026-01-03"])
+        self.assertEqual(gap["missing_count"], 1)
+        self.assertEqual(gap["missing_days"], ["2026-01-02"])
+        summary = format_missing_days_summary(gap)
+        self.assertIn("internal gap", summary)
+
+    def test_analysis_limits_use_compact_profile_preview(self):
+        self.assertEqual(PROFILE_CHART_MAX_DAYS, 31)
+        self.assertEqual(MAX_PCAP_FLOWS, 0)
+        self.assertEqual(MAX_PCAP_READABLE_SAMPLES, 0)
 
 
 class AIServiceTests(unittest.TestCase):

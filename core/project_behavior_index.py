@@ -58,7 +58,7 @@ def build_project_behavior_index(
         except Exception:
             failed += 1
 
-    profile = accumulator.to_profile(limit=12)
+    profile = accumulator.to_profile()
     profile["project_id"] = project_id
     profile["json_file_count"] = expected_json_file_count
     profile["loaded_json_file_count"] = total

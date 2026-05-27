@@ -20,6 +20,11 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from core.analysis_limits import (
+    PROFILE_CHART_MAX_DAYS,
+    PROFILE_CHART_MAX_DEVICE_IPS,
+    PROFILE_CHART_PREVIEW_ROWS,
+)
 from core.behavior_profile import build_flow_behavior_profile
 from core.db import get_app_settings, get_project, get_project_behavior_profile
 from core.exporters.profile_exporter import export_activity_profile_html
@@ -135,20 +140,29 @@ class ActivityProfilePage(QWidget):
         self.metric_cards: list[QLabel] = []
         metric_grid = QGridLayout()
         metric_grid.setSpacing(10)
-        for title in ("JSON Datasets", "PCAP Days", "Findings", "Device IPs", "PCAP Volume", "Capture Range"):
+        for title in ("JSON", "PCAP", "Findings", "Device IPs", "PCAP Volume", "Capture Range"):
             card = QLabel(f"{title}\n0")
             card.setObjectName("ProfileMetric")
             card.setAlignment(Qt.AlignCenter)
-            card.setMinimumHeight(74)
+            card.setMinimumHeight(86)
             card.setWordWrap(True)
             self.metric_cards.append(card)
             idx = len(self.metric_cards) - 1
             metric_grid.addWidget(card, idx // 3, idx % 3)
         scroll_layout.addLayout(metric_grid)
 
-        self.evidence_chart = BarChartWidget("Evidence sources", count_list=True)
-        self.device_ip_chart = BarChartWidget("PCAP device IP distribution", count_list=True)
-        self.activity_chart = BarChartWidget("Activity event types", count_list=True, max_rows=6)
+        self.evidence_chart = BarChartWidget(
+            "Evidence sources",
+            count_list=True,
+            value_label_key="badge_label",
+        )
+        self.device_ip_chart = BarChartWidget(
+            "PCAP device IP distribution",
+            count_list=True,
+            max_rows=PROFILE_CHART_MAX_DEVICE_IPS,
+            value_label_key="badge_label",
+        )
+        self.activity_chart = BarChartWidget("Activity event types", count_list=True, max_rows=0)
 
         chart_grid = QGridLayout()
         chart_grid.setSpacing(12)
@@ -162,26 +176,77 @@ class ActivityProfilePage(QWidget):
         behavior_title.setObjectName("SectionTitle")
         scroll_layout.addWidget(behavior_title)
 
-        self.service_chart = BarChartWidget("Service groups by volume", value_key="bytes", value_label_key="bytes_label")
+        expand_row = QHBoxLayout()
+        expand_row.setSpacing(8)
+        self.btn_expand_json_days = QPushButton("Expand JSON days")
+        self.btn_expand_pcap_days = QPushButton("Expand PCAP days")
+        self.btn_expand_compare_days = QPushButton("Expand JSON vs PCAP")
+        self.btn_expand_services = QPushButton("Expand services")
+        self.btn_expand_domains = QPushButton("Expand domains")
+        for button in (
+            self.btn_expand_json_days,
+            self.btn_expand_pcap_days,
+            self.btn_expand_compare_days,
+            self.btn_expand_services,
+            self.btn_expand_domains,
+        ):
+            button.setMinimumHeight(34)
+            button.setEnabled(False)
+            expand_row.addWidget(button)
+        expand_row.addStretch()
+        scroll_layout.addLayout(expand_row)
+        self.btn_expand_json_days.clicked.connect(lambda: self._expand_profile_rows("json_day_rows", "JSON activity by day"))
+        self.btn_expand_pcap_days.clicked.connect(lambda: self._expand_profile_rows("pcap_day_rows", "PCAP volume by day"))
+        self.btn_expand_compare_days.clicked.connect(lambda: self._expand_profile_rows("period_comparison_rows", "JSON vs PCAP by day"))
+        self.btn_expand_services.clicked.connect(lambda: self._expand_behavior_rows("service_rows", "Service groups by volume"))
+        self.btn_expand_domains.clicked.connect(lambda: self._expand_behavior_rows("domain_rows", "Observed domains by volume"))
+
+        self.service_chart = BarChartWidget(
+            "Service groups by volume",
+            value_key="bytes",
+            value_label_key="bytes_label",
+            max_rows=PROFILE_CHART_PREVIEW_ROWS,
+        )
         self.domain_chart = BarChartWidget(
             "Observed domains by volume",
             value_key="bytes",
             value_label_key="bytes_label",
             label_limit=120,
             stacked_labels=True,
-            max_rows=12,
+            max_rows=PROFILE_CHART_PREVIEW_ROWS,
         )
-        self.day_chart = BarChartWidget("JSON activity by day", value_key="count", value_label_key="detail", label_width=110, max_rows=14)
-        self.pcap_day_chart = BarChartWidget("PCAP volume by day", value_key="count", value_label_key="detail", label_width=110, max_rows=14)
+        self.day_chart = BarChartWidget(
+            "JSON activity by day",
+            value_key="count",
+            value_label_key="detail",
+            label_width=110,
+            max_rows=PROFILE_CHART_MAX_DAYS,
+        )
+        self.pcap_day_chart = BarChartWidget(
+            "PCAP volume by day",
+            value_key="count",
+            value_label_key="detail",
+            label_width=110,
+            max_rows=PROFILE_CHART_MAX_DAYS,
+        )
+        self.period_compare_chart = BarChartWidget(
+            "JSON vs PCAP by day",
+            value_key="count",
+            value_label_key="detail",
+            label_width=110,
+            max_rows=PROFILE_CHART_MAX_DAYS,
+            stacked_labels=True,
+            label_limit=80,
+        )
         self.pcap_coverage_chart = BarChartWidget(
             "PCAP period coverage",
             value_key="saved",
             value_label_key="detail",
             label_width=110,
-            max_rows=14,
+            max_rows=PROFILE_CHART_MAX_DAYS,
             count_list=True,
         )
-        self.hour_chart = BarChartWidget("Activity by hour", value_key="count", max_rows=24)
+        self.hour_chart = BarChartWidget("Activity by hour", value_key="count", max_rows=0)
         self.txt_routine = QTextEdit()
         self.txt_routine.setReadOnly(True)
         self.txt_routine.setMinimumHeight(150)
@@ -193,9 +258,10 @@ class ActivityProfilePage(QWidget):
         behavior_grid.addWidget(self.domain_chart, 0, 1)
         behavior_grid.addWidget(self.day_chart, 1, 0)
         behavior_grid.addWidget(self.pcap_day_chart, 1, 1)
-        behavior_grid.addWidget(self.pcap_coverage_chart, 2, 0)
-        behavior_grid.addWidget(self.hour_chart, 2, 1)
-        behavior_grid.addWidget(self._section("Activity rhythm", self.txt_routine), 3, 0, 1, 2)
+        behavior_grid.addWidget(self.period_compare_chart, 2, 0, 1, 2)
+        behavior_grid.addWidget(self.pcap_coverage_chart, 3, 0)
+        behavior_grid.addWidget(self.hour_chart, 3, 1)
+        behavior_grid.addWidget(self._section("Activity rhythm", self.txt_routine), 4, 0, 1, 2)
         behavior_grid.setColumnStretch(0, 1)
         behavior_grid.setColumnStretch(1, 1)
         scroll_layout.addLayout(behavior_grid)
@@ -252,10 +318,19 @@ class ActivityProfilePage(QWidget):
         self._set_metrics(profile.get("metrics") or [])
         self._set_overview(profile)
         self.evidence_chart.set_rows(profile.get("evidence_counts") or [])
-        self.device_ip_chart.set_rows(profile.get("pcap_device_ip_rows") or [], empty_text="No saved PCAP device IPs yet.")
+        self.device_ip_chart.set_rows(
+            profile.get("pcap_device_ip_rows") or [],
+            empty_text="No saved PCAP device IPs yet.",
+            footer_text=(
+                f"{len(profile.get('pcap_device_ip_rows') or [])} unique device IPs across "
+                f"{int(profile.get('pcap_day_count') or 0)} PCAP periods. "
+                "Badge shows packet volume, not IP count."
+            ) if profile.get("pcap_device_ip_rows") else "",
+        )
         self.activity_chart.set_rows(profile.get("activity_type_rows") or [], empty_text="No activity events yet.")
         self._set_behavior_profile()
         self._set_pcap_period_coverage(profile.get("pcap_period_coverage") or [])
+        self._update_profile_expand_buttons(profile)
 
         summary_lines = list(profile.get("summary_lines") or [])
         self.txt_summary.setPlainText("\n".join(summary_lines))
@@ -284,6 +359,7 @@ class ActivityProfilePage(QWidget):
         self.domain_chart.set_rows([], empty_text="No saved project dataset is available for observed domains.")
         self.day_chart.set_rows([], empty_text="No saved JSON activity is available by day.")
         self.pcap_day_chart.set_rows([], empty_text="No saved PCAP activity is available by day.")
+        self.period_compare_chart.set_rows([], empty_text="Load JSON and save PCAP periods to compare daily volume.")
         self.pcap_coverage_chart.set_rows([], empty_text="No indexed PCAP periods for this project.")
         self.hour_chart.set_rows([], empty_text="No saved project dataset is available for hourly activity.")
         self.txt_routine.clear()
@@ -397,8 +473,8 @@ class ActivityProfilePage(QWidget):
 
     def _set_metrics(self, metrics: list[dict[str, Any]]):
         defaults = [
-            {"label": "JSON Datasets", "value": 0, "detail": "loaded"},
-            {"label": "PCAP Days", "value": 0, "detail": "saved"},
+            {"label": "JSON", "value": 0, "detail": "loaded"},
+            {"label": "PCAP", "value": 0, "detail": "saved"},
             {"label": "Findings", "value": 0, "detail": "saved"},
             {"label": "Device IPs", "value": 0, "detail": "from PCAP"},
             {"label": "PCAP Volume", "value": "0 B", "detail": "0 packets"},
@@ -441,7 +517,24 @@ class ActivityProfilePage(QWidget):
             empty_text="Import a PCAP folder with a calendar period to see indexed days.",
         )
 
+    def _apply_saved_day_charts(self) -> None:
+        profile = self.profile or {}
+        self.day_chart.set_rows(
+            profile.get("json_day_rows") or [],
+            empty_text="No saved JSON activity is available by day.",
+        )
+        self.pcap_day_chart.set_rows(
+            profile.get("pcap_day_rows") or [],
+            empty_text="No saved PCAP activity is available by day.",
+        )
+        self.period_compare_chart.set_rows(
+            profile.get("period_comparison_rows") or [],
+            empty_text="Load JSON and save PCAP periods to compare daily volume.",
+        )
+        self._update_profile_expand_buttons(profile)
+
     def _set_behavior_profile(self):
+        self._apply_saved_day_charts()
         project_id = getattr(self.app, "current_project_id", None) if self.app else None
         indexed = get_project_behavior_profile(project_id) if project_id is not None else {}
         if indexed.get("flow_count"):
@@ -543,26 +636,27 @@ class ActivityProfilePage(QWidget):
         if not behavior.get("flow_count"):
             self.service_chart.set_rows([], empty_text="No saved project dataset is available for service groups.")
             self.domain_chart.set_rows([], empty_text="No saved project dataset is available for observed domains.")
-            self.day_chart.set_rows([], empty_text="No saved JSON activity is available by day.")
-            self.pcap_day_chart.set_rows(
-                (self.profile or {}).get("pcap_day_rows") or [],
-                empty_text="No saved PCAP activity is available by day.",
-            )
             self.hour_chart.set_rows([], empty_text="No saved project dataset is available for hourly activity.")
             self._set_behavior_routine_text(behavior)
             return
 
+        service_rows = behavior.get("service_rows") or []
+        domain_rows = behavior.get("domain_rows") or []
         self.service_chart.set_rows(
-            behavior.get("service_rows") or [],
+            service_rows,
             empty_text="No visible service groups found in the loaded dataset.",
         )
+        if len(service_rows) > PROFILE_CHART_PREVIEW_ROWS:
+            self.service_chart.setToolTip(f"{len(service_rows):,} service groups indexed. Chart shows top {PROFILE_CHART_PREVIEW_ROWS} by volume.")
         self.domain_chart.set_rows(
-            behavior.get("domain_rows") or [],
+            domain_rows,
             empty_text="No visible hostnames found in the loaded dataset.",
         )
+        if len(domain_rows) > PROFILE_CHART_PREVIEW_ROWS:
+            self.domain_chart.setToolTip(f"{len(domain_rows):,} domains indexed. Chart shows top {PROFILE_CHART_PREVIEW_ROWS} by volume.")
         self.day_chart.set_rows(
-            behavior.get("day_rows") or [],
-            empty_text="No daily JSON activity found in the loaded dataset.",
+            (self.profile or {}).get("json_day_rows") or behavior.get("day_rows") or [],
+            empty_text="No saved JSON activity is available by day.",
         )
         self.pcap_day_chart.set_rows(
             (self.profile or {}).get("pcap_day_rows") or [],
@@ -573,6 +667,70 @@ class ActivityProfilePage(QWidget):
             empty_text="No timestamps found in the loaded dataset.",
         )
         self._set_behavior_routine_text(behavior)
+        self._update_profile_expand_buttons(self.profile)
+
+    def _update_profile_expand_buttons(self, profile: dict[str, Any] | None = None) -> None:
+        profile = profile or self.profile or {}
+        behavior = self._current_behavior_profile()
+        thresholds = {
+            self.btn_expand_json_days: len(profile.get("json_day_rows") or []),
+            self.btn_expand_pcap_days: len(profile.get("pcap_day_rows") or []),
+            self.btn_expand_compare_days: len(profile.get("period_comparison_rows") or []),
+            self.btn_expand_services: len(behavior.get("service_rows") or []),
+            self.btn_expand_domains: len(behavior.get("domain_rows") or []),
+        }
+        day_limit = PROFILE_CHART_MAX_DAYS
+        preview_limit = PROFILE_CHART_PREVIEW_ROWS
+        for button, count in thresholds.items():
+            limit = preview_limit if button in (self.btn_expand_services, self.btn_expand_domains) else day_limit
+            button.setEnabled(count > limit)
+            if count > limit:
+                button.setToolTip(f"{count:,} rows available — embedded chart shows first {limit}.")
+            else:
+                button.setToolTip("")
+
+    def _current_behavior_profile(self) -> dict[str, Any]:
+        project_id = getattr(self.app, "current_project_id", None) if self.app else None
+        if project_id is None:
+            return {}
+        indexed = get_project_behavior_profile(project_id)
+        if indexed.get("flow_count"):
+            return indexed
+        flows = self._current_flows()
+        if not flows:
+            return indexed
+        return build_flow_behavior_profile(flows)
+
+    def _expand_behavior_rows(self, key: str, title: str) -> None:
+        behavior = self._current_behavior_profile()
+        rows = list(behavior.get(key) or [])
+        if not rows or not hasattr(self.app, "_open_project_rows_dialog"):
+            return
+        if key == "service_rows":
+            columns = [("label", "Service"), ("bytes_label", "Volume"), ("count", "Flows"), ("example", "Example")]
+        else:
+            columns = [("label", "Domain"), ("bytes_label", "Volume"), ("count", "Flows"), ("share", "Share")]
+        self.app._open_project_rows_dialog(title, columns, rows)
+
+    def _expand_profile_rows(self, key: str, title: str) -> None:
+        profile = self.profile or {}
+        rows = list(profile.get(key) or [])
+        if not rows or not hasattr(self.app, "_open_project_rows_dialog"):
+            return
+        if key == "period_comparison_rows":
+            columns = [
+                ("label", "Day"),
+                ("json_mb_label", "JSON"),
+                ("pcap_mb_label", "PCAP"),
+                ("delta_pct", "Δ vol %"),
+                ("status", "Status"),
+                ("detail", "Detail"),
+            ]
+        elif key == "pcap_day_rows":
+            columns = [("label", "Day"), ("count", "Packets"), ("bytes_label", "Volume"), ("detail", "Detail")]
+        else:
+            columns = [("label", "Day"), ("count", "Flows"), ("detail", "Detail")]
+        self.app._open_project_rows_dialog(title, columns, rows)
 
     def _current_flows(self) -> list[dict[str, Any]]:
         if self.app and getattr(self.app, "current_project_id", None) is not None:
@@ -693,9 +851,15 @@ class BarChartWidget(QFrame):
         self.rows.setSpacing(6)
         self.rows.setAlignment(Qt.AlignTop)
         self.layout.addLayout(self.rows, 1)
-        self.setMinimumHeight(180)
+        self.setMinimumHeight(140)
 
-    def set_rows(self, rows: list[dict[str, Any]], *, empty_text: str = "No data yet.") -> None:
+    def set_rows(
+        self,
+        rows: list[dict[str, Any]],
+        *,
+        empty_text: str = "No data yet.",
+        footer_text: str = "",
+    ) -> None:
         self._clear_rows()
         if not rows:
             empty = QLabel(empty_text)
@@ -708,18 +872,21 @@ class BarChartWidget(QFrame):
 
         max_count = max(int(row.get(self.value_key) or 0) for row in rows) or 1
         use_compact_counts = self.compact_single_counts and self.value_key == "count" and max_count <= 1
-        for row in rows[: self.max_rows]:
+        visible_rows = rows if self.max_rows <= 0 else rows[: self.max_rows]
+        hidden_count = max(0, len(rows) - len(visible_rows))
+        for row in visible_rows:
             label = str(row.get("label") or "-")
             count = int(row.get(self.value_key) or 0)
             display_value = str(row.get(self.value_label_key) or count) if self.value_label_key else str(count)
             pct = int(round((count / max_count) * 100)) if max_count else 0
+            tooltip = str(row.get("tooltip") or row.get("detail") or label)
 
             if self.count_list:
-                self._add_count_row(label, display_value)
+                self._add_count_row(label, display_value, tooltip=tooltip)
                 continue
 
             if self.stacked_labels:
-                self._add_stacked_row(label, display_value, pct)
+                self._add_stacked_row(label, display_value, pct, tooltip=tooltip)
                 continue
 
             line = QHBoxLayout()
@@ -743,9 +910,20 @@ class BarChartWidget(QFrame):
             line.addWidget(value)
             self.rows.addLayout(line)
 
+        if hidden_count:
+            footer = QLabel(f"+ {hidden_count:,} more rows ({len(rows):,} total)")
+            footer.setObjectName("Muted")
+            footer.setWordWrap(True)
+            self.rows.addWidget(footer)
+        elif footer_text:
+            footer = QLabel(footer_text)
+            footer.setObjectName("Muted")
+            footer.setWordWrap(True)
+            self.rows.addWidget(footer)
+
         self.rows.addStretch()
 
-    def _add_count_row(self, label: str, display_value: str) -> None:
+    def _add_count_row(self, label: str, display_value: str, *, tooltip: str = "") -> None:
         row = QFrame()
         row.setObjectName("ProfileCountRow")
         row_layout = QHBoxLayout(row)
@@ -754,7 +932,7 @@ class BarChartWidget(QFrame):
 
         name = QLabel(label)
         name.setWordWrap(True)
-        name.setToolTip(label)
+        name.setToolTip(tooltip or label)
         value = QLabel(display_value)
         value.setObjectName("ProfileCountBadge")
         value.setAlignment(Qt.AlignCenter)
@@ -764,12 +942,12 @@ class BarChartWidget(QFrame):
         row_layout.addWidget(value)
         self.rows.addWidget(row)
 
-    def _add_stacked_row(self, label: str, display_value: str, pct: int) -> None:
+    def _add_stacked_row(self, label: str, display_value: str, pct: int, *, tooltip: str = "") -> None:
         label_row = QHBoxLayout()
         label_row.setSpacing(8)
         name = QLabel(label)
         name.setWordWrap(True)
-        name.setToolTip(label)
+        name.setToolTip(tooltip or label)
         value = QLabel(display_value)
         value.setMinimumWidth(72)
         value.setAlignment(Qt.AlignRight | Qt.AlignVCenter)

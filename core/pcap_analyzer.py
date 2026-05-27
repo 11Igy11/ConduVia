@@ -11,6 +11,21 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from core.analysis_limits import (
+    MAX_COMMUNICATION_ROWS,
+    MAX_INVESTIGATOR_SERVICE_ROWS,
+    MAX_PCAP_ARTIFACTS_PER_KIND,
+    MAX_PCAP_ENDPOINT_ROWS,
+    MAX_PCAP_FLOWS,
+    MAX_PCAP_PORT_ROWS,
+    MAX_PCAP_PROTOCOL_ROWS,
+    MAX_PCAP_READABLE_SAMPLES,
+    METADATA_TOP_DNS_ROWS,
+    METADATA_TOP_HTTP_ROWS,
+    METADATA_TOP_TLS_ROWS,
+    counter_most_common,
+    slice_rows,
+)
 from core.formatters import format_pcap_datetime, human_bytes
 
 
@@ -42,10 +57,7 @@ APP_PORT_HINTS = {
 
 PRINTABLE_BYTES = set(bytes(string.printable, "ascii")) | {9, 10, 13}
 
-ARTIFACT_LIMIT_PER_KIND = 300
-METADATA_TOP_DNS_ROWS = 50
-METADATA_TOP_TLS_ROWS = 50
-METADATA_TOP_HTTP_ROWS = 30
+ARTIFACT_LIMIT_PER_KIND = MAX_PCAP_ARTIFACTS_PER_KIND
 
 
 @dataclass
@@ -81,6 +93,8 @@ class PcapSummary:
     hourly_activity: list[dict[str, Any]] = field(default_factory=list)
     flows: list[dict[str, Any]] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
+    total_flows: int = 0
+    total_readable_samples: int = 0
 
 
 @dataclass
@@ -120,6 +134,7 @@ class _PcapAccumulator:
         self.http_hosts: Counter[str] = Counter()
         self.hourly_activity: Counter[str] = Counter()
         self.readable_samples: list[dict[str, Any]] = []
+        self.total_readable_samples = 0
         self.artifacts: dict[tuple[str, str, str], dict[str, Any]] = {}
         self.flow_map: dict[tuple[Any, ...], dict[str, Any]] = {}
 
@@ -297,7 +312,7 @@ class _PcapAccumulator:
             for item in self.artifacts.values()
             if item.get("category") == category and item.get("type") == artifact_type
         )
-        if kind_count >= ARTIFACT_LIMIT_PER_KIND:
+        if ARTIFACT_LIMIT_PER_KIND > 0 and kind_count >= ARTIFACT_LIMIT_PER_KIND:
             return
 
         self.artifacts[key] = {
@@ -316,7 +331,8 @@ class _PcapAccumulator:
         }
 
     def _store_sample(self, packet: _Packet, evidence_type: str, value: str) -> None:
-        if len(self.readable_samples) >= self.max_evidence:
+        self.total_readable_samples += 1
+        if self.max_evidence > 0 and len(self.readable_samples) >= self.max_evidence:
             return
 
         self.readable_samples.append({
@@ -345,11 +361,12 @@ class _PcapAccumulator:
             flow["pcap_payload_preview"] = f"{evidence_type}: {value[:220]}"
 
     def build_summary(self, path: Path, file_format: str) -> PcapSummary:
-        flows = sorted(
+        all_flows = sorted(
             self.flow_map.values(),
             key=lambda f: int(f.get("bidirectional_bytes") or 0),
             reverse=True,
-        )[: self.max_flows]
+        )
+        flows = slice_rows(all_flows, self.max_flows)
 
         likely_device = self.endpoints.most_common(1)[0][0] if self.endpoints else ""
         first_seen = _format_ts(self.first_ts)
@@ -360,10 +377,13 @@ class _PcapAccumulator:
 
         notes = [
             "Encrypted traffic payload is not readable; ViaNyquist reports metadata such as endpoints, ports, DNS and TLS SNI.",
-            "Readable payload samples are limited previews of bytes visible in the capture.",
         ]
+        if self.max_evidence > 0 and self.total_readable_samples > len(self.readable_samples):
+            notes.append(
+                f"Readable payload samples: {len(self.readable_samples):,} shown of {self.total_readable_samples:,} observed."
+            )
 
-        communication_rows = build_communication_rows(flows)
+        communication_rows = build_communication_rows(all_flows)
 
         return PcapSummary(
             file_path=str(path),
@@ -380,15 +400,15 @@ class _PcapAccumulator:
             likely_device_ip=likely_device,
             protocols=[
                 {"protocol": PROTO_NAMES.get(k, str(k)), "number": k, "packets": v}
-                for k, v in self.protocols.most_common(10)
+                for k, v in counter_most_common(self.protocols, MAX_PCAP_PROTOCOL_ROWS)
             ],
             top_endpoints=[
                 {"ip": k, "packets": v}
-                for k, v in self.endpoints.most_common(20)
+                for k, v in counter_most_common(self.endpoints, MAX_PCAP_ENDPOINT_ROWS)
             ],
             top_ports=[
                 {"protocol": PROTO_NAMES.get(k[0], str(k[0])), "port": k[1], "packets": v}
-                for k, v in self.ports.most_common(25)
+                for k, v in counter_most_common(self.ports, MAX_PCAP_PORT_ROWS)
             ],
             total_dns_names=len(self.dns_queries),
             total_tls_sni_hosts=len(self.tls_sni),
@@ -398,15 +418,15 @@ class _PcapAccumulator:
             http_host_counts=dict(self.http_hosts),
             dns_queries=[
                 {"query": k, "count": v}
-                for k, v in self.dns_queries.most_common(METADATA_TOP_DNS_ROWS)
+                for k, v in counter_most_common(self.dns_queries, METADATA_TOP_DNS_ROWS)
             ],
             tls_sni=[
                 {"host": k, "count": v}
-                for k, v in self.tls_sni.most_common(METADATA_TOP_TLS_ROWS)
+                for k, v in counter_most_common(self.tls_sni, METADATA_TOP_TLS_ROWS)
             ],
             http_hosts=[
                 {"host": k, "count": v}
-                for k, v in self.http_hosts.most_common(METADATA_TOP_HTTP_ROWS)
+                for k, v in counter_most_common(self.http_hosts, METADATA_TOP_HTTP_ROWS)
             ],
             readable_samples=self.readable_samples,
             artifacts=sorted(
@@ -420,10 +440,12 @@ class _PcapAccumulator:
             ],
             flows=flows,
             notes=notes,
+            total_flows=len(all_flows),
+            total_readable_samples=self.total_readable_samples,
         )
 
 
-def analyze_pcap(path: str | Path, *, max_flows: int = 5000, max_evidence: int = 300) -> PcapSummary:
+def analyze_pcap(path: str | Path, *, max_flows: int = MAX_PCAP_FLOWS, max_evidence: int = MAX_PCAP_READABLE_SAMPLES) -> PcapSummary:
     p = Path(path)
     if not p.exists() or not p.is_file():
         raise FileNotFoundError(f"PCAP file not found: {p}")
@@ -450,8 +472,8 @@ def analyze_pcap_files(
     paths: list[str | Path],
     *,
     label: str = "",
-    max_flows: int = 5000,
-    max_evidence: int = 300,
+    max_flows: int = MAX_PCAP_FLOWS,
+    max_evidence: int = MAX_PCAP_READABLE_SAMPLES,
 ) -> PcapSummary:
     clean_paths = [Path(path) for path in paths if str(path or "").strip()]
     if not clean_paths:
@@ -484,6 +506,8 @@ def merge_pcap_summaries(summaries: list[PcapSummary], *, label: str = "") -> Pc
     flow_map: dict[tuple[Any, ...], dict[str, Any]] = {}
     artifacts: dict[tuple[str, str, str], dict[str, Any]] = {}
     samples: list[dict[str, Any]] = []
+    total_readable = 0
+    total_flow_candidates = 0
     source_paths: list[str] = []
 
     packet_count = 0
@@ -527,8 +551,14 @@ def merge_pcap_summaries(summaries: list[PcapSummary], *, label: str = "") -> Pc
         for row in summary.hourly_activity:
             hourly[str(row.get("hour") or "")] += _safe_int(row.get("packets") or row.get("count"))
 
-        if len(samples) < 300:
-            samples.extend(summary.readable_samples[: max(0, 300 - len(samples))])
+        total_readable += int(getattr(summary, "total_readable_samples", 0) or len(summary.readable_samples or []))
+        total_flow_candidates += int(getattr(summary, "total_flows", 0) or len(summary.flows or []))
+        if MAX_PCAP_READABLE_SAMPLES > 0 and len(samples) < MAX_PCAP_READABLE_SAMPLES:
+            samples.extend(
+                summary.readable_samples[: max(0, MAX_PCAP_READABLE_SAMPLES - len(samples))]
+            )
+        else:
+            samples.extend(summary.readable_samples or [])
 
         for artifact in summary.artifacts:
             key = (
@@ -567,7 +597,9 @@ def merge_pcap_summaries(summaries: list[PcapSummary], *, label: str = "") -> Pc
             existing["bidirectional_first_seen_ms"] = _min_time_text(existing.get("bidirectional_first_seen_ms"), flow.get("bidirectional_first_seen_ms"))
             existing["bidirectional_last_seen_ms"] = _max_time_text(existing.get("bidirectional_last_seen_ms"), flow.get("bidirectional_last_seen_ms"))
 
-    flows = sorted(flow_map.values(), key=lambda row: _safe_int(row.get("bidirectional_bytes")), reverse=True)[:5000]
+    flow_map_values = sorted(flow_map.values(), key=lambda row: _safe_int(row.get("bidirectional_bytes")), reverse=True)
+    total_flows = len(flow_map_values)
+    flows = slice_rows(flow_map_values, MAX_PCAP_FLOWS)
     first_seen = _format_ts(first_ts)
     last_seen = _format_ts(last_ts)
     duration = max(0.0, (last_ts or 0) - (first_ts or 0)) if first_ts is not None and last_ts is not None else 0.0
@@ -590,16 +622,16 @@ def merge_pcap_summaries(summaries: list[PcapSummary], *, label: str = "") -> Pc
         likely_device_ip=device_votes.most_common(1)[0][0] if device_votes else "",
         protocols=[
             {"protocol": protocol or PROTO_NAMES.get(number, str(number)), "number": number, "packets": packets}
-            for (protocol, number), packets in protocols.most_common(10)
+            for (protocol, number), packets in counter_most_common(protocols, MAX_PCAP_PROTOCOL_ROWS)
         ],
         top_endpoints=[
             {"ip": ip, "packets": packets}
-            for ip, packets in endpoints.most_common(20)
+            for ip, packets in counter_most_common(endpoints, MAX_PCAP_ENDPOINT_ROWS)
             if ip
         ],
         top_ports=[
             {"protocol": protocol, "port": port, "packets": packets}
-            for (protocol, port), packets in ports.most_common(25)
+            for (protocol, port), packets in counter_most_common(ports, MAX_PCAP_PORT_ROWS)
         ],
         total_dns_names=len(dns),
         total_tls_sni_hosts=len(tls),
@@ -609,35 +641,36 @@ def merge_pcap_summaries(summaries: list[PcapSummary], *, label: str = "") -> Pc
         http_host_counts=dict(http),
         dns_queries=[
             {"query": query, "count": count}
-            for query, count in dns.most_common(METADATA_TOP_DNS_ROWS)
+            for query, count in counter_most_common(dns, METADATA_TOP_DNS_ROWS)
             if query
         ],
         tls_sni=[
             {"host": host, "count": count}
-            for host, count in tls.most_common(METADATA_TOP_TLS_ROWS)
+            for host, count in counter_most_common(tls, METADATA_TOP_TLS_ROWS)
             if host
         ],
         http_hosts=[
             {"host": host, "count": count}
-            for host, count in http.most_common(METADATA_TOP_HTTP_ROWS)
+            for host, count in counter_most_common(http, METADATA_TOP_HTTP_ROWS)
             if host
         ],
-        readable_samples=samples[:300],
+        readable_samples=slice_rows(samples, MAX_PCAP_READABLE_SAMPLES),
         artifacts=sorted(
             artifacts.values(),
             key=lambda item: (str(item.get("category", "")), str(item.get("type", "")), -_safe_int(item.get("count"))),
         ),
-        communication_rows=build_communication_rows(flows),
+        communication_rows=build_communication_rows(flow_map_values),
         hourly_activity=[
             {"hour": hour, "packets": packets}
             for hour, packets in sorted(hourly.items())
             if hour
         ],
         flows=flows,
+        total_flows=max(total_flows, total_flow_candidates),
+        total_readable_samples=max(total_readable, len(samples)),
         notes=[
             f"Aggregated PCAP view built from {len(items):,} files.",
             "Encrypted traffic payload is not readable; ViaNyquist reports metadata such as endpoints, ports, DNS and TLS SNI.",
-            "Readable payload samples are limited previews of bytes visible in the capture.",
         ],
     )
 
@@ -662,7 +695,7 @@ def _max_time_text(left: Any, right: Any) -> str:
     return str(left if left_ts >= right_ts else right)
 
 
-def build_communication_rows(flows: list[dict[str, Any]], *, limit: int = 80) -> list[dict[str, Any]]:
+def build_communication_rows(flows: list[dict[str, Any]], *, limit: int = MAX_COMMUNICATION_ROWS) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for flow in flows:
         service = _communication_service(flow)
@@ -694,7 +727,7 @@ def build_communication_rows(flows: list[dict[str, Any]], *, limit: int = 80) ->
             str(row.get("service") or ""),
         )
     )
-    return rows[:limit]
+    return rows[:limit] if limit > 0 else rows
 
 
 def build_investigator_view(summary: PcapSummary) -> dict[str, Any]:
@@ -952,7 +985,7 @@ def _build_service_rows(summary: PcapSummary) -> list[dict[str, Any]]:
 
     rows = [
         {"service": service, "count": count, "example": examples.get(service, "")}
-        for service, count in counts.most_common(12)
+        for service, count in counter_most_common(counts, MAX_INVESTIGATOR_SERVICE_ROWS)
     ]
     return _with_share(rows, "count")
 

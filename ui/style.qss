@@ -111,12 +111,35 @@ QFrame#ProfileCountRow {
     border-radius: 8px;
 }
 
+QFrame#ProfileCountRow:hover {
+    background: #273549;
+    border-color: #475569;
+}
+
+QLabel#ChartLinkLabel {
+    color: #dbeafe;
+}
+
 QLabel#ProfileCountBadge {
     background: #3b82f6;
     color: #ffffff;
     border-radius: 8px;
     padding: 4px 10px;
     font-weight: 700;
+}
+
+QPushButton#ChartLinkButton {
+    color: #93c5fd;
+    text-align: left;
+    padding: 7px 10px;
+    border: none;
+    background: transparent;
+}
+
+QPushButton#ChartLinkButton:hover {
+    color: #dbeafe;
+    background: #1e293b;
+    border-radius: 6px;
 }
 
 QLabel#RegistryStrongTitle {
@@ -195,6 +218,34 @@ QPushButton:disabled {
     color: #7c8aa0;
     background: #243244;
     border: 1px solid #3b4a5d;
+}
+
+QPushButton#ExploreTabActionButton {
+    padding: 4px 10px;
+    font-size: 12px;
+    min-height: 0;
+    margin: 0;
+}
+
+QPushButton#SummaryExpandButton {
+    padding: 4px 8px;
+    font-size: 11px;
+    min-height: 0;
+    margin: 0;
+}
+
+QTabWidget#ExploreSubTabs QTabBar {
+    min-height: 36px;
+}
+
+QTabWidget#ExploreSubTabs QTabBar::tab {
+    padding: 6px 14px;
+    margin-bottom: 0;
+}
+
+QWidget#ExploreTabActions {
+    margin: 0;
+    padding: 0;
 }
 
 /* Primary */
@@ -453,6 +504,26 @@ QTextEdit#SummaryTextBox {
     color: #d1d5db;
 }
 
+QLabel#SummaryTextBox {
+    padding: 0 4px;
+    font-family: Consolas, "Courier New", monospace;
+    font-size: 11px;
+    color: #d1d5db;
+}
+
+QLabel#SummaryPreviewName,
+QLabel#SummaryPreviewCount {
+    padding: 0;
+    font-family: Consolas, "Courier New", monospace;
+    font-size: 11px;
+    color: #d1d5db;
+    background: transparent;
+}
+
+QLabel#SummaryPreviewCount {
+    padding-right: 2px;
+}
+
 /* =========================
    SPLITTER
    ========================= */
@@ -566,20 +637,31 @@ QFrame#ExploreHeaderCard {
     border-radius: 14px;
 }
 
+QFrame#ExploreHeaderCard QLabel {
+    margin: 0;
+    padding: 0;
+}
+
 QLabel#HeaderProjectLabel {
-    font-size: 18px;
+    font-size: 16px;
     font-weight: 600;
     color: #f4f7fb;
+    margin: 0;
+    padding: 0;
 }
 
 QLabel#HeaderPathLabel {
-    font-size: 14px;
+    font-size: 13px;
     color: #d7e3f4;
+    margin: 0;
+    padding: 0;
 }
 
 QLabel#HeaderStatLabel {
-    font-size: 13px;
+    font-size: 12px;
     color: #c6d4e8;
+    margin: 0;
+    padding: 0;
 }
 
 QLabel#PcapLoadingStatus {
@@ -738,6 +820,11 @@ QDialog QComboBox {
 QDialog QPushButton {
     min-width: 110px;
     min-height: 36px;
+    padding: 6px 14px;
+}
+
+QDialogButtonBox {
+    margin-top: 2px;
 }
 
 /* ---------- Listing header card ---------- */

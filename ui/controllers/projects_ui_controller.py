@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import QListWidgetItem
 
 from core.db import (
@@ -392,14 +392,27 @@ class ProjectsUIController:
         self.app.lbl_active_project.setText(f"Active project: {p.name}")
         self.app.lbl_project_banner.setText(f"Project: {p.name}")
 
-        self.refresh_recent_datasets(p.id)
-        self.refresh_case_dashboard(p.id)
-        self.app.refresh_findings_ui()
-        self.app.refresh_notes_ui()
-        self.app.refresh_activity_profile_ui()
-        self.sync_project_workspace(p.id)
         if hasattr(self.app, "dataset_controller"):
-            self.app.dataset_controller.refresh_project_behavior_index(p.id)
+            controller = self.app.dataset_controller
+            controller.sync_json_periods_from_project(p.id)
+            controller.sync_pcap_periods_from_project(p.id)
+
+        self.app.refresh_findings_ui()
+        self.app.refresh_notes_ui(refresh_profile=False)
+
+        QTimer.singleShot(0, lambda pid=p.id: self._complete_project_activation(pid))
+
+    def _complete_project_activation(self, project_id: int) -> None:
+        if self.app.current_project_id != project_id:
+            return
+
+        self.refresh_recent_datasets(project_id)
+        self.refresh_case_dashboard(project_id)
+        if hasattr(self.app, "refresh_activity_profile_ui"):
+            self.app.refresh_activity_profile_ui()
+        self.sync_project_workspace(project_id)
+        if hasattr(self.app, "dataset_controller"):
+            self.app.dataset_controller.refresh_project_behavior_index(project_id)
 
     def sync_project_workspace(self, project_id: int | None) -> None:
         if project_id is None:

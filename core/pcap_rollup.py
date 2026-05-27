@@ -112,6 +112,48 @@ def _rollup_day_group(group: list[Any]) -> tuple[int, int, Counter[str]]:
     return packets, wire_bytes, ips
 
 
+def collect_device_ip_stats(sources: list[Any]) -> tuple[Counter[str], list[dict[str, Any]]]:
+    """Distinct likely device IPs with period counts; includes legacy per-file rows."""
+    period_ips: Counter[str] = Counter()
+    packet_weight: Counter[str] = Counter()
+    all_ips: set[str] = set()
+
+    by_day: dict[str, list[Any]] = {}
+    for source in sources or []:
+        ip = str(getattr(source, "likely_device_ip", "") or "").strip()
+        if ip:
+            all_ips.add(ip)
+        by_day.setdefault(pcap_day_key(source) or f"row-{getattr(source, 'id', 0)}", []).append(source)
+
+    for group in by_day.values():
+        _packets, _wire_bytes, day_ips = _rollup_day_group(group)
+        for ip, count in day_ips.items():
+            period_ips[ip] += count
+            best = max(
+                group,
+                key=lambda item: int(getattr(item, "packet_count", 0) or 0),
+            )
+            if str(getattr(best, "likely_device_ip", "") or "").strip() == ip:
+                packet_weight[ip] += int(getattr(best, "packet_count", 0) or 0)
+
+    rows = []
+    for ip in sorted(all_ips):
+        period_count = int(period_ips.get(ip, 0) or 0)
+        packet_count = int(packet_weight.get(ip, 0) or 0)
+        rows.append({
+            "label": ip,
+            "count": packet_count,
+            "periods": period_count or 1,
+            "badge_label": f"{packet_count:,} pkts",
+            "detail": f"Seen in {period_count or 1} PCAP period(s) · {packet_count:,} packets",
+            "packets": packet_count,
+            "tooltip": f"{ip} — {period_count or 1} period(s), {packet_count:,} packets",
+        })
+    rows.sort(key=lambda row: (-int(row.get("packets") or 0), str(row.get("label") or "")))
+    counter = Counter({row["label"]: int(row["count"]) for row in rows})
+    return counter, rows
+
+
 def pcap_day_key(source: Any) -> str:
     period_day = str(getattr(source, "period_day", "") or "").strip()
     if period_day and period_day != "undated":

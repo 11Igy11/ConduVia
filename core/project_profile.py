@@ -7,6 +7,7 @@ from typing import Any
 from core.db import (
     DEFAULT_DB_PATH,
     get_project,
+    get_project_behavior_profile,
     list_activity,
     list_findings,
     list_pcap_sources,
@@ -15,7 +16,9 @@ from core.db import (
 from core.evidence_policy import format_period_day_label
 from core.formatters import human_bytes
 from core.db import list_ingest_items, list_saved_pcap_period_days
-from core.pcap_rollup import pcap_day_key, rollup_pcap_sources
+from core.analysis_limits import MAX_PROFILE_ACTIVITY_EVENTS, MAX_PROFILE_TIMELINE_LINES
+from core.period_comparison import build_period_comparison_rows
+from core.pcap_rollup import collect_device_ip_stats, pcap_day_key, rollup_pcap_sources
 from core.project_datasets import count_project_json_datasets, list_project_json_dataset_files
 from core.project_identity import project_identifiers_text, subject_display_label, target_display_label
 from core.timeutils import parse_timestamp
@@ -36,6 +39,8 @@ def build_project_activity_profile(
             "evidence_counts": [],
             "pcap_device_ip_rows": [],
             "activity_type_rows": [],
+            "period_comparison_rows": [],
+            "json_day_rows": [],
             "capture_range": {"first_seen": "", "last_seen": "", "label": "-"},
             "dataset_count": 0,
             "pcap_count": 0,
@@ -55,10 +60,12 @@ def build_project_activity_profile(
     dataset_count = count_project_json_datasets(project_id, limit=50000, db_path=db_path)
     pcaps = list_pcap_sources(project_id, limit=50000, db_path=db_path)
     findings = list_findings(project_id, limit=50000, db_path=db_path)
-    activity = list_activity(project_id, limit=200, db_path=db_path)
+    activity = list_activity(project_id, limit=50000 if MAX_PROFILE_ACTIVITY_EVENTS <= 0 else MAX_PROFILE_ACTIVITY_EVENTS, db_path=db_path)
 
     pcap_rollup = rollup_pcap_sources(pcaps)
-    pcap_ips = pcap_rollup.device_ips
+    pcap_ips, pcap_device_ip_rows = collect_device_ip_stats(pcaps)
+    behavior_index = get_project_behavior_profile(project_id, db_path=db_path) or {}
+    json_day_rows = list(behavior_index.get("day_rows") or [])
     capture_starts = [src.first_seen for src in pcaps if src.first_seen]
     capture_ends = [src.last_seen for src in pcaps if src.last_seen]
     total_packets = pcap_rollup.total_packets
@@ -73,13 +80,16 @@ def build_project_activity_profile(
     undated_pcap_count = pcap_rollup.undated_day_count
     pcap_day_count = pcap_rollup.pcap_day_count
 
+    json_day_count = len(json_day_rows)
+    pcap_file_count = len(pcaps)
+
     summary_lines = [
         "Project Activity Profile",
         f"- Case subject: {subject_display_label(project)}",
         f"- Known identifiers: {project_identifiers_text(project)}",
         f"- Target fallback: {target_display_label(project)}",
-        f"- JSON datasets: {dataset_count}",
-        f"- PCAP days: {pcap_day_count}",
+        f"- JSON datasets: {dataset_count:,} files / {json_day_count:,} days",
+        f"- PCAP periods: {pcap_file_count:,} files / {pcap_day_count:,} days",
         f"- Findings: {len(findings)}",
     ]
 
@@ -135,15 +145,25 @@ def build_project_activity_profile(
             "detail": f"{undated_pcap_packets:,} packets / {human_bytes(undated_pcap_bytes, precision=2)}",
         })
 
+    period_comparison_rows = build_period_comparison_rows(json_day_rows, pcap_day_rows)
+
     return {
         "summary_lines": summary_lines,
         "timeline_lines": timeline_lines,
         "recommendation_lines": recommendation_lines,
         "metrics": [
-            {"label": "JSON Files", "value": dataset_count, "detail": "indexed in project"},
-            {"label": "PCAP Periods", "value": pcap_day_count, "detail": f"{pcap_rollup.pcap_source_rows:,} saved analysis rows"},
+            {
+                "label": "JSON",
+                "value": f"{dataset_count:,} files / {json_day_count:,} days",
+                "detail": f"{dataset_count:,} JSON files across {json_day_count:,} activity days",
+            },
+            {
+                "label": "PCAP",
+                "value": f"{pcap_file_count:,} files / {pcap_day_count:,} days",
+                "detail": f"{pcap_file_count:,} saved PCAP sources across {pcap_day_count:,} daily periods",
+            },
             {"label": "Findings", "value": len(findings), "detail": "saved"},
-            {"label": "Device IPs", "value": len(pcap_ips), "detail": "from saved PCAP"},
+            {"label": "Device IPs", "value": len(pcap_device_ip_rows), "detail": f"{len(pcap_device_ip_rows)} unique IPs across {pcap_day_count} PCAP periods"},
         ],
         "dataset_count": dataset_count,
         "pcap_count": len(pcaps),
@@ -151,17 +171,16 @@ def build_project_activity_profile(
         "finding_count": len(findings),
         "pcap_device_ips": dict(pcap_ips),
         "evidence_counts": [
-            {"label": "JSON Files", "count": dataset_count},
-            {"label": "PCAP Periods", "count": pcap_day_count},
-            {"label": "Findings", "count": len(findings)},
+            {"label": "JSON", "count": dataset_count, "badge_label": f"{dataset_count:,} / {json_day_count:,} d"},
+            {"label": "PCAP", "count": pcap_file_count, "badge_label": f"{pcap_file_count:,} / {pcap_day_count:,} d"},
+            {"label": "Findings", "count": len(findings), "badge_label": str(len(findings))},
         ],
-        "pcap_device_ip_rows": [
-            {"label": ip, "count": count}
-            for ip, count in pcap_ips.most_common()
-        ],
+        "pcap_device_ip_rows": pcap_device_ip_rows,
         "activity_type_rows": _activity_type_rows(activity_types, pcap_day_count=pcap_day_count),
         "pcap_day_rows": pcap_day_rows,
         "pcap_period_coverage": pcap_period_coverage,
+        "period_comparison_rows": period_comparison_rows,
+        "json_day_rows": json_day_rows,
         "capture_range": {
             "first_seen": capture_start,
             "last_seen": capture_end,
@@ -184,7 +203,8 @@ def format_project_activity_profile(profile: dict[str, Any]) -> str:
 
     if timeline:
         lines.extend(["", "Recent project activity:"])
-        lines.extend(timeline[:12])
+        visible_timeline = timeline if MAX_PROFILE_TIMELINE_LINES <= 0 else timeline[:MAX_PROFILE_TIMELINE_LINES]
+        lines.extend(visible_timeline)
 
     return "\n".join(lines)
 
@@ -228,14 +248,14 @@ def _pcap_period_coverage_rows(project_id: int, *, db_path: Path) -> list[dict[s
 def _counter_label(values: Counter[str]) -> str:
     if not values:
         return "-"
-    return ", ".join(f"{value} ({count})" for value, count in values.most_common(5))
+    return ", ".join(f"{value} ({count})" for value, count in values.most_common())
 
 
 def _activity_type_rows(activity_types: Counter[str], *, pcap_day_count: int) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     pcap_events = int(activity_types.get("pcap_saved") or 0)
     if pcap_day_count:
-        rows.append({"label": "PCAP periods saved", "count": pcap_day_count})
+        rows.append({"label": "PCAP periods saved", "count": pcap_day_count, "detail": f"{pcap_day_count} daily PCAP periods in project (not IP count)"})
     if pcap_events and pcap_events != pcap_day_count:
         rows.append({"label": "PCAP save log events", "count": pcap_events})
     for event_type, count in activity_types.most_common():

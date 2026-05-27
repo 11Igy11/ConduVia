@@ -748,6 +748,34 @@ def mark_ingest_item(
         )
 
 
+def mark_ingest_items_batch(
+    project_id: int,
+    file_paths: Iterable[str],
+    status: str,
+    message: str = "",
+    db_path: Path = DEFAULT_DB_PATH,
+) -> None:
+    status = (status or "").strip().lower()
+    if not status:
+        return
+
+    paths = [str(path or "").strip() for path in file_paths if str(path or "").strip()]
+    if not paths:
+        return
+
+    with _connect(db_path) as con:
+        con.executemany(
+            """
+            UPDATE ingest_items
+            SET status = ?,
+                message = ?,
+                updated_at = strftime('%Y-%m-%d %H:%M:%f', 'now')
+            WHERE project_id = ? AND file_path = ?;
+            """,
+            [(status, message or "", project_id, path) for path in paths],
+        )
+
+
 def list_ingest_items(
     project_id: int,
     *,

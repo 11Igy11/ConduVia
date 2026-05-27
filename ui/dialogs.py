@@ -1,22 +1,54 @@
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
+    QAbstractScrollArea,
     QDialog,
     QDialogButtonBox,
-    QVBoxLayout,
     QFormLayout,
     QHBoxLayout,
+    QLineEdit,
     QPushButton,
     QLabel,
-    QLineEdit,
     QComboBox,
     QPlainTextEdit,
     QFileDialog,
     QMessageBox,
     QScrollArea,
+    QSizePolicy,
+    QVBoxLayout,
     QWidget,
 )
 
 from core.project_identity import is_valid_oib
+
+# Extra bottom margin keeps dialog action buttons clear of the window edge.
+DIALOG_MARGINS = (20, 18, 20, 28)
+DIALOG_BUTTON_MIN_HEIGHT = 42
+
+
+def _apply_dialog_layout(layout: QVBoxLayout) -> None:
+    layout.setContentsMargins(*DIALOG_MARGINS)
+    layout.setSpacing(14)
+
+
+def _style_dialog_button(button: QPushButton, *, destructive: bool = False) -> None:
+    button.setMinimumHeight(DIALOG_BUTTON_MIN_HEIGHT)
+    button.setMinimumWidth(110)
+    if destructive:
+        button.setObjectName("DangerButton")
+
+
+def _style_dialog_buttons(buttons: QDialogButtonBox, *, destructive_ok: bool = False) -> None:
+    for button in buttons.buttons():
+        is_ok = buttons.buttonRole(button) in {
+            QDialogButtonBox.AcceptRole,
+            QDialogButtonBox.YesRole,
+        }
+        _style_dialog_button(button, destructive=destructive_ok and is_ok)
+
+
+def _add_dialog_buttons(layout: QVBoxLayout, buttons: QDialogButtonBox) -> None:
+    layout.addSpacing(6)
+    layout.addWidget(buttons)
 
 
 def message_dialog(
@@ -32,8 +64,7 @@ def message_dialog(
     dlg.setFixedWidth(width)
 
     layout = QVBoxLayout(dlg)
-    layout.setContentsMargins(18, 16, 18, 16)
-    layout.setSpacing(14)
+    _apply_dialog_layout(layout)
 
     lbl_message = QLabel(message)
     lbl_message.setWordWrap(True)
@@ -50,11 +81,10 @@ def message_dialog(
 
     buttons = QDialogButtonBox()
     btn_ok = buttons.addButton("OK", QDialogButtonBox.AcceptRole)
-    btn_ok.setFixedHeight(40)
-    btn_ok.setMinimumWidth(110)
+    _style_dialog_button(btn_ok)
 
     buttons.accepted.connect(dlg.accept)
-    layout.addWidget(buttons)
+    _add_dialog_buttons(layout, buttons)
 
     dlg.exec()
 
@@ -72,8 +102,7 @@ def choice_dialog(
     dlg.setFixedWidth(width)
 
     layout = QVBoxLayout(dlg)
-    layout.setContentsMargins(18, 16, 18, 16)
-    layout.setSpacing(14)
+    _apply_dialog_layout(layout)
 
     lbl = QLabel(message)
     lbl.setWordWrap(True)
@@ -88,8 +117,7 @@ def choice_dialog(
 
     for choice in choices:
         btn = QPushButton(choice)
-        btn.setFixedHeight(40)
-        btn.setMinimumWidth(110)
+        _style_dialog_button(btn)
 
         def _make_handler(c=choice):
             def handler():
@@ -101,11 +129,11 @@ def choice_dialog(
         btn_row.addWidget(btn)
 
     cancel_btn = QPushButton("Cancel")
-    cancel_btn.setFixedHeight(40)
-    cancel_btn.setMinimumWidth(110)
+    _style_dialog_button(cancel_btn)
     cancel_btn.clicked.connect(dlg.reject)
     btn_row.addWidget(cancel_btn)
 
+    layout.addSpacing(6)
     layout.addLayout(btn_row)
 
     ok = dlg.exec() == QDialog.Accepted
@@ -125,8 +153,7 @@ def text_input_dialog(
     dlg.setFixedWidth(width)
 
     layout = QVBoxLayout(dlg)
-    layout.setContentsMargins(18, 16, 18, 16)
-    layout.setSpacing(12)
+    _apply_dialog_layout(layout)
 
     lbl = QLabel(label)
     lbl.setWordWrap(True)
@@ -140,18 +167,14 @@ def text_input_dialog(
     layout.addWidget(edit)
 
     buttons = QDialogButtonBox()
-    btn_ok = buttons.addButton("OK", QDialogButtonBox.AcceptRole)
-    btn_cancel = buttons.addButton("Cancel", QDialogButtonBox.RejectRole)
-
-    btn_ok.setFixedHeight(40)
-    btn_cancel.setFixedHeight(40)
-    btn_ok.setMinimumWidth(110)
-    btn_cancel.setMinimumWidth(110)
+    buttons.addButton("OK", QDialogButtonBox.AcceptRole)
+    buttons.addButton("Cancel", QDialogButtonBox.RejectRole)
+    _style_dialog_buttons(buttons)
 
     buttons.accepted.connect(dlg.accept)
     buttons.rejected.connect(dlg.reject)
 
-    layout.addWidget(buttons)
+    _add_dialog_buttons(layout, buttons)
 
     ok = dlg.exec() == QDialog.Accepted
     return edit.text(), ok
@@ -170,10 +193,10 @@ def multiline_input_dialog(
     dlg.setModal(True)
     dlg.resize(width, height)
     dlg.setMinimumWidth(width)
+    dlg.setMinimumHeight(height)
 
     layout = QVBoxLayout(dlg)
-    layout.setContentsMargins(18, 16, 18, 16)
-    layout.setSpacing(12)
+    _apply_dialog_layout(layout)
 
     lbl = QLabel(label)
     lbl.setWordWrap(True)
@@ -185,18 +208,14 @@ def multiline_input_dialog(
     layout.addWidget(edit, 1)
 
     buttons = QDialogButtonBox()
-    btn_ok = buttons.addButton("OK", QDialogButtonBox.AcceptRole)
-    btn_cancel = buttons.addButton("Cancel", QDialogButtonBox.RejectRole)
-
-    btn_ok.setFixedHeight(40)
-    btn_cancel.setFixedHeight(40)
-    btn_ok.setMinimumWidth(110)
-    btn_cancel.setMinimumWidth(110)
+    buttons.addButton("OK", QDialogButtonBox.AcceptRole)
+    buttons.addButton("Cancel", QDialogButtonBox.RejectRole)
+    _style_dialog_buttons(buttons)
 
     buttons.accepted.connect(dlg.accept)
     buttons.rejected.connect(dlg.reject)
 
-    layout.addWidget(buttons)
+    _add_dialog_buttons(layout, buttons)
 
     ok = dlg.exec() == QDialog.Accepted
     return edit.toPlainText(), ok
@@ -216,8 +235,7 @@ def item_choice_dialog(
     dlg.setFixedWidth(width)
 
     layout = QVBoxLayout(dlg)
-    layout.setContentsMargins(18, 16, 18, 16)
-    layout.setSpacing(12)
+    _apply_dialog_layout(layout)
 
     lbl = QLabel(label)
     lbl.setWordWrap(True)
@@ -230,18 +248,14 @@ def item_choice_dialog(
     layout.addWidget(combo)
 
     buttons = QDialogButtonBox()
-    btn_ok = buttons.addButton("OK", QDialogButtonBox.AcceptRole)
-    btn_cancel = buttons.addButton("Cancel", QDialogButtonBox.RejectRole)
-
-    btn_ok.setFixedHeight(40)
-    btn_cancel.setFixedHeight(40)
-    btn_ok.setMinimumWidth(110)
-    btn_cancel.setMinimumWidth(110)
+    buttons.addButton("OK", QDialogButtonBox.AcceptRole)
+    buttons.addButton("Cancel", QDialogButtonBox.RejectRole)
+    _style_dialog_buttons(buttons)
 
     buttons.accepted.connect(dlg.accept)
     buttons.rejected.connect(dlg.reject)
 
-    layout.addWidget(buttons)
+    _add_dialog_buttons(layout, buttons)
 
     ok = dlg.exec() == QDialog.Accepted
     return combo.currentText(), ok
@@ -265,10 +279,10 @@ def project_details_dialog(
         width = min(width, max(560, available.width() - 120))
     dlg.resize(width, height)
     dlg.setMinimumWidth(width)
+    dlg.setMinimumHeight(min(height, 520))
 
     layout = QVBoxLayout(dlg)
-    layout.setContentsMargins(18, 16, 18, 16)
-    layout.setSpacing(14)
+    _apply_dialog_layout(layout)
 
     intro = QLabel("Project details and known subject/device identifiers.")
     intro.setWordWrap(True)
@@ -278,13 +292,19 @@ def project_details_dialog(
     scroll = QScrollArea()
     scroll.setWidgetResizable(True)
     scroll.setFrameShape(QScrollArea.NoFrame)
+    scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+    scroll.setSizeAdjustPolicy(QAbstractScrollArea.SizeAdjustPolicy.AdjustIgnored)
+    scroll.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+    scroll.setMinimumHeight(260)
 
     form_host = QWidget()
+    form_host.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
     form = QFormLayout(form_host)
     form.setLabelAlignment(Qt.AlignRight)
     form.setFormAlignment(Qt.AlignTop)
     form.setHorizontalSpacing(12)
     form.setVerticalSpacing(10)
+    form.setContentsMargins(0, 0, 4, 8)
 
     edit_name = QLineEdit()
     edit_name.setText(getattr(project, "name", "") or "")
@@ -303,7 +323,7 @@ def project_details_dialog(
     edit_parent.setMinimumHeight(40)
     btn_browse = QPushButton("Browse...")
     btn_browse.setMinimumWidth(110)
-    btn_browse.setFixedHeight(40)
+    btn_browse.setMinimumHeight(DIALOG_BUTTON_MIN_HEIGHT)
     workspace_row.addWidget(edit_parent, 1)
     workspace_row.addWidget(btn_browse)
     form.addRow("Workspace parent:", workspace_row)
@@ -352,12 +372,9 @@ def project_details_dialog(
     btn_browse.clicked.connect(browse_parent)
 
     buttons = QDialogButtonBox()
-    btn_ok = buttons.addButton("OK", QDialogButtonBox.AcceptRole)
-    btn_cancel = buttons.addButton("Cancel", QDialogButtonBox.RejectRole)
-    btn_ok.setFixedHeight(40)
-    btn_cancel.setFixedHeight(40)
-    btn_ok.setMinimumWidth(110)
-    btn_cancel.setMinimumWidth(110)
+    buttons.addButton("OK", QDialogButtonBox.AcceptRole)
+    buttons.addButton("Cancel", QDialogButtonBox.RejectRole)
+    _style_dialog_buttons(buttons)
 
     def accept_project_details() -> None:
         if not edit_parent.text().strip():
@@ -379,7 +396,7 @@ def project_details_dialog(
 
     buttons.accepted.connect(accept_project_details)
     buttons.rejected.connect(dlg.reject)
-    layout.addWidget(buttons)
+    _add_dialog_buttons(layout, buttons)
 
     if dlg.exec() != QDialog.Accepted:
         return None, False
@@ -415,8 +432,7 @@ def confirm_dialog(
     dlg.setFixedWidth(width)
 
     layout = QVBoxLayout(dlg)
-    layout.setContentsMargins(18, 16, 18, 16)
-    layout.setSpacing(14)
+    _apply_dialog_layout(layout)
 
     lbl_message = QLabel(message)
     lbl_message.setWordWrap(True)
@@ -431,22 +447,13 @@ def confirm_dialog(
         layout.addWidget(lbl_details)
 
     buttons = QDialogButtonBox()
-    btn_ok = buttons.addButton(ok_text, QDialogButtonBox.AcceptRole)
-    btn_cancel = buttons.addButton(cancel_text, QDialogButtonBox.RejectRole)
-
-    btn_ok.setFixedHeight(40)
-    btn_cancel.setFixedHeight(40)
-    btn_ok.setMinimumWidth(110)
-    btn_cancel.setMinimumWidth(110)
-
-    if destructive:
-        btn_ok.setObjectName("DangerButton")
+    buttons.addButton(ok_text, QDialogButtonBox.AcceptRole)
+    buttons.addButton(cancel_text, QDialogButtonBox.RejectRole)
+    _style_dialog_buttons(buttons, destructive_ok=destructive)
 
     buttons.accepted.connect(dlg.accept)
     buttons.rejected.connect(dlg.reject)
 
-    layout.addWidget(buttons)
+    _add_dialog_buttons(layout, buttons)
 
     return dlg.exec() == QDialog.Accepted
-
-
