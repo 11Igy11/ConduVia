@@ -88,6 +88,11 @@ def rollup_pcap_sources(sources: list[Any]) -> PcapRollupTotals:
     )
 
 
+def rollup_pcap_day_group(group: list[Any]) -> tuple[int, int, Counter[str]]:
+    """Public wrapper for per-day packet/byte/IP rollup used by Profile and Projects."""
+    return _rollup_day_group(group)
+
+
 def _rollup_day_group(group: list[Any]) -> tuple[int, int, Counter[str]]:
     aggregates = [item for item in group if is_aggregate_pcap_source(item)]
     singles = [item for item in group if not is_aggregate_pcap_source(item)]
@@ -150,7 +155,7 @@ def collect_device_ip_stats(sources: list[Any]) -> tuple[Counter[str], list[dict
             "tooltip": f"{ip} — {period_count or 1} period(s), {packet_count:,} packets",
         })
     rows.sort(key=lambda row: (-int(row.get("packets") or 0), str(row.get("label") or "")))
-    counter = Counter({row["label"]: int(row["count"]) for row in rows})
+    counter = Counter({row["label"]: int(row["periods"]) for row in rows})
     return counter, rows
 
 

@@ -49,14 +49,6 @@ def load_json_file(path: str | Path, *, debug: bool = False) -> list[dict[str, A
     with p.open("r", encoding="utf-8") as f:
         data = json.load(f)
 
-    if debug:
-        if isinstance(data, dict):
-            print(f"[DEBUG] {p.name}: top-level dict keys = {list(data.keys())[:30]}")
-            if "flow" in data:
-                print(f"[DEBUG] {p.name}: type(flow) = {type(data['flow']).__name__}")
-        else:
-            print(f"[DEBUG] {p.name}: top-level type = {type(data).__name__}")
-
     # Case 1: list of flows
     if isinstance(data, list):
         return [x for x in data if isinstance(x, dict)]

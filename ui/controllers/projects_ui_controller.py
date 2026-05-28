@@ -11,7 +11,6 @@ from core.db import (
     get_project_notes,
     list_recent_datasets,
     list_pcap_sources,
-    list_ingest_items,
     list_activity,
     list_findings,
     touch_project,
@@ -19,7 +18,8 @@ from core.db import (
 )
 from core.formatters import format_duration_compact_ms, format_pcap_datetime, human_bytes
 from core.project_identity import project_identifiers_text, subject_display_label
-from core.project_datasets import count_project_json_datasets, list_project_json_dataset_files
+from core.project_evidence import build_project_evidence_snapshot
+from core.project_datasets import list_project_json_dataset_files
 from core.project_profile import build_project_activity_profile, format_project_activity_profile
 from core.workspace import (
     ensure_workspace_structure,
@@ -36,7 +36,10 @@ class ProjectsUIController:
     def __init__(self, app):
         self.app = app
 
-    def refresh_projects(self):
+    def refresh_projects(self, *, reset_active: bool = False):
+        if reset_active:
+            self._clear_active_project()
+
         self.app.projects_list.clear()
         projects = list_projects()
 
@@ -51,9 +54,21 @@ class ProjectsUIController:
         self.app.project_recent_pcap_rows = []
         self.app.project_activity_rows = []
         self._refresh_project_launcher_cards()
-        self.refresh_case_dashboard(None)
+        self.refresh_case_dashboard()
         self.app.refresh_activity_profile_ui()
-        self.app.refresh_activity_ui_for_project(None)
+        self.app.notes_controller.refresh_activity_ui_for_project(None)
+
+    def _clear_active_project(self) -> None:
+        if self.app.current_project_id is None:
+            return
+
+        self.app.dataset_controller.clear_context()
+        self.app.current_project_id = None
+        self.app.current_project_name = ""
+        self.app.lbl_project_banner.setText("Project: (none)")
+        self.app.findings_controller.refresh_ui()
+        self.app.notes_controller.refresh_ui()
+        self.app.refresh_activity_profile_ui()
 
     def _short_text(self, value: str, limit: int = 54) -> str:
         text = (value or "").strip()
@@ -118,8 +133,8 @@ class ProjectsUIController:
         self.sync_project_workspace(pid)
         self.refresh_projects()
         self.refresh_recent_datasets(pid)
-        self.app.refresh_findings_ui()
-        self.app.refresh_notes_ui()
+        self.app.findings_controller.refresh_ui()
+        self.app.notes_controller.refresh_ui()
 
         should_open = self.app._confirm_dialog(
             title="Open dataset",
@@ -143,7 +158,7 @@ class ProjectsUIController:
             self.app.project_recent_pcap_rows = []
             self.app.project_activity_rows = []
             self._refresh_project_launcher_cards()
-            self.refresh_case_dashboard(None)
+            self.refresh_case_dashboard()
             return
 
         pid = int(item.data(Qt.UserRole))
@@ -175,8 +190,8 @@ class ProjectsUIController:
         self.app.projects_info.setText("\n".join(info))
 
         self.refresh_recent_datasets(pid)
-        self.app.refresh_activity_ui_for_project(pid)
-        self.refresh_case_dashboard(pid)
+        self.app.notes_controller.refresh_activity_ui_for_project(pid)
+        self.refresh_case_dashboard()
 
     def open_selected_project(self):
         item = self.app.projects_list.currentItem()
@@ -236,17 +251,8 @@ class ProjectsUIController:
             return
 
         if self.app.current_project_id == project_id:
-            self.app.clear_dataset_context()
-
-            self.app.current_project_id = None
-            self.app.current_project_name = ""
-
-            self.app.lbl_active_project.setText("Active project: (none)")
-            self.app.lbl_project_banner.setText("Project: (none)")
-
-            self.app.refresh_findings_ui()
-            self.app.refresh_notes_ui()
-            self.app.refresh_activity_profile_ui()
+            self._clear_active_project()
+            self.refresh_case_dashboard()
 
         self.refresh_projects()
 
@@ -368,8 +374,8 @@ class ProjectsUIController:
         # update active project labels if needed
         if self.app.current_project_id == project.id:
             self.app.current_project_name = name
-            self.app.lbl_active_project.setText(f"Active project: {name}")
             self.app.lbl_project_banner.setText(f"Project: {name}")
+            self.refresh_case_dashboard()
             self.app.refresh_activity_profile_ui()
 
     def set_active_project(self, project_id: int):
@@ -382,23 +388,23 @@ class ProjectsUIController:
         project_changed = self.app.current_project_id != p.id
 
         if project_changed:
-            self.app.clear_dataset_context()
+            self.app.dataset_controller.clear_context()
             if hasattr(self.app, "activity_profile_page"):
                 self.app.activity_profile_page.invalidate_project_cache()
 
         self.app.current_project_id = p.id
         self.app.current_project_name = p.name
 
-        self.app.lbl_active_project.setText(f"Active project: {p.name}")
         self.app.lbl_project_banner.setText(f"Project: {p.name}")
+        self.refresh_case_dashboard()
 
         if hasattr(self.app, "dataset_controller"):
             controller = self.app.dataset_controller
             controller.sync_json_periods_from_project(p.id)
             controller.sync_pcap_periods_from_project(p.id)
 
-        self.app.refresh_findings_ui()
-        self.app.refresh_notes_ui(refresh_profile=False)
+        self.app.findings_controller.refresh_ui()
+        self.app.notes_controller.refresh_ui(refresh_profile=False)
 
         QTimer.singleShot(0, lambda pid=p.id: self._complete_project_activation(pid))
 
@@ -407,7 +413,7 @@ class ProjectsUIController:
             return
 
         self.refresh_recent_datasets(project_id)
-        self.refresh_case_dashboard(project_id)
+        self.refresh_case_dashboard()
         if hasattr(self.app, "refresh_activity_profile_ui"):
             self.app.refresh_activity_profile_ui()
         self.sync_project_workspace(project_id)
@@ -549,10 +555,13 @@ class ProjectsUIController:
         return f"{ip}:{port}" if port else ip
 
     def refresh_recent_datasets(self, project_id: int):
-        self.app.project_recent_json_total_count = count_project_json_datasets(project_id, limit=50000)
-        self.app.project_recent_json_rows = list_project_json_dataset_files(project_id, limit=50000)[:100]
+        evidence = build_project_evidence_snapshot(project_id, limit=50000)
+        json_evidence = evidence["json"]
+        pcap_evidence = evidence["pcap"]
 
-        self.app.project_recent_pcap_rows = self._project_pcap_day_rows(project_id)
+        self.app.project_recent_json_total_count = int(json_evidence.get("count") or 0)
+        self.app.project_recent_json_rows = list(json_evidence.get("rows") or [])[:100]
+        self.app.project_recent_pcap_rows = list(pcap_evidence.get("recent_day_rows") or [])[:500]
 
         activity_rows = list_activity(project_id, limit=500)
         self.app.project_activity_rows = []
@@ -565,108 +574,6 @@ class ProjectsUIController:
             })
 
         self._refresh_project_launcher_cards()
-
-    def _project_pcap_day_rows(self, project_id: int) -> list[dict]:
-        ingest_days: dict[str, list[str]] = {}
-        for item in list_ingest_items(project_id, file_type="pcap", status="done", limit=50000):
-            day = str(item.observed_date or "").strip() or self._date_from_name(item.file_name) or "undated"
-            ingest_days.setdefault(day, [])
-            if item.file_path and Path(item.file_path).is_file() and item.file_path not in ingest_days[day]:
-                ingest_days[day].append(item.file_path)
-
-        source_days: dict[str, dict] = {}
-        for source in list_pcap_sources(project_id, limit=50000):
-            day = self._date_from_pcap_source(source) or self._date_from_name(source.file_name) or "undated"
-            row = source_days.setdefault(day, {
-                "packet_count": 0,
-                "wire_bytes": 0,
-                "first_seen": "",
-                "last_seen": "",
-                "device_ips": {},
-                "paths": [],
-                "source_count": 0,
-            })
-            row["source_count"] += 1
-            row["packet_count"] += int(source.packet_count or 0)
-            row["wire_bytes"] += int(source.wire_bytes or 0)
-            row["first_seen"] = self._min_text_time(row["first_seen"], source.first_seen)
-            row["last_seen"] = self._max_text_time(row["last_seen"], source.last_seen)
-            if source.likely_device_ip:
-                row["device_ips"][source.likely_device_ip] = row["device_ips"].get(source.likely_device_ip, 0) + 1
-            if source.file_path and Path(source.file_path).is_file() and source.file_path not in row["paths"]:
-                row["paths"].append(source.file_path)
-
-        all_days = set(ingest_days) | set(source_days)
-        rows: list[dict] = []
-        for day in sorted(all_days, reverse=True):
-            data = source_days.get(day, {})
-            paths = list(ingest_days.get(day) or []) + list(data.get("paths") or [])
-            seen_paths: set[str] = set()
-            paths = [
-                path
-                for path in paths
-                if path and Path(path).is_file() and not (path in seen_paths or seen_paths.add(path))
-            ]
-            file_count = len(paths) or int(data.get("source_count") or 0) or 1
-            device_ips = data.get("device_ips") or {}
-            device_ip = "-"
-            if device_ips:
-                device_ip = sorted(device_ips.items(), key=lambda item: (-item[1], item[0]))[0][0]
-            period = " - ".join(
-                value
-                for value in (
-                    format_pcap_datetime(data.get("first_seen", "")),
-                    format_pcap_datetime(data.get("last_seen", "")),
-                )
-                if value
-            )
-            rows.append({
-                "name": f"{self._display_day(day)} ({file_count:,} PCAP files)",
-                "file_count": file_count,
-                "packets": f"{int(data.get('packet_count') or 0):,}",
-                "volume": human_bytes(int(data.get("wire_bytes") or 0), precision=2),
-                "device_ip": device_ip,
-                "period": period or "-",
-                "path": paths[0] if len(paths) == 1 else "",
-                "paths": paths,
-                "day": day,
-            })
-        return rows[:500]
-
-    def _date_from_pcap_source(self, source) -> str:
-        raw = str(source.first_seen or source.last_seen or "").strip()
-        if len(raw) >= 10 and raw[4] == "-" and raw[7] == "-":
-            return raw[:10]
-        return ""
-
-    def _date_from_name(self, value: str) -> str:
-        text = str(value or "")
-        for token in text.replace("\\", "_").replace("/", "_").split("_"):
-            if len(token) >= 8 and token[:8].isdigit():
-                raw = token[:8]
-                return f"{raw[:4]}-{raw[4:6]}-{raw[6:8]}"
-        return ""
-
-    def _display_day(self, day: str) -> str:
-        if day == "undated":
-            return "Undated"
-        if len(day) == 10 and day[4] == "-" and day[7] == "-":
-            return f"{day[8:10]}/{day[5:7]}/{day[:4]}"
-        return day
-
-    def _min_text_time(self, current: str, candidate: str) -> str:
-        if not candidate:
-            return current or ""
-        if not current:
-            return candidate
-        return min(str(current), str(candidate))
-
-    def _max_text_time(self, current: str, candidate: str) -> str:
-        if not candidate:
-            return current or ""
-        if not current:
-            return candidate
-        return max(str(current), str(candidate))
 
     def _refresh_project_launcher_cards(self) -> None:
         json_rows = getattr(self.app, "project_recent_json_rows", []) or []
@@ -682,61 +589,98 @@ class ProjectsUIController:
 
         if hasattr(self.app, "lbl_recent_json_count"):
             self.app.lbl_recent_json_count.setText(f"{json_count:,} JSON datasets")
-            if json_count:
-                newest_row = next((row for row in json_rows if row.get("status") == "Available"), json_rows[0])
+            if json_count and json_rows:
+                newest_row = next(
+                    (row for row in json_rows if row.get("status") == "Available"),
+                    json_rows[0],
+                )
                 newest = self._short_text(newest_row.get("name") or "-")
                 self.app.lbl_recent_json_detail.setText(f"Most recent: {newest}")
+            elif json_count:
+                self.app.lbl_recent_json_detail.setText(f"{json_count:,} JSON datasets indexed")
             else:
                 self.app.lbl_recent_json_detail.setText("No JSON datasets saved for this project.")
 
         if hasattr(self.app, "lbl_recent_pcap_count"):
+            pcap_rows = getattr(self.app, "project_recent_pcap_rows", []) or []
             self.app.lbl_recent_pcap_count.setText(f"{pcap_count:,} PCAP days")
-            if pcap_count:
-                newest = self._short_text(self.app.project_recent_pcap_rows[0].get("name") or "-")
+            if pcap_count and pcap_rows:
+                newest = self._short_text(pcap_rows[0].get("name") or "-")
                 self.app.lbl_recent_pcap_detail.setText(f"Most recent: {newest}")
+            elif pcap_count:
+                self.app.lbl_recent_pcap_detail.setText(f"{pcap_count:,} PCAP days saved")
             else:
                 self.app.lbl_recent_pcap_detail.setText("No PCAP days saved for this project.")
 
         if hasattr(self.app, "lbl_recent_activity_count"):
+            activity_rows = getattr(self.app, "project_activity_rows", []) or []
             self.app.lbl_recent_activity_count.setText(f"{activity_count:,} events")
-            if activity_count:
-                newest = self._short_text(self.app.project_activity_rows[0].get("event") or "-")
+            if activity_count and activity_rows:
+                newest = self._short_text(activity_rows[0].get("event") or "-")
                 self.app.lbl_recent_activity_detail.setText(f"Latest: {newest}")
+            elif activity_count:
+                self.app.lbl_recent_activity_detail.setText(f"{activity_count:,} recent events")
             else:
                 self.app.lbl_recent_activity_detail.setText("No project activity yet.")
 
-    def refresh_case_dashboard(self, project_id: int | None):
+    def refresh_case_dashboard(self) -> None:
         if not hasattr(self.app, "lbl_case_dashboard_title"):
             return
 
-        if project_id is None:
-            self.app.lbl_case_dashboard_title.setText("Case Dashboard")
-            self.app.lbl_case_dashboard_subject.setText("Select a project to see case context.")
-            for idx, title in enumerate(("JSON Datasets", "PCAP Days", "Findings", "Device IPs")):
-                self.app.case_metric_cards[idx].setText(f"{title}: 0")
+        self._refresh_active_case_header()
+        self._update_selection_panel()
+
+    def _refresh_active_case_header(self) -> None:
+        pid = self.app.current_project_id
+        if pid is None:
+            self.app.lbl_case_dashboard_title.setText("Active case: (none)")
+            self.app.lbl_case_dashboard_subject.setText(
+                "Open a project as the active case to work with JSON, PCAP and notes."
+            )
             return
 
-        project = get_project(project_id)
+        project = get_project(pid)
         if not project:
-            self.refresh_case_dashboard(None)
+            self.app.lbl_case_dashboard_title.setText("Active case: (none)")
+            self.app.lbl_case_dashboard_subject.setText("The active project could not be loaded.")
             return
 
-        profile = build_project_activity_profile(project_id)
-        active_suffix = "active" if self.app.current_project_id == project_id else "selected"
-        self.app.lbl_case_dashboard_title.setText(f"Case Dashboard: {project.name} ({active_suffix})")
+        self.app.lbl_case_dashboard_title.setText(f"Active case: {project.name}")
         self.app.lbl_case_dashboard_subject.setText(
-            f"Subject: {subject_display_label(project)}\n"
-            f"Known identifiers: {project_identifiers_text(project)}"
+            f"Subject: {subject_display_label(project)} | "
+            f"Identifiers: {project_identifiers_text(project)}"
         )
 
-        values = [
-            ("JSON Datasets", profile.get("dataset_count", 0)),
-            ("PCAP Days", profile.get("pcap_day_count", 0)),
-            ("Findings", profile.get("finding_count", 0)),
-            ("Device IPs", len(profile.get("pcap_device_ips") or {})),
-        ]
-        for idx, (title, value) in enumerate(values):
-            self.app.case_metric_cards[idx].setText(f"{title}: {value}")
+    def _update_selection_panel(self) -> None:
+        if not hasattr(self.app, "lbl_project_selection_title"):
+            return
+
+        item = self.app.projects_list.currentItem()
+        if not item:
+            self.app.lbl_project_selection_title.setText("Select a project")
+            self.app.lbl_project_selection_state.hide()
+            self.app.btn_open_project.setEnabled(False)
+            self.app.btn_edit_project.setEnabled(False)
+            self.app.btn_delete_project.setEnabled(False)
+            return
+
+        pid = int(item.data(Qt.UserRole))
+        project = get_project(pid)
+        if not project:
+            return
+
+        self.app.lbl_project_selection_title.setText(project.name)
+        self.app.btn_edit_project.setEnabled(True)
+        self.app.btn_delete_project.setEnabled(True)
+
+        if self.app.current_project_id == pid:
+            self.app.lbl_project_selection_state.setText("Active case")
+            self.app.lbl_project_selection_state.show()
+            self.app.btn_open_project.setEnabled(False)
+        else:
+            self.app.lbl_project_selection_state.setText("Preview")
+            self.app.lbl_project_selection_state.show()
+            self.app.btn_open_project.setEnabled(True)
 
     def _case_dashboard_warnings(self, project, profile: dict) -> list[str]:
         warnings: list[str] = []

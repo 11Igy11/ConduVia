@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import QDate, QObject, Qt, QThread, QTimer, Signal
+from PySide6.QtCore import QDate, QObject, Qt, QThread, QTimer, Signal, Slot
 from PySide6.QtGui import QFontMetrics
 from PySide6.QtWidgets import (
     QCalendarWidget,
@@ -11,9 +11,13 @@ from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QFormLayout,
+    QHBoxLayout,
     QLabel,
     QFileDialog,
     QProgressDialog,
+    QPushButton,
+    QTableWidget,
+    QTableWidgetItem,
     QVBoxLayout,
 )
 
@@ -38,6 +42,7 @@ from core.db import (
     upsert_ingest_items,
 )
 from core.loader import list_json_files_recursive, load_folder_recursive, load_json_file
+from core.period_gaps import format_missing_days_summary, missing_period_days
 from core.parser import extract_dataset_meta
 from core.formatters import format_short_date, human_bytes
 from core.project_behavior_index import build_project_behavior_index
@@ -59,6 +64,10 @@ from core.evidence_policy import (
     should_batch_pcap_files,
     should_open_interactively,
 )
+
+
+from ui.project_rows_dialog import open_project_rows_dialog
+from ui.thread_utils import stop_qthread
 
 
 def _json_order_metadata_line(meta: dict | None) -> str:
@@ -101,6 +110,7 @@ class DatasetLoadWorker(QObject):
         self.project_id = project_id
         self.files = files or []
 
+    @Slot()
     def run(self):
         try:
             previous_flows = self._load_previous_flows()
@@ -190,6 +200,7 @@ class BehaviorIndexWorker(QObject):
         super().__init__()
         self.project_id = project_id
 
+    @Slot()
     def run(self):
         try:
             self.finished.emit(build_project_behavior_index(self.project_id))
@@ -205,6 +216,7 @@ class CaseScanWorker(QObject):
         super().__init__()
         self.folder = folder
 
+    @Slot()
     def run(self):
         try:
             self.finished.emit(scan_case_source(self.folder))
@@ -222,6 +234,7 @@ class FolderIngestWorker(QObject):
         self.folder = folder
         self.scan = scan
 
+    @Slot()
     def run(self):
         try:
             json_files = list(self.scan.json_files or [])
@@ -290,6 +303,7 @@ class DatasetController(QObject):
         self._json_day_source = ""
         self._json_active_day = ""
         self._json_day_switching = False
+        self._json_gap_info: dict[str, object] = {}
         self._pending_behavior_index_project_id: int | None = None
 
     def _split_ranked_lines(self, items):
@@ -341,7 +355,7 @@ class DatasetController(QObject):
         self._scan_progress.setMinimumWidth(460)
         self._scan_progress.show()
 
-        self._scan_thread = QThread()
+        self._scan_thread = QThread(self.app)
         self._scan_worker = CaseScanWorker(folder)
         self._scan_worker.moveToThread(self._scan_thread)
         self._scan_thread.started.connect(self._scan_worker.run)
@@ -355,6 +369,7 @@ class DatasetController(QObject):
         self._scan_thread.finished.connect(self._cleanup_scan_thread)
         self._scan_thread.start()
 
+    @Slot()
     def _cleanup_scan_thread(self) -> None:
         self._scan_thread = None
         self._scan_worker = None
@@ -362,10 +377,12 @@ class DatasetController(QObject):
             self._scan_progress.close()
             self._scan_progress = None
 
+    @Slot(str)
     def _on_folder_scan_error(self, message: str) -> None:
         self._cleanup_scan_thread()
         self.app._message_dialog("Dataset folder", "Failed to scan selected folder.", message, width=520)
 
+    @Slot(object)
     def _on_folder_scan_finished(self, scan) -> None:
         folder = str(getattr(scan, "root", "") or "")
         purpose = self._scan_purpose
@@ -411,7 +428,7 @@ class DatasetController(QObject):
         self._ingest_progress.setMinimumWidth(460)
         self._ingest_progress.show()
 
-        self._ingest_thread = QThread()
+        self._ingest_thread = QThread(self.app)
         self._ingest_worker = FolderIngestWorker(project_id, folder, scan)
         self._ingest_worker.moveToThread(self._ingest_thread)
         self._ingest_thread.started.connect(self._ingest_worker.run)
@@ -425,6 +442,7 @@ class DatasetController(QObject):
         self._ingest_thread.finished.connect(self._cleanup_ingest_thread)
         self._ingest_thread.start()
 
+    @Slot()
     def _cleanup_ingest_thread(self) -> None:
         self._ingest_thread = None
         self._ingest_worker = None
@@ -432,12 +450,14 @@ class DatasetController(QObject):
             self._ingest_progress.close()
             self._ingest_progress = None
 
+    @Slot(str)
     def _on_folder_ingest_error(self, message: str) -> None:
         self._cleanup_ingest_thread()
         self._pending_ingest_scan = None
         self._pending_ingest_folder = ""
         self.app._message_dialog("Dataset folder", "Failed to index evidence files.", message, width=520)
 
+    @Slot(object)
     def _on_folder_ingest_finished(self, scan) -> None:
         folder = self._pending_ingest_folder
         purpose = getattr(self, "_ingest_purpose", "import")
@@ -830,7 +850,7 @@ class DatasetController(QObject):
         if not hasattr(self.app, "projects_ui_controller"):
             return
         self.app.projects_ui_controller.refresh_recent_datasets(project_id)
-        self.app.projects_ui_controller.refresh_case_dashboard(project_id)
+        self.app.projects_ui_controller.refresh_case_dashboard()
 
     def _json_day_groups_from_ingest(self, project_id: int | None, folder_prefix: str = "") -> dict[str, list[str]]:
         if project_id is None:
@@ -874,9 +894,9 @@ class DatasetController(QObject):
         if hasattr(self.app, "projects_ui_controller"):
             self.app.projects_ui_controller.sync_project_workspace(self.app.current_project_id)
             self.app.projects_ui_controller.refresh_recent_datasets(self.app.current_project_id)
-            self.app.projects_ui_controller.refresh_case_dashboard(self.app.current_project_id)
-        if hasattr(self.app, "refresh_activity_ui"):
-            self.app.refresh_activity_ui()
+            self.app.projects_ui_controller.refresh_case_dashboard()
+        if hasattr(self.app, "notes_controller"):
+            self.app.notes_controller.refresh_activity_ui()
         if hasattr(self.app, "refresh_activity_profile_ui"):
             self.app.refresh_activity_profile_ui()
         self.refresh_project_behavior_index(self.app.current_project_id)
@@ -903,7 +923,7 @@ class DatasetController(QObject):
         if hasattr(self.app, "projects_ui_controller"):
             self.app.projects_ui_controller.sync_project_workspace(self.app.current_project_id)
             self.app.projects_ui_controller.refresh_recent_datasets(self.app.current_project_id)
-            self.app.projects_ui_controller.refresh_case_dashboard(self.app.current_project_id)
+            self.app.projects_ui_controller.refresh_case_dashboard()
         if hasattr(self.app, "refresh_activity_profile_ui"):
             self.app.refresh_activity_profile_ui()
 
@@ -971,7 +991,8 @@ class DatasetController(QObject):
         else:
             return
 
-        self.app._open_project_rows_dialog(
+        open_project_rows_dialog(
+            self.app,
             title,
             [("rank", "#"), ("value", "Name"), ("count", "Count")],
             rows,
@@ -1120,6 +1141,7 @@ class DatasetController(QObject):
         self._json_active_day = str(combo.currentData() or next(iter(self._json_day_groups)))
         if not self.app.flow_controller.get_all():
             QTimer.singleShot(0, self._load_active_json_period)
+        self._update_json_gap_banner(list(self._json_day_groups.keys()))
         return list(self._json_day_groups.get(self._json_active_day, []))
 
     def _load_active_json_period(self, *, force: bool = False) -> None:
@@ -1154,6 +1176,63 @@ class DatasetController(QObject):
             self._json_day_switching = False
         if label is not None:
             label.setVisible(False)
+        self._update_json_gap_banner([])
+
+    def _update_json_gap_banner(self, present_days: list[str] | None = None) -> None:
+        days = present_days if present_days is not None else list(self._json_day_groups.keys())
+        gap = missing_period_days(days)
+        self._json_gap_info = gap
+        summary = format_missing_days_summary(gap)
+        lbl = getattr(self.app, "lbl_json_gaps", None)
+        btn = getattr(self.app, "btn_expand_json_gaps", None)
+        if lbl is not None:
+            lbl.setText(summary)
+            lbl.setToolTip(summary)
+        if btn is not None:
+            missing_count = int(gap.get("missing_count") or 0)
+            btn.setVisible(missing_count > 0)
+            btn.setText(f"Missing days ({missing_count:,})")
+
+    def open_json_missing_days_dialog(self) -> None:
+        missing = list(self._json_gap_info.get("missing_days") or [])
+        if not missing:
+            self.app._message_dialog("Missing days", "No internal gaps in the indexed period range.", width=420)
+            return
+
+        first = self._format_day_label(str(self._json_gap_info.get("first_day") or ""))
+        last = self._format_day_label(str(self._json_gap_info.get("last_day") or ""))
+
+        dlg = QDialog(self.app)
+        dlg.setWindowTitle("Missing JSON days")
+        dlg.resize(720, 560)
+        layout = QVBoxLayout(dlg)
+        layout.setContentsMargins(14, 14, 14, 28)
+        hint = QLabel(
+            f"{len(missing):,} indexed days missing between {first} and {last}. "
+            "These are internal gaps — calendar days inside the imported period with no JSON files."
+        )
+        hint.setWordWrap(True)
+        layout.addWidget(hint)
+
+        table = QTableWidget(len(missing), 2, dlg)
+        table.setHorizontalHeaderLabels(["Missing day", "ISO date"])
+        table.verticalHeader().setVisible(False)
+        table.setEditTriggers(QTableWidget.NoEditTriggers)
+        table.setSelectionBehavior(QTableWidget.SelectRows)
+        for row_index, day in enumerate(missing):
+            table.setItem(row_index, 0, QTableWidgetItem(self._format_day_label(day)))
+            table.setItem(row_index, 1, QTableWidgetItem(day))
+        table.resizeColumnsToContents()
+        layout.addWidget(table, 1)
+
+        footer = QHBoxLayout()
+        footer.addStretch()
+        close_btn = QPushButton("Close")
+        close_btn.setMinimumHeight(42)
+        close_btn.clicked.connect(dlg.accept)
+        footer.addWidget(close_btn)
+        layout.addLayout(footer)
+        dlg.exec()
 
     def _format_day_label(self, day: str) -> str:
         return format_period_day_label(day)
@@ -1186,7 +1265,7 @@ class DatasetController(QObject):
         if hasattr(self.app, "lbl_json_meta"):
             self.app.lbl_json_meta.setText("")
 
-        self._load_thread = QThread()
+        self._load_thread = QThread(self.app)
         self._load_worker = DatasetLoadWorker(
             mode=mode,
             path=path,
@@ -1207,6 +1286,7 @@ class DatasetController(QObject):
         self._load_thread.finished.connect(self._cleanup_load_thread)
         self._load_thread.start()
 
+    @Slot(object)
     def _on_dataset_loaded(self, result: dict):
         if result.get("project_id") != self.app.current_project_id:
             self.app._message_dialog(
@@ -1251,7 +1331,7 @@ class DatasetController(QObject):
             if hasattr(self.app, "projects_ui_controller"):
                 self.app.projects_ui_controller.sync_project_workspace(self.app.current_project_id)
             self.app.projects_ui_controller.refresh_recent_datasets(self.app.current_project_id)
-            self.app.refresh_activity_ui()
+            self.app.notes_controller.refresh_activity_ui()
             self._start_behavior_index(self.app.current_project_id)
 
         self.render_summary()
@@ -1441,11 +1521,13 @@ class DatasetController(QObject):
             width=560,
         )
 
+    @Slot(str, str)
     def _on_dataset_load_error(self, title: str, details: str):
         if hasattr(self.app, "lbl_stats"):
             self.app.explore_ui_controller.set_json_stats_text("JSON dataset load failed.", include_counts=False)
         self.app._message_dialog("Dataset", title, details, width=520)
 
+    @Slot()
     def _cleanup_load_thread(self):
         self._load_worker = None
         self._load_thread = None
@@ -1485,7 +1567,7 @@ class DatasetController(QObject):
 
     def sync_pcap_periods_from_project(self, project_id: int | None) -> None:
         """Restore PCAP period selector from saved ingest and project PCAP rows."""
-        from core.db import list_saved_pcap_period_days
+        from core.project_evidence import build_project_evidence_snapshot
 
         pcap_page = getattr(self.app, "pcap_page", None)
         if pcap_page is None:
@@ -1494,25 +1576,8 @@ class DatasetController(QObject):
             pcap_page._clear_day_groups()
             return
 
-        controller = getattr(self.app, "projects_ui_controller", None)
-        if controller is None or not hasattr(controller, "_project_pcap_day_rows"):
-            pcap_page._clear_day_groups()
-            return
-
-        by_day: dict[str, list[str]] = {}
-        for row in controller._project_pcap_day_rows(project_id):
-            day = str(row.get("day") or "").strip() or "undated"
-            paths = [
-                str(path)
-                for path in (row.get("paths") or [])
-                if str(path or "").strip() and Path(str(path)).is_file()
-            ]
-            if paths:
-                by_day[day] = paths
-
-        for day in list_saved_pcap_period_days(project_id):
-            by_day.setdefault(day, [])
-
+        evidence = build_project_evidence_snapshot(project_id)
+        by_day = dict(evidence["pcap"]["day_groups"])
         if not by_day:
             pcap_page._clear_day_groups()
             return
@@ -1539,7 +1604,7 @@ class DatasetController(QObject):
             self._pending_behavior_index_project_id = project_id
             return
 
-        self._behavior_index_thread = QThread()
+        self._behavior_index_thread = QThread(self.app)
         self._behavior_index_worker = BehaviorIndexWorker(project_id)
         self._behavior_index_worker.moveToThread(self._behavior_index_thread)
 
@@ -1554,6 +1619,7 @@ class DatasetController(QObject):
         self._behavior_index_thread.finished.connect(self._cleanup_behavior_index_thread)
         self._behavior_index_thread.start()
 
+    @Slot(object)
     def _on_behavior_index_finished(self, profile: dict):
         if profile.get("project_id") != self.app.current_project_id:
             return
@@ -1562,6 +1628,7 @@ class DatasetController(QObject):
             self.app.activity_profile_page.invalidate_project_cache()
         self.app.refresh_activity_profile_ui()
 
+    @Slot(str)
     def _on_behavior_index_error(self, message: str):
         if hasattr(self.app, "lbl_stats"):
             self.app.explore_ui_controller.set_json_stats_text(
@@ -1569,6 +1636,7 @@ class DatasetController(QObject):
                 include_counts=False,
             )
 
+    @Slot()
     def _cleanup_behavior_index_thread(self):
         self._behavior_index_worker = None
         self._behavior_index_thread = None
@@ -1583,3 +1651,81 @@ class DatasetController(QObject):
 
         self.app.btn_load.setEnabled(not loading)
         self.app.btn_load.setText("Loading..." if loading else "Load dataset")
+
+    def clear_context(self) -> None:
+        app = self.app
+        app.current_folder = None
+        app._current_flow = None
+        app._conversation_on = False
+        app._flows_expanded = False
+
+        app.flow_controller.set_flows([])
+        app.model.set_flows([])
+
+        app.search.blockSignals(True)
+        app.search.setText("")
+        app.search.blockSignals(False)
+
+        app.proxy.set_filter_text("")
+        app.proxy.clear_conversation()
+
+        if app.table.selectionModel():
+            app.table.clearSelection()
+
+        app.explore_ui_controller.update_detail(None)
+        app.explore_ui_controller.update_mode_label()
+        app.explore_ui_controller.update_conversation_summary()
+        app.explore_ui_controller.update_loaded_label()
+        app.explore_ui_controller.update_load_more_enabled()
+        app.explore_ui_controller.update_showing()
+
+        app.lbl_path.setText("No dataset loaded")
+        app.explore_ui_controller.set_json_stats_text("", include_counts=False)
+        if hasattr(app, "lbl_json_meta"):
+            app.lbl_json_meta.setText("")
+        app.lbl_conv_summary.clear()
+        app.lbl_conv_summary.hide()
+        app.lbl_mode.clear()
+        app.lbl_mode.hide()
+
+        for rows in getattr(app, "summary_preview_rows", {}).values():
+            self.clear_summary_preview_rows(rows)
+
+        app.txt_ai_summary.clear()
+
+        if hasattr(app, "details_panel"):
+            app.details_panel.show()
+        if hasattr(app, "btn_expand_flows"):
+            app.btn_expand_flows.setText("Expand Flows")
+
+        if hasattr(app, "registry_page"):
+            app.registry_page.set_dataset("", [], [])
+
+        if hasattr(app, "listing_page"):
+            try:
+                app.listing_page.set_dataset("", [], [])
+            except Exception:
+                pass
+
+    def shutdown_background_tasks(self, wait_ms: int = 5000) -> None:
+        for progress_name in ("_scan_progress", "_ingest_progress"):
+            progress = getattr(self, progress_name, None)
+            if progress is not None:
+                progress.close()
+                setattr(self, progress_name, None)
+        for thread_name in (
+            "_load_thread",
+            "_scan_thread",
+            "_ingest_thread",
+            "_behavior_index_thread",
+        ):
+            stop_qthread(getattr(self, thread_name, None), wait_ms=wait_ms)
+            setattr(self, thread_name, None)
+        for worker_name in (
+            "_load_worker",
+            "_scan_worker",
+            "_ingest_worker",
+            "_behavior_index_worker",
+        ):
+            setattr(self, worker_name, None)
+        self._pending_behavior_index_project_id = None

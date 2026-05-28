@@ -50,7 +50,6 @@ QLabel#Signature {
 }
 
 QLabel#SectionTitle {
-    font-size: 16px;
     font-weight: 600;
     color: #e5e7eb;
     padding: 2px 0 4px 0;
@@ -79,7 +78,6 @@ QLabel#ProfileMetric {
     border-radius: 10px;
     padding: 10px 8px;
     color: #f8fafc;
-    font-size: 14px;
     font-weight: 700;
 }
 
@@ -90,9 +88,16 @@ QFrame#CaseDashboardCompact {
 }
 
 QLabel#CaseDashboardTitle {
-    font-size: 16px;
     font-weight: 600;
     color: #f4f7fb;
+}
+
+QLabel#ProjectSelectionBadge {
+    background: #1e3a5f;
+    border: 1px solid #3b82f6;
+    border-radius: 8px;
+    color: #bfdbfe;
+    padding: 2px 8px;
 }
 
 QLabel#CaseMetricCompact {
@@ -227,6 +232,68 @@ QPushButton#ExploreTabActionButton {
     margin: 0;
 }
 
+QPushButton#CompactButton,
+QPushButton#PrimaryButton,
+QPushButton#SetActiveButton {
+    padding: 4px 10px;
+    min-height: 0;
+    max-height: 32px;
+    margin: 0;
+}
+
+QPushButton#SetActiveButton {
+    background: #3b82f6;
+    border: 1px solid #3b82f6;
+    color: #ffffff;
+    font-weight: 700;
+}
+
+QPushButton#SetActiveButton:hover {
+    background: #2563eb;
+    border: 1px solid #2563eb;
+}
+
+QPushButton#SetActiveButton:pressed {
+    background: #1d4ed8;
+    border: 1px solid #1d4ed8;
+}
+
+QPushButton#SetActiveButton:disabled {
+    color: #7c8aa0;
+    background: #243244;
+    border: 1px solid #3b4a5d;
+    font-weight: 400;
+}
+
+QToolButton#CompactToolButton {
+    padding: 2px;
+    min-height: 0;
+    max-width: 32px;
+    max-height: 32px;
+    margin: 0;
+}
+
+QToolButton#PrimaryToolButton {
+    padding: 2px;
+    min-height: 0;
+    max-width: 32px;
+    max-height: 32px;
+    margin: 0;
+    background: #3b82f6;
+    border: 1px solid #3b82f6;
+    color: #ffffff;
+}
+
+QToolButton#PrimaryToolButton:hover {
+    background: #2563eb;
+    border: 1px solid #2563eb;
+}
+
+QToolButton#PrimaryToolButton:pressed {
+    background: #1d4ed8;
+    border: 1px solid #1d4ed8;
+}
+
 QPushButton#SummaryExpandButton {
     padding: 4px 8px;
     font-size: 11px;
@@ -249,19 +316,22 @@ QWidget#ExploreTabActions {
 }
 
 /* Primary */
-QPushButton#Primary {
+QPushButton#Primary,
+QPushButton#PrimaryButton {
     background: #3b82f6;
     border: 1px solid #3b82f6;
     color: white;
     font-weight: 700;
 }
 
-QPushButton#Primary:hover {
+QPushButton#Primary:hover,
+QPushButton#PrimaryButton:hover {
     background: #2563eb;
     border: 1px solid #2563eb;
 }
 
-QPushButton#Primary:pressed {
+QPushButton#Primary:pressed,
+QPushButton#PrimaryButton:pressed {
     background: #1d4ed8;
     border: 1px solid #1d4ed8;
 }
