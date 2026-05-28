@@ -12,7 +12,7 @@ from core.db import get_app_settings, get_project
 from core.workspace import workspace_export_path
 
 from PySide6.QtCore import Qt, Signal, QAbstractTableModel, QModelIndex, QSortFilterProxyModel, QSize, QRectF
-from PySide6.QtGui import QPainter, QColor, QPen, QFontMetrics
+from PySide6.QtGui import QPainter, QColor, QPen, QFont, QFontMetrics
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QLineEdit,
     QTableView, QFileDialog, QMessageBox, QFrame, QGridLayout, QTabWidget,
@@ -506,10 +506,10 @@ class MiniHistogram24Widget(QWidget):
                 
             # labels
             if self._show_labels:
-                f = p.font()
-                f.setPointSize(9)
-                p.setFont(f)
-                fm = QFontMetrics(p.font())
+                label_font = QFont()
+                label_font.setPointSize(9)
+                p.setFont(label_font)
+                fm = QFontMetrics(label_font)
                 p.setPen(text_c)
 
                 def draw_label(hour: int, align: str):
@@ -697,8 +697,8 @@ class RegistryPage(QWidget):
         hero = QFrame()
         hero.setObjectName("Card")
         hl = QVBoxLayout(hero)
-        hl.setContentsMargins(16, 14, 16, 14)
-        hl.setSpacing(10)
+        hl.setContentsMargins(12, 8, 12, 8)
+        hl.setSpacing(8)
 
         top_row = QHBoxLayout()
         left = QVBoxLayout()

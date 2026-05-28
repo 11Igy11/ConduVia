@@ -419,6 +419,8 @@ class ListingPage(QWidget):
         self.lbl_title = QLabel("Listing")
         font = QFont()
         font.setPointSize(20)
+        if font.pointSize() <= 0:
+            font.setPixelSize(20)
         font.setBold(True)
         self.lbl_title.setFont(font)
 
@@ -591,10 +593,6 @@ class ListingPage(QWidget):
         if format_name == "html":
             self._export_html(headers, rows)
             return
-
-        print(f"Export format selected: {format_name}")
-        print(f"Headers: {headers}")
-        print(f"Rows: {len(rows)}")
 
     def _choose_export_format(self):
         dlg = QDialog(self)

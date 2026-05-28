@@ -10,18 +10,12 @@ from core.db import (
     get_project_behavior_profile,
     list_activity,
     list_findings,
-    list_pcap_sources,
-    list_recent_datasets,
 )
-from core.evidence_policy import format_period_day_label
 from core.formatters import human_bytes
-from core.db import list_ingest_items, list_saved_pcap_period_days
 from core.analysis_limits import MAX_PROFILE_ACTIVITY_EVENTS, MAX_PROFILE_TIMELINE_LINES
 from core.period_comparison import build_period_comparison_rows
-from core.pcap_rollup import collect_device_ip_stats, pcap_day_key, rollup_pcap_sources
-from core.project_datasets import count_project_json_datasets, list_project_json_dataset_files
+from core.project_evidence import build_project_evidence_snapshot
 from core.project_identity import project_identifiers_text, subject_display_label, target_display_label
-from core.timeutils import parse_timestamp
 
 
 def build_project_activity_profile(
@@ -52,36 +46,32 @@ def build_project_activity_profile(
             "total_pcap_bytes_label": human_bytes(0, precision=2),
         }
 
-    dataset_sources = list_recent_datasets(project_id, limit=50000, db_path=db_path)
-    dataset_files = [
-        row for row in list_project_json_dataset_files(project_id, limit=50000, db_path=db_path)
-        if row.get("status") == "Available"
-    ]
-    dataset_count = count_project_json_datasets(project_id, limit=50000, db_path=db_path)
-    pcaps = list_pcap_sources(project_id, limit=50000, db_path=db_path)
+    evidence = build_project_evidence_snapshot(project_id, db_path=db_path)
+    json_evidence = evidence["json"]
+    pcap_evidence = evidence["pcap"]
+
+    dataset_sources = json_evidence["dataset_sources"]
+    dataset_files = json_evidence["available_files"]
+    dataset_count = json_evidence["count"]
+    pcaps = pcap_evidence["sources"]
     findings = list_findings(project_id, limit=50000, db_path=db_path)
     activity = list_activity(project_id, limit=50000 if MAX_PROFILE_ACTIVITY_EVENTS <= 0 else MAX_PROFILE_ACTIVITY_EVENTS, db_path=db_path)
 
-    pcap_rollup = rollup_pcap_sources(pcaps)
-    pcap_ips, pcap_device_ip_rows = collect_device_ip_stats(pcaps)
+    pcap_ips = Counter(pcap_evidence["device_ip_counts"])
+    pcap_device_ip_rows = list(pcap_evidence["device_ip_rows"])
     behavior_index = get_project_behavior_profile(project_id, db_path=db_path) or {}
     json_day_rows = list(behavior_index.get("day_rows") or [])
-    capture_starts = [src.first_seen for src in pcaps if src.first_seen]
-    capture_ends = [src.last_seen for src in pcaps if src.last_seen]
-    total_packets = pcap_rollup.total_packets
-    total_pcap_bytes = pcap_rollup.total_bytes
-    capture_start = min(capture_starts) if capture_starts else ""
-    capture_end = max(capture_ends) if capture_ends else ""
+    total_packets = int(pcap_evidence["total_packets"] or 0)
+    total_pcap_bytes = int(pcap_evidence["total_bytes"] or 0)
+    capture_start = str(pcap_evidence["capture_range"].get("first_seen") or "")
+    capture_end = str(pcap_evidence["capture_range"].get("last_seen") or "")
     activity_types = Counter(str(row["event_type"] or "event") for row in activity)
-    pcap_day_packets = pcap_rollup.day_packets
-    pcap_day_bytes = pcap_rollup.day_bytes
-    undated_pcap_packets = pcap_rollup.undated_packets
-    undated_pcap_bytes = pcap_rollup.undated_bytes
-    undated_pcap_count = pcap_rollup.undated_day_count
-    pcap_day_count = pcap_rollup.pcap_day_count
+    pcap_day_count = int(pcap_evidence["day_count"] or 0)
+    pcap_file_count = int(pcap_evidence["source_count"] or 0)
+    pcap_day_rows = list(pcap_evidence["day_rows"])
+    pcap_period_coverage = list(pcap_evidence["period_coverage"])
 
     json_day_count = len(json_day_rows)
-    pcap_file_count = len(pcaps)
 
     summary_lines = [
         "Project Activity Profile",
@@ -116,7 +106,6 @@ def build_project_activity_profile(
         message = str(row["message"] or "")
         timeline_lines.append(f"- {created}: {_event_label(event_type)}{(': ' + message) if message else ''}")
 
-    pcap_period_coverage = _pcap_period_coverage_rows(project_id, db_path=db_path)
     recommendation_lines = _recommendations(
         dataset_count=dataset_count,
         pcap_count=pcap_day_count,
@@ -124,27 +113,6 @@ def build_project_activity_profile(
         pcap_ips=pcap_ips,
         pcap_period_coverage=pcap_period_coverage,
     )
-    pcap_day_rows = [
-        {
-            "label": format_period_day_label(day),
-            "date": day,
-            "count": packets,
-            "bytes": pcap_day_bytes[day],
-            "bytes_label": human_bytes(pcap_day_bytes[day], precision=2),
-            "detail": f"{packets:,} packets / {human_bytes(pcap_day_bytes[day], precision=2)}",
-        }
-        for day, packets in sorted(pcap_day_packets.items())
-    ]
-    if undated_pcap_count:
-        pcap_day_rows.append({
-            "label": "Undated PCAP",
-            "date": "",
-            "count": undated_pcap_packets,
-            "bytes": undated_pcap_bytes,
-            "bytes_label": human_bytes(undated_pcap_bytes, precision=2),
-            "detail": f"{undated_pcap_packets:,} packets / {human_bytes(undated_pcap_bytes, precision=2)}",
-        })
-
     period_comparison_rows = build_period_comparison_rows(json_day_rows, pcap_day_rows)
 
     return {
@@ -188,7 +156,7 @@ def build_project_activity_profile(
         },
         "total_pcap_packets": total_packets,
         "total_pcap_bytes": total_pcap_bytes,
-        "total_pcap_bytes_label": human_bytes(total_pcap_bytes, precision=2),
+        "total_pcap_bytes_label": pcap_evidence["total_bytes_label"],
     }
 
 
@@ -207,42 +175,6 @@ def format_project_activity_profile(profile: dict[str, Any]) -> str:
         lines.extend(visible_timeline)
 
     return "\n".join(lines)
-
-
-def _day_key(value: str) -> str:
-    dt = parse_timestamp(value)
-    return "" if dt is None else dt.strftime("%Y-%m-%d")
-
-
-def _pcap_period_coverage_rows(project_id: int, *, db_path: Path) -> list[dict[str, Any]]:
-    indexed: dict[str, int] = {}
-    for item in list_ingest_items(project_id, file_type="pcap", limit=50000, db_path=db_path):
-        day = str(item.observed_date or "").strip() or "undated"
-        if day == "undated":
-            continue
-        indexed[day] = indexed.get(day, 0) + 1
-
-    saved_days = set(list_saved_pcap_period_days(project_id, db_path=db_path))
-    rows: list[dict[str, Any]] = []
-    for day in sorted(indexed):
-        file_count = indexed[day]
-        saved = day in saved_days
-        rows.append({
-            "label": format_period_day_label(day),
-            "date": day,
-            "count": file_count,
-            "detail": f"{file_count:,} PCAP files indexed",
-            "status": "Saved to project" if saved else "Not saved yet",
-        })
-    for day in sorted(saved_days - set(indexed)):
-        rows.append({
-            "label": format_period_day_label(day),
-            "date": day,
-            "count": 0,
-            "detail": "Saved summary without indexed files",
-            "status": "Saved to project",
-        })
-    return rows
 
 
 def _counter_label(values: Counter[str]) -> str:

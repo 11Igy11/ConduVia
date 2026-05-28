@@ -1773,9 +1773,9 @@ class PcapAnalyzerTests(unittest.TestCase):
         self.assertEqual(profile["finding_count"], 1)
         self.assertEqual(profile["pcap_device_ips"], {"10.0.0.10": 1})
         self.assertEqual(profile["evidence_counts"], [
-            {"label": "JSON Files", "count": 1},
-            {"label": "PCAP Periods", "count": 1},
-            {"label": "Findings", "count": 1},
+            {"label": "JSON", "count": 1, "badge_label": "1 / 0 d"},
+            {"label": "PCAP", "count": 1, "badge_label": "1 / 1 d"},
+            {"label": "Findings", "count": 1, "badge_label": "1"},
         ])
         self.assertEqual(profile["pcap_device_ip_rows"][0]["label"], "10.0.0.10")
         self.assertGreaterEqual(profile["pcap_device_ip_rows"][0]["count"], 1)

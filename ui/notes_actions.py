@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable
+from typing import TYPE_CHECKING, Any, Callable
 
 from PySide6.QtGui import QTextDocument
 from PySide6.QtPrintSupport import QPrinter
@@ -12,9 +12,11 @@ from PySide6.QtWidgets import QFileDialog, QWidget
 from core.db import get_project
 from core.exporters.notes_exporter import export_notes_docx, export_notes_html
 from core.workspace import workspace_export_path, write_project_notes_backup
-from ui.controllers.notes_controller import NotesController
 from ui.notes_charts import available_notes_charts, render_notes_chart
 from ui.notes_page import NotesPage
+
+if TYPE_CHECKING:
+    from ui.controllers.notes_controller import NotesController
 
 
 @dataclass(frozen=True)

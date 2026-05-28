@@ -42,7 +42,7 @@ from core.pcap_analyzer import (
     analyze_pcap_files,
     build_investigator_view,
 )
-from core.pcap_period import resolve_period_day
+from core.pcap_period import aggregate_hash_for_paths, capture_span_note, resolve_period_day
 from core.period_gaps import format_missing_days_summary, missing_period_days
 from core.protocols import format_ip_proto
 from core.workspace import workspace_export_path
@@ -54,13 +54,14 @@ from core.db import (
     get_app_settings,
     get_project,
     list_project_pcap_device_ips,
-    list_pcap_sources,
     mark_ingest_item,
     set_project_subject,
     upsert_ingest_items,
 )
+from core.project_evidence import get_saved_pcap_period_source
 from ui.activity_profile_page import BarChartWidget
 from ui.explore_widgets import AITextWorker, CopyableTableView
+from ui.thread_utils import stop_qthread
 
 
 class VisibilityIndicatorRow(QFrame):
@@ -392,16 +393,15 @@ class PcapPage(QWidget):
         header = QFrame()
         header.setObjectName("ExploreHeaderCard")
         header_layout = QVBoxLayout(header)
-        header_layout.setContentsMargins(14, 14, 14, 14)
-        header_layout.setSpacing(10)
+        header_layout.setContentsMargins(10, 6, 10, 6)
+        header_layout.setSpacing(4)
 
         top = QHBoxLayout()
+        top.setSpacing(6)
         self.lbl_title = QLabel("PCAP analysis")
         self.lbl_title.setObjectName("HeaderProjectLabel")
         self.btn_open = QPushButton("Open PCAP")
         self.btn_save_project = QPushButton("Save Period to Project")
-        self.btn_save_all_periods = QPushButton("Save All Periods")
-        self.btn_save_all_periods.setEnabled(False)
         self.btn_save_project.setEnabled(False)
         self.btn_ai_summary = QPushButton("AI Summary")
         self.btn_ai_summary.setEnabled(False)
@@ -409,11 +409,19 @@ class PcapPage(QWidget):
         self.btn_add_notes.setEnabled(False)
         self.btn_export = QPushButton("Export Summary")
         self.btn_export.setEnabled(False)
+        for button in (
+            self.btn_open,
+            self.btn_save_project,
+            self.btn_ai_summary,
+            self.btn_add_notes,
+            self.btn_export,
+        ):
+            button.setObjectName("CompactButton")
+            button.setFixedHeight(32)
         top.addWidget(self.lbl_title)
         top.addStretch()
         top.addWidget(self.btn_open)
         top.addWidget(self.btn_save_project)
-        top.addWidget(self.btn_save_all_periods)
         top.addWidget(self.btn_ai_summary)
         top.addWidget(self.btn_add_notes)
         top.addWidget(self.btn_export)
@@ -427,7 +435,8 @@ class PcapPage(QWidget):
         self.lbl_period_gaps.setObjectName("MutedLabel")
         self.lbl_period_gaps.setWordWrap(True)
         self.btn_expand_period_gaps = QPushButton("Missing days")
-        self.btn_expand_period_gaps.setMinimumHeight(34)
+        self.btn_expand_period_gaps.setObjectName("CompactButton")
+        self.btn_expand_period_gaps.setFixedHeight(30)
         self.btn_expand_period_gaps.setVisible(False)
         self.btn_expand_period_gaps.clicked.connect(self._open_missing_days_dialog)
         self._period_gap_info: dict[str, object] = {}
@@ -436,7 +445,7 @@ class PcapPage(QWidget):
         header_layout.addWidget(self.lbl_file)
         header_layout.addWidget(self.lbl_stats)
         gap_row = QHBoxLayout()
-        gap_row.setSpacing(10)
+        gap_row.setSpacing(6)
         gap_row.addWidget(self.lbl_period_gaps, 1)
         gap_row.addWidget(self.btn_expand_period_gaps)
         header_layout.addLayout(gap_row)
@@ -444,8 +453,8 @@ class PcapPage(QWidget):
         self.batch_status_panel = QFrame()
         self.batch_status_panel.setObjectName("InlinePanel")
         batch_layout = QHBoxLayout(self.batch_status_panel)
-        batch_layout.setContentsMargins(10, 8, 10, 8)
-        batch_layout.setSpacing(10)
+        batch_layout.setContentsMargins(8, 6, 8, 6)
+        batch_layout.setSpacing(8)
         self.lbl_batch_status = QLabel("")
         self.lbl_batch_status.setObjectName("MutedLabel")
         self.lbl_pcap_day = QLabel("Period:")
@@ -479,7 +488,6 @@ class PcapPage(QWidget):
 
         self.btn_open.clicked.connect(self.open_pcap_dialog)
         self.btn_save_project.clicked.connect(self.save_to_project)
-        self.btn_save_all_periods.clicked.connect(self.save_all_periods_to_project)
         self.btn_ai_summary.clicked.connect(self.generate_ai_summary)
         self.btn_add_notes.clicked.connect(self.add_summary_to_notes)
         self.btn_export.clicked.connect(self.export_summary)
@@ -949,6 +957,46 @@ class PcapPage(QWidget):
         button_row.addWidget(button)
         layout.addLayout(button_row)
         return card
+
+    def _sync_save_period_button(self, *, visible: bool | None = None, saved: bool = False, hide: bool = False) -> None:
+        btn = getattr(self, "btn_save_project", None)
+        if btn is None:
+            return
+        if saved:
+            btn.setText("Saved to Project")
+            btn.setEnabled(False)
+            btn.setToolTip("This period is already saved to the project.")
+            btn.setVisible(not hide)
+            return
+        if visible is not None:
+            btn.setVisible(visible)
+        elif self._pcap_queue_auto_save:
+            btn.setVisible(False)
+        else:
+            btn.setVisible(True)
+
+    def _current_period_day(self) -> str:
+        if self._pcap_active_day:
+            return str(self._pcap_active_day)
+        summary = getattr(self, "summary", None)
+        if summary is None:
+            return ""
+        source_paths = list(getattr(summary, "source_paths", None) or [])
+        if not source_paths and getattr(summary, "file_path", ""):
+            source_paths = [summary.file_path]
+        return resolve_period_day(
+            active_day=self._pcap_active_day,
+            file_paths=source_paths,
+            first_seen=getattr(summary, "first_seen", None),
+            last_seen=getattr(summary, "last_seen", None),
+        )
+
+    def _current_period_already_saved(self) -> bool:
+        project_id = self._current_project_id()
+        day = self._current_period_day()
+        if project_id is None or not day:
+            return False
+        return get_saved_pcap_period_source(project_id, day) is not None
 
     def _update_period_gap_banner(self, present_days: list[str] | None = None) -> None:
         days = list(present_days or self._pcap_day_groups.keys())
@@ -1432,6 +1480,8 @@ class PcapPage(QWidget):
         self.btn_export.setEnabled(False)
         self.btn_ai_summary.setEnabled(False)
         self.btn_save_project.setEnabled(False)
+        if auto_save:
+            self._sync_save_period_button(saved=True, hide=True)
         self.btn_add_notes.setEnabled(False)
         self.lbl_file.setText(Path(paths[0]).name)
         self.lbl_stats.setText("Auto analyzing PCAP batch...")
@@ -1489,17 +1539,19 @@ class PcapPage(QWidget):
         self.cmb_pcap_day.blockSignals(False)
         self._pcap_active_day = self.cmb_pcap_day.currentData() or next(iter(self._pcap_day_groups))
         self._sync_period_selector_panel()
-        if hasattr(self, "btn_save_all_periods"):
-            self.btn_save_all_periods.setEnabled(True)
         self._update_reanalyze_button_state()
         self._update_period_gap_banner()
         return list(self._pcap_day_groups.get(self._pcap_active_day, []))
 
     def _sync_period_selector_panel(self) -> None:
-        has_periods = bool(self._pcap_day_groups)
-        has_batch = self._pcap_batch_total > 1 or bool(self._pcap_queue)
-        self.lbl_pcap_day.setVisible(has_periods)
-        self.cmb_pcap_day.setVisible(has_periods)
+        has_periods = bool(getattr(self, "_pcap_day_groups", None))
+        batch_total = int(getattr(self, "_pcap_batch_total", 0) or 0)
+        queue = list(getattr(self, "_pcap_queue", None) or [])
+        has_batch = batch_total > 1 or bool(queue)
+        if hasattr(self, "lbl_pcap_day"):
+            self.lbl_pcap_day.setVisible(has_periods)
+        if hasattr(self, "cmb_pcap_day"):
+            self.cmb_pcap_day.setVisible(has_periods)
         if hasattr(self, "batch_status_panel"):
             self.batch_status_panel.setVisible(has_periods or has_batch)
 
@@ -1519,20 +1571,25 @@ class PcapPage(QWidget):
         elif prefer_saved:
             self._try_load_saved_pcap_period(day)
 
+    def refresh_current_view(self) -> None:
+        if self._thread is not None or self._batch_thread is not None:
+            return
+        if self.summary:
+            self._render_loaded_summary(self.summary)
+            return
+        day = str(self._pcap_active_day or self.cmb_pcap_day.currentData() or "")
+        if day:
+            self._try_load_saved_pcap_period(day)
+
     def _try_load_saved_pcap_period(self, day: str) -> bool:
         project_id = self._current_project_id()
         if project_id is None or not day:
             return False
 
-        matches = [
-            source
-            for source in list_pcap_sources(project_id, limit=50000)
-            if str(source.period_day or "").strip() == day
-        ]
-        if not matches:
+        source = get_saved_pcap_period_source(project_id, day)
+        if source is None:
             return False
 
-        source = max(matches, key=lambda row: int(row.packet_count or 0))
         self._render_saved_period_source(source, day)
         return True
 
@@ -1581,8 +1638,6 @@ class PcapPage(QWidget):
             f"Device IP: {source.likely_device_ip or '-'} | Packets: {int(source.packet_count or 0):,}"
         )
         self._set_artifact_tables([])
-        if hasattr(self, "btn_save_all_periods"):
-            self.btn_save_all_periods.setEnabled(bool(self._pcap_day_groups))
         self.btn_export.setEnabled(False)
         if hasattr(self, "btn_export_full_dns"):
             self.btn_export_full_dns.setEnabled(False)
@@ -1590,6 +1645,7 @@ class PcapPage(QWidget):
             self.btn_export_full_tls.setEnabled(False)
         self.btn_save_project.setText("Saved to Project")
         self.btn_save_project.setEnabled(False)
+        self._sync_save_period_button(saved=True)
         self.btn_ai_summary.setEnabled(bool(plain))
         self.btn_add_notes.setEnabled(bool(plain))
         self._sync_period_selector_panel()
@@ -1603,8 +1659,6 @@ class PcapPage(QWidget):
             self.cmb_pcap_day.clear()
             self.cmb_pcap_day.blockSignals(False)
         self._sync_period_selector_panel()
-        if hasattr(self, "btn_save_all_periods"):
-            self.btn_save_all_periods.setEnabled(False)
         if hasattr(self, "btn_reanalyze_period"):
             self.btn_reanalyze_period.setEnabled(False)
         self._update_period_gap_banner([])
@@ -1691,6 +1745,8 @@ class PcapPage(QWidget):
         if self._pcap_queue_auto_save:
             saved = self._save_current_to_project(show_dialog=False, check_device=False, refresh_ui=False)
             self._mark_current_ingest("done" if saved else "failed", "" if saved else "Auto-save failed.")
+            if saved:
+                self._sync_save_period_button(saved=True, hide=True)
         source_count = len(getattr(summary, "source_paths", None) or [])
         if source_count > 1 and self._pcap_batch_total == source_count:
             self._pcap_batch_processed = self._pcap_batch_total
@@ -1707,17 +1763,20 @@ class PcapPage(QWidget):
         if hasattr(self, "btn_export_full_tls"):
             self.btn_export_full_tls.setEnabled(True)
         source_count = len(getattr(summary, "source_paths", None) or [])
-        self.btn_save_project.setEnabled(True)
-        if source_count > 1:
-            self.btn_save_project.setText("Save Period to Project")
-            self.btn_save_all_periods.setEnabled(bool(self._pcap_day_groups))
-            self.btn_save_project.setToolTip(
-                "Save this daily aggregate to the project profile. The source files remain indexed individually."
-            )
+        already_saved = self._current_period_already_saved()
+        if already_saved:
+            self._sync_save_period_button(saved=True)
         else:
+            self.btn_save_project.setEnabled(True)
             self.btn_save_project.setText("Save Period to Project")
-            self.btn_save_project.setToolTip("")
-            self.btn_save_all_periods.setEnabled(bool(self._pcap_day_groups))
+            if not self._pcap_queue_auto_save:
+                self._sync_save_period_button(visible=True)
+            if source_count > 1:
+                self.btn_save_project.setToolTip(
+                    "Save this daily aggregate to the project profile. The source files remain indexed individually."
+                )
+            else:
+                self.btn_save_project.setToolTip("")
         self.btn_ai_summary.setEnabled(True)
         self.btn_ai_summary.setText("AI Summary")
         self.btn_add_notes.setEnabled(True)
@@ -2317,6 +2376,7 @@ class PcapPage(QWidget):
             self._render_loaded_summary(last_summary)
             if self._pcap_queue_auto_save:
                 self.btn_save_project.setText("Saved to Project")
+                self._sync_save_period_button(saved=True, hide=True)
             if self._pcap_day_groups:
                 self._reset_batch_status()
         else:
@@ -2641,39 +2701,9 @@ class PcapPage(QWidget):
         except Exception as exc:
             QMessageBox.critical(self, "PCAP export failed", str(exc))
 
-    def save_all_periods_to_project(self) -> None:
-        if not self._pcap_day_groups:
-            self._info("PCAP", "No period groups are loaded.", "Import a folder with a calendar date range first.")
-            return
-        if self._thread is not None or self._batch_thread is not None:
-            self._info("PCAP", "PCAP analysis is already running.")
-            return
-        if not self._ensure_project_workspace():
-            return
-
-        project_id = self._current_project_id()
-        if project_id is None:
-            self._info("PCAP", "Open an active project first.")
-            return
-
-        total_files = sum(len(paths) for paths in self._pcap_day_groups.values())
-        if not self.app._confirm_dialog(
-            title="Save all PCAP periods",
-            message=f"Analyze and save {len(self._pcap_day_groups):,} daily periods to the project?",
-            details=(
-                f"Total PCAP files: {total_files:,}\n"
-                "Each calendar day is saved once to the project profile, matching the JSON period workflow."
-            ),
-            ok_text="Save all",
-            cancel_text="Cancel",
-            width=620,
-        ):
-            return
-
-        all_paths = [path for paths in self._pcap_day_groups.values() for path in paths]
-        self._start_auto_pcap_batch(all_paths, auto_save=True)
-
     def save_to_project(self):
+        if not self.btn_save_project.isEnabled() or self._current_period_already_saved():
+            return
         self._save_current_to_project(show_dialog=True, check_device=True)
 
     def _save_current_to_project(
@@ -2686,6 +2716,10 @@ class PcapPage(QWidget):
         if not self.summary:
             if show_dialog:
                 self._info("PCAP", "Open a PCAP file first.")
+            return False
+
+        if self._current_period_already_saved():
+            self._sync_save_period_button(saved=True)
             return False
 
         project_id = self._current_project_id()
@@ -2768,7 +2802,7 @@ class PcapPage(QWidget):
             return False
 
         self._saved_source_id = source_id
-        self.btn_save_project.setText("Saved to Project")
+        self._sync_save_period_button(saved=True, hide=not show_dialog)
         if refresh_ui:
             self._refresh_project_after_batch()
         details = [f"Source id: {source_id}"]
@@ -2844,7 +2878,7 @@ class PcapPage(QWidget):
         if hasattr(self.app, "projects_ui_controller"):
             self.app.projects_ui_controller.sync_project_workspace(project_id)
             self.app.projects_ui_controller.refresh_recent_datasets(project_id)
-            self.app.projects_ui_controller.refresh_case_dashboard(project_id)
+            self.app.projects_ui_controller.refresh_case_dashboard()
         if hasattr(self.app, "refresh_activity_profile_ui"):
             self.app.refresh_activity_profile_ui()
         self._refresh_activity()
@@ -2876,7 +2910,7 @@ class PcapPage(QWidget):
                     new_text = block
                 self.app.txt_notes.setPlainText(new_text)
             self.app._notes_dirty = True
-            self.app._flush_notes()
+            self.app.notes_controller.flush()
             add_activity(project_id, "pcap_notes_added", self.summary.file_name)
             self._refresh_activity()
         except Exception as exc:
@@ -3026,5 +3060,15 @@ class PcapPage(QWidget):
         return QMessageBox.question(self, title, message) == QMessageBox.Yes
 
     def _refresh_activity(self) -> None:
-        if hasattr(self.app, "refresh_activity_ui"):
-            self.app.refresh_activity_ui()
+        if hasattr(self.app, "notes_controller"):
+            self.app.notes_controller.refresh_activity_ui()
+
+    def shutdown_background_tasks(self, wait_ms: int = 5000) -> None:
+        if self._batch_worker is not None:
+            self._batch_worker.request_stop()
+        for thread_name in ("_thread", "_batch_thread", "_ai_thread"):
+            stop_qthread(getattr(self, thread_name, None), wait_ms=wait_ms)
+            setattr(self, thread_name, None)
+        self._worker = None
+        self._batch_worker = None
+        self._ai_worker = None

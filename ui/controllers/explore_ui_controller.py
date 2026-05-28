@@ -1,10 +1,8 @@
-from core.protocols import format_ip_proto
-from core.formatters import human_bytes
-from PySide6.QtCore import QThread
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QMenu
 from ui.explore_widgets import AITextWorker
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QTableView
+from ui.table_export import export_table_dialog
 
 class ExploreUIController:
     def __init__(self, app):
@@ -290,6 +288,27 @@ class ExploreUIController:
 
         self.app.copy_text("\n".join(lines))
 
+    def export_flows_table(self, export_format: str | None = None) -> None:
+        if self.app.proxy.rowCount() == 0:
+            self.app._message_dialog("Export table", "No flows are loaded or visible.", width=420)
+            return
+
+        if export_format:
+            export_table_dialog(
+                self.app,
+                "Flows",
+                self.app.table,
+                export_format,
+                project_id=self.app.current_project_id,
+                category="json",
+            )
+            return
+
+        menu = QMenu(self.app.btn_export_flows)
+        for fmt, label in (("csv", "Export CSV"), ("xlsx", "Export Excel"), ("html", "Export HTML")):
+            menu.addAction(label, lambda checked=False, chosen=fmt: self.export_flows_table(chosen))
+        menu.exec(self.app.btn_export_flows.mapToGlobal(self.app.btn_export_flows.rect().bottomLeft()))
+
     def generate_ai_summary(self):
         flows = self.app.flow_controller.get_all()
 
@@ -297,7 +316,7 @@ class ExploreUIController:
             self.app._message_dialog("AI Assistant", "Load a dataset first.", width=400)
             return
 
-        if self.app._ai_thread is not None:
+        if self.app.ai_task_controller.is_busy():
             self.app._message_dialog("AI Assistant", "AI summary is already running.", width=420)
             return
 
@@ -308,57 +327,31 @@ class ExploreUIController:
 
         dataset_path = str(self.app.current_folder) if self.app.current_folder else ""
 
-        self.app._ai_mode = "summary"
-        self.app._ai_thread = QThread()
-        self.app._ai_worker = AITextWorker(
+        worker = AITextWorker(
             self.app.ai_service.generate_dataset_summary,
             list(flows),
             self.app.current_project_name,
             dataset_path,
         )
-
-        self.app._ai_worker.moveToThread(self.app._ai_thread)
-        self.app._ai_thread.started.connect(self.app._ai_worker.run)
-        self.app._ai_worker.finished.connect(self.app.on_ai_task_finished)
-        self.app._ai_worker.error.connect(self.app.on_ai_task_error)
-
-        self.app._ai_worker.finished.connect(self.app._ai_thread.quit)
-        self.app._ai_worker.error.connect(self.app._ai_thread.quit)
-
-        self.app._ai_thread.finished.connect(self.app._cleanup_ai_thread)
-
-        self.app._ai_thread.start()
+        self.app.ai_task_controller.start("summary", worker)
 
     def explain_selected_flow(self):
         if not self.app._current_flow:
             self.app._message_dialog("AI Assistant", "Select a flow first.", width=400)
             return
 
-        if self.app._ai_thread is not None:
+        if self.app.ai_task_controller.is_busy():
             self.app._message_dialog("AI Assistant", "Another AI task is already running.", width=430)
             return
 
-        self.app._ai_mode = "flow"
         self.app.btn_ai_explain.setEnabled(False)
         self.app.txt_ai_summary.setPlainText("Generating AI flow explanation...")
         self.app.tabs.setCurrentIndex(0)
 
-        self.app._ai_thread = QThread()
-        self.app._ai_worker = AITextWorker(
+        worker = AITextWorker(
             self.app.ai_service.explain_flow,
             dict(self.app._current_flow),
         )
-
-        self.app._ai_worker.moveToThread(self.app._ai_thread)
-        self.app._ai_thread.started.connect(self.app._ai_worker.run)
-        self.app._ai_worker.finished.connect(self.app.on_ai_task_finished)
-        self.app._ai_worker.error.connect(self.app.on_ai_task_error)
-
-        self.app._ai_worker.finished.connect(self.app._ai_thread.quit)
-        self.app._ai_worker.error.connect(self.app._ai_thread.quit)
-
-        self.app._ai_thread.finished.connect(self.app._cleanup_ai_thread)
-
-        self.app._ai_thread.start()
+        self.app.ai_task_controller.start("flow", worker)
 
     

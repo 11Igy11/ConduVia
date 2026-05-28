@@ -33,6 +33,8 @@ from core.project_profile import build_project_activity_profile
 from core.timeutils import parse_timestamp
 from core.workspace import workspace_export_path
 from ui.explore_widgets import AITextWorker
+from ui.thread_utils import stop_qthread
+from ui.project_rows_dialog import open_project_rows_dialog
 
 
 def _compact_range(first_seen: str, last_seen: str) -> str:
@@ -97,8 +99,8 @@ class ActivityProfilePage(QWidget):
         header = QFrame()
         header.setObjectName("ExploreHeaderCard")
         header_layout = QVBoxLayout(header)
-        header_layout.setContentsMargins(14, 14, 14, 14)
-        header_layout.setSpacing(8)
+        header_layout.setContentsMargins(10, 6, 10, 6)
+        header_layout.setSpacing(4)
 
         title_row = QHBoxLayout()
         self.lbl_title = QLabel("Activity Profile")
@@ -471,6 +473,15 @@ class ActivityProfilePage(QWidget):
             self._ai_thread.deleteLater()
             self._ai_thread = None
 
+    def shutdown_background_tasks(self, wait_ms: int = 5000) -> None:
+        stop_qthread(self._ai_thread, wait_ms=wait_ms)
+        if self._ai_worker is not None:
+            self._ai_worker.deleteLater()
+            self._ai_worker = None
+        if self._ai_thread is not None:
+            self._ai_thread.deleteLater()
+            self._ai_thread = None
+
     def _set_metrics(self, metrics: list[dict[str, Any]]):
         defaults = [
             {"label": "JSON", "value": 0, "detail": "loaded"},
@@ -704,18 +715,18 @@ class ActivityProfilePage(QWidget):
     def _expand_behavior_rows(self, key: str, title: str) -> None:
         behavior = self._current_behavior_profile()
         rows = list(behavior.get(key) or [])
-        if not rows or not hasattr(self.app, "_open_project_rows_dialog"):
+        if not rows:
             return
         if key == "service_rows":
             columns = [("label", "Service"), ("bytes_label", "Volume"), ("count", "Flows"), ("example", "Example")]
         else:
             columns = [("label", "Domain"), ("bytes_label", "Volume"), ("count", "Flows"), ("share", "Share")]
-        self.app._open_project_rows_dialog(title, columns, rows)
+        open_project_rows_dialog(self.app, title, columns, rows)
 
     def _expand_profile_rows(self, key: str, title: str) -> None:
         profile = self.profile or {}
         rows = list(profile.get(key) or [])
-        if not rows or not hasattr(self.app, "_open_project_rows_dialog"):
+        if not rows:
             return
         if key == "period_comparison_rows":
             columns = [
@@ -730,7 +741,7 @@ class ActivityProfilePage(QWidget):
             columns = [("label", "Day"), ("count", "Packets"), ("bytes_label", "Volume"), ("detail", "Detail")]
         else:
             columns = [("label", "Day"), ("count", "Flows"), ("detail", "Detail")]
-        self.app._open_project_rows_dialog(title, columns, rows)
+        open_project_rows_dialog(self.app, title, columns, rows)
 
     def _current_flows(self) -> list[dict[str, Any]]:
         if self.app and getattr(self.app, "current_project_id", None) is not None:

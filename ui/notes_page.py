@@ -236,7 +236,9 @@ class NotesPage(QWidget):
             if key == "fontFamily":
                 fmt.setFontFamily(str(value))
             elif key == "fontPointSize":
-                fmt.setFontPointSize(float(value))
+                size = float(value)
+                if size > 0:
+                    fmt.setFontPointSize(size)
             elif key == "fontWeight":
                 fmt.setFontWeight(int(value))
             elif key == "fontItalic":
@@ -306,6 +308,8 @@ class NotesPage(QWidget):
                 self.font_box.setCurrentIndex(idx)
         if font.pointSize() > 0:
             self.size_box.setValue(font.pointSize())
+        elif font.pixelSize() > 0:
+            self.size_box.setValue(max(8, min(36, int(round(font.pixelSize() * 0.75)))))
         self.btn_bold.setChecked(font.bold())
         self.btn_italic.setChecked(font.italic())
         self.btn_underline.setChecked(font.underline())
