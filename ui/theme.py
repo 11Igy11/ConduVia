@@ -162,6 +162,13 @@ QComboBox:focus {
     border-color: #2563eb;
 }
 
+QLineEdit#SettingsField,
+QComboBox#SettingsField {
+    min-height: 36px;
+    max-height: 36px;
+    padding: 6px 10px;
+}
+
 QComboBox QAbstractItemView {
     background: #ffffff;
     color: #111827;

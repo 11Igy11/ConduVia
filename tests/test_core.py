@@ -25,6 +25,7 @@ from core.db import (
     file_sha256,
     get_app_setting,
     get_app_settings,
+    get_latest_osint_lookup,
     get_project,
     get_project_behavior_profile,
     init_db,
@@ -36,6 +37,8 @@ from core.db import (
     list_recent_dataset_sources,
     list_recent_datasets,
     mark_ingest_item,
+    save_osint_lookup,
+    save_project_behavior_profile,
     set_app_setting,
     set_project_subject,
     set_project_target,
@@ -77,6 +80,11 @@ from core.project_datasets import count_project_json_datasets, list_project_json
 from core.project_behavior_index import build_project_behavior_index
 from core.project_identity import identifier_values_match, is_valid_oib, normalize_identifier_value
 from core.project_profile import build_project_activity_profile, format_project_activity_profile
+from core.osint.links import build_domain_links, build_identifier_search_links, build_ip_links
+from core.osint.normalize import normalize_domain, normalize_msisdn
+from core.osint.service import available_enrichers, enrich_entity
+from core.osint.settings import OsintSettings
+from core.osint.snapshot import build_osint_snapshot
 from core.protocols import describe_ip_proto, format_ip_proto_with_description
 from core.timeutils import LOCAL_TZ, parse_timestamp
 from core.workspace import (
@@ -1258,6 +1266,175 @@ class AppSettingsTests(unittest.TestCase):
                 get_app_settings("ai.", db_path=db_path),
                 {"ai.model": "model-a", "ai.timeout_seconds": "42"},
             )
+
+
+class OsintTests(unittest.TestCase):
+    def test_normalize_msisdn_adds_country_prefix(self):
+        self.assertEqual(normalize_msisdn("0911234567"), "+385911234567")
+        self.assertEqual(normalize_msisdn("+385911234567"), "+385911234567")
+
+    def test_build_search_links_for_identifier(self):
+        links = build_identifier_search_links(name="Ana Horvat", identifier="+385911234567", kind="MSISDN")
+        labels = {row["label"] for row in links}
+        self.assertIn("Google name", labels)
+        self.assertIn("Google phone", labels)
+        self.assertTrue(all(row["url"].startswith("https://") for row in links))
+
+    def test_build_domain_and_ip_links(self):
+        domain_links = build_domain_links("example.com")
+        ip_links = build_ip_links("1.2.3.4")
+        self.assertTrue(any("crt.sh" in row["url"] for row in domain_links))
+        self.assertTrue(any("virustotal.com" in row["url"] for row in ip_links))
+
+    def test_available_enrichers_by_entity_kind(self):
+        self.assertIn("dns", available_enrichers("domain"))
+        self.assertIn("reverse_dns", available_enrichers("ip"))
+        self.assertEqual(available_enrichers("identifier"), [])
+
+    def test_osint_snapshot_collects_subject_and_profile_entities(self):
+        with temporary_directory() as tmp:
+            db_path = Path(tmp) / "osint.db"
+            init_db(db_path)
+            project_id = create_project("OSINT Case", db_path=db_path)
+            set_project_subject(
+                project_id,
+                first_name="Ana",
+                last_name="Horvat",
+                msisdn="0911234567",
+                ip="10.0.0.5",
+                extra_identifiers="email: ana@example.test",
+                db_path=db_path,
+            )
+            save_project_behavior_profile(
+                project_id,
+                {
+                    "flow_count": 2,
+                    "domain_rows": [{"label": "web.facebook.com", "count": 3, "bytes": 1000, "bytes_label": "1.0 KB", "share": 1.0}],
+                },
+                db_path=db_path,
+            )
+
+            snapshot = build_osint_snapshot(project_id, db_path=db_path)
+
+        self.assertEqual(snapshot["project_name"], "OSINT Case")
+        self.assertEqual(snapshot["subject_label"], "Ana Horvat")
+        self.assertTrue(any(row["value"] == "+385911234567" for row in snapshot["identifiers"]))
+        self.assertTrue(any(row["value"] == "10.0.0.5" for row in snapshot["ips"]))
+        self.assertTrue(any(row["value"] == "web.facebook.com" for row in snapshot["domains"]))
+
+    def test_osint_lookup_is_persisted(self):
+        with temporary_directory() as tmp:
+            db_path = Path(tmp) / "osint.db"
+            init_db(db_path)
+            project_id = create_project("Lookup Case", db_path=db_path)
+            lookup_id = save_osint_lookup(
+                project_id,
+                entity_kind="domain",
+                entity_value="example.com",
+                enricher="dns",
+                status="ok",
+                summary="DNS for example.com",
+                details={"A": ["93.184.216.34"]},
+                db_path=db_path,
+            )
+            latest = get_latest_osint_lookup(
+                project_id,
+                entity_kind="domain",
+                entity_value="example.com",
+                enricher="dns",
+                db_path=db_path,
+            )
+
+        self.assertGreater(lookup_id, 0)
+        self.assertIsNotNone(latest)
+        self.assertEqual(latest["summary"], "DNS for example.com")
+        self.assertEqual(latest["details"]["A"], ["93.184.216.34"])
+
+    def test_osint_settings_roundtrip(self):
+        settings = OsintSettings(virustotal_api_key="vt-key", shodan_api_key="sh-key")
+        restored = OsintSettings.from_mapping(settings.to_mapping())
+        self.assertEqual(restored.virustotal_api_key, "vt-key")
+        self.assertEqual(restored.shodan_api_key, "sh-key")
+
+    def test_shodan_skips_private_ip_before_api_call(self):
+        result = enrich_entity(
+            "shodan",
+            "ip",
+            "10.142.39.39",
+            settings=OsintSettings(shodan_api_key="test-key"),
+        )
+        self.assertEqual(result.status, "error")
+        self.assertIn("private", result.summary.lower())
+
+    def test_registrable_domain_from_cdn_host(self):
+        from core.osint.registrable_domain import registrable_domain
+
+        root = registrable_domain("eu-nw-courier-vs.push-apple.com.akadns.net")
+        self.assertEqual(root, "apple.com")
+
+    def test_decode_imsi_hr_telekom(self):
+        from core.osint.imsi import decode_imsi
+
+        result = decode_imsi("219012345678901")
+        self.assertEqual(result.status, "ok")
+        self.assertIn("Hrvatski Telekom", result.summary)
+
+    def test_decode_msisdn_hr_prefix_hint(self):
+        from core.osint.msisdn_carrier import decode_msisdn_operator
+
+        result = decode_msisdn_operator("+385911234567")
+        self.assertEqual(result.status, "ok")
+        self.assertIn("Hrvatski Telekom", result.summary)
+
+    def test_decode_imei_tac_from_bundled_db(self):
+        from core.osint.imei import decode_imei
+
+        result = decode_imei("356789012345678")
+        self.assertEqual(result.enricher, "imei_decode")
+        self.assertIn("Samsung", result.summary)
+
+    def test_decode_imei_invalid_checksum_still_decodes_tac(self):
+        from core.osint.imei import decode_imei
+
+        result = decode_imei("901370011193137")
+        self.assertEqual(result.details["tac"], "90137001")
+        self.assertFalse(result.details["luhn_valid"])
+        self.assertEqual(result.details["expected_check_digit"], 0)
+        self.assertEqual(result.status, "warning")
+        self.assertIn("operator exports", result.summary)
+
+    def test_registrable_domain_co_uk(self):
+        from core.osint.registrable_domain import registrable_domain
+
+        self.assertEqual(registrable_domain("www.example.co.uk"), "example.co.uk")
+
+    def test_import_tac_csv(self):
+        from core.osint.tac_store import import_tac_csv, lookup_tac, invalidate_tac_cache
+        from core.db import APP_DATA_DIR
+
+        with temporary_directory() as tmp:
+            csv_path = Path(tmp) / "tac.csv"
+            csv_path.write_text(
+                "tac,manufacturer,model,device_type\n99999999,TestCo,Test Phone,smartphone\n",
+                encoding="utf-8",
+            )
+            imported_path = APP_DATA_DIR / "osint" / "tac_import.json"
+            backup = imported_path.read_text(encoding="utf-8") if imported_path.exists() else None
+            try:
+                count, message = import_tac_csv(csv_path)
+                self.assertEqual(count, 1)
+                self.assertIn("Imported", message)
+                entry = lookup_tac("99999999")
+                self.assertIsNotNone(entry)
+                self.assertEqual(entry["manufacturer"], "TestCo")
+            finally:
+                invalidate_tac_cache()
+                if backup is None:
+                    if imported_path.exists():
+                        imported_path.unlink()
+                else:
+                    imported_path.write_text(backup, encoding="utf-8")
+                    invalidate_tac_cache()
 
 
 class ProjectTargetTests(unittest.TestCase):

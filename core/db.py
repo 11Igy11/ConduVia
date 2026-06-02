@@ -282,6 +282,24 @@ def init_db(db_path: Path = DEFAULT_DB_PATH) -> None:
             """
         )
 
+        # --- OSINT lookups (cached enrich results) ---
+        con.execute(
+            """
+            CREATE TABLE IF NOT EXISTS osint_lookups (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_id INTEGER NOT NULL,
+                entity_kind TEXT NOT NULL,
+                entity_value TEXT NOT NULL,
+                enricher TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'ok',
+                summary TEXT NOT NULL DEFAULT '',
+                details_json TEXT NOT NULL DEFAULT '{}',
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
+            );
+            """
+        )
+
         # --- Indexes (performance) ---
         con.execute("CREATE INDEX IF NOT EXISTS idx_datasets_project_loaded ON datasets(project_id, loaded_at);")
         con.execute("CREATE INDEX IF NOT EXISTS idx_pcap_sources_project_created ON pcap_sources(project_id, created_at);")
@@ -289,6 +307,9 @@ def init_db(db_path: Path = DEFAULT_DB_PATH) -> None:
         con.execute("CREATE INDEX IF NOT EXISTS idx_findings_project_created ON findings(project_id, created_at);")
         con.execute("CREATE INDEX IF NOT EXISTS idx_activity_project_created ON activity_log(project_id, created_at);")
         con.execute("CREATE INDEX IF NOT EXISTS idx_ingest_items_project_status ON ingest_items(project_id, status, file_type);")
+        con.execute(
+            "CREATE INDEX IF NOT EXISTS idx_osint_lookups_entity ON osint_lookups(project_id, entity_kind, entity_value, enricher);"
+        )
 
 # ---------------- App settings ----------------
 def get_app_setting(key: str, default: str = "", db_path: Path = DEFAULT_DB_PATH) -> str:
@@ -1501,3 +1522,123 @@ def delete_finding(finding_id: int, db_path: Path = DEFAULT_DB_PATH) -> None:
     if proj_id is not None:
         touch_project(proj_id, db_path=db_path)
         add_activity(proj_id, "finding_deleted", f"#{finding_id} {title}", db_path=db_path)
+
+
+# ---------------- OSINT lookups ----------------
+def save_osint_lookup(
+    project_id: int,
+    *,
+    entity_kind: str,
+    entity_value: str,
+    enricher: str,
+    status: str,
+    summary: str,
+    details: dict | None = None,
+    db_path: Path = DEFAULT_DB_PATH,
+) -> int:
+    payload = json.dumps(details or {}, ensure_ascii=False)
+    with _connect(db_path) as con:
+        cur = con.execute(
+            """
+            INSERT INTO osint_lookups (
+                project_id, entity_kind, entity_value, enricher, status, summary, details_json
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?);
+            """,
+            (
+                project_id,
+                str(entity_kind or ""),
+                str(entity_value or ""),
+                str(enricher or ""),
+                str(status or "ok"),
+                str(summary or ""),
+                payload,
+            ),
+        )
+        return int(cur.lastrowid)
+
+
+def get_latest_osint_lookup(
+    project_id: int,
+    *,
+    entity_kind: str,
+    entity_value: str,
+    enricher: str,
+    db_path: Path = DEFAULT_DB_PATH,
+) -> Optional[dict]:
+    with _connect(db_path) as con:
+        row = con.execute(
+            """
+            SELECT *
+            FROM osint_lookups
+            WHERE project_id = ? AND entity_kind = ? AND entity_value = ? AND enricher = ?
+            ORDER BY id DESC
+            LIMIT 1;
+            """,
+            (project_id, str(entity_kind or ""), str(entity_value or ""), str(enricher or "")),
+        ).fetchone()
+    if not row:
+        return None
+    try:
+        details = json.loads(str(row["details_json"] or "{}"))
+    except Exception:
+        details = {}
+    return {
+        "id": int(row["id"]),
+        "project_id": int(row["project_id"]),
+        "entity_kind": str(row["entity_kind"] or ""),
+        "entity_value": str(row["entity_value"] or ""),
+        "enricher": str(row["enricher"] or ""),
+        "status": str(row["status"] or ""),
+        "summary": str(row["summary"] or ""),
+        "details": details if isinstance(details, dict) else {},
+        "created_at": str(row["created_at"] or ""),
+    }
+
+
+def list_osint_lookups(
+    project_id: int,
+    *,
+    entity_kind: str = "",
+    entity_value: str = "",
+    limit: int = 50,
+    db_path: Path = DEFAULT_DB_PATH,
+) -> list[dict]:
+    query = """
+        SELECT *
+        FROM osint_lookups
+        WHERE project_id = ?
+    """
+    params: list = [project_id]
+    if entity_kind:
+        query += " AND entity_kind = ?"
+        params.append(entity_kind)
+    if entity_value:
+        query += " AND entity_value = ?"
+        params.append(entity_value)
+    query += " ORDER BY id DESC LIMIT ?;"
+    params.append(int(limit))
+
+    with _connect(db_path) as con:
+        rows = con.execute(query, tuple(params)).fetchall()
+
+    results = []
+    for row in rows:
+        try:
+            details = json.loads(str(row["details_json"] or "{}"))
+        except Exception:
+            details = {}
+        results.append(
+            {
+                "id": int(row["id"]),
+                "project_id": int(row["project_id"]),
+                "entity_kind": str(row["entity_kind"] or ""),
+                "entity_value": str(row["entity_value"] or ""),
+                "enricher": str(row["enricher"] or ""),
+                "status": str(row["status"] or ""),
+                "summary": str(row["summary"] or ""),
+                "details": details if isinstance(details, dict) else {},
+                "created_at": str(row["created_at"] or ""),
+            }
+        )
+    return results
