@@ -100,6 +100,15 @@ QLabel#ProjectSelectionBadge {
     padding: 2px 8px;
 }
 
+QLabel#HitBanner {
+    background: #064e3b;
+    border: 1px solid #10b981;
+    border-radius: 8px;
+    color: #d1fae5;
+    padding: 6px 10px;
+    font-weight: 600;
+}
+
 QLabel#CaseMetricCompact {
     background: #273549;
     border: 1px solid #475569;
@@ -236,6 +245,7 @@ QPushButton#CompactButton,
 QPushButton#PrimaryButton,
 QPushButton#SetActiveButton {
     padding: 4px 10px;
+    min-width: 0;
     min-height: 0;
     max-height: 32px;
     margin: 0;
@@ -383,6 +393,13 @@ QTextEdit:focus,
 QPlainTextEdit:focus,
 QComboBox:focus {
     border: 1px solid #60a5fa;
+}
+
+QLineEdit#SettingsField,
+QComboBox#SettingsField {
+    min-height: 36px;
+    max-height: 36px;
+    padding: 6px 10px;
 }
 
 /* ComboBox dropdown */
@@ -816,6 +833,34 @@ QPushButton#DangerButton:pressed {
     border: 1px solid #991b1b;
 }
 
+QPushButton#OutlineButton {
+    background: transparent;
+    border: 1px solid #3b82f6;
+    color: #93c5fd;
+    font-weight: 600;
+    padding: 4px 10px;
+    min-width: 0;
+    min-height: 0;
+    max-height: 32px;
+    border-radius: 6px;
+}
+
+QPushButton#OutlineButton:hover {
+    background: #1e3a5f;
+    color: #ffffff;
+}
+
+QPushButton#OutlineButton:pressed {
+    background: #1e40af;
+    color: #ffffff;
+}
+
+QPushButton#OutlineButton:disabled {
+    background: transparent;
+    border: 1px solid #374151;
+    color: #6b7280;
+}
+
 #NotesToolbar {
     background: #223149;
     border: 1px solid #415372;
@@ -891,6 +936,13 @@ QDialog QPushButton {
     min-width: 110px;
     min-height: 36px;
     padding: 6px 14px;
+}
+
+QDialog QPushButton#CompactButton {
+    min-width: 0;
+    min-height: 0;
+    max-height: 32px;
+    padding: 4px 10px;
 }
 
 QDialogButtonBox {

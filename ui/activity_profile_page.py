@@ -126,6 +126,13 @@ class ActivityProfilePage(QWidget):
 
         header_layout.addLayout(title_row)
         header_layout.addWidget(self.lbl_subtitle)
+
+        self.lbl_profile_hit = QLabel("")
+        self.lbl_profile_hit.setObjectName("HitBanner")
+        self.lbl_profile_hit.setWordWrap(True)
+        self.lbl_profile_hit.hide()
+        header_layout.addWidget(self.lbl_profile_hit)
+
         root.addWidget(header)
 
         scroll = QScrollArea()
@@ -340,9 +347,49 @@ class ActivityProfilePage(QWidget):
         recommendation_lines = list(profile.get("recommendation_lines") or [])
         self.txt_next.setPlainText("\n".join(recommendation_lines))
 
+        self._update_hit_banner(project_id)
+
+    def _update_hit_banner(self, project_id: int | None) -> None:
+        banner = getattr(self, "lbl_profile_hit", None)
+        if banner is None:
+            return
+        if project_id is None:
+            banner.hide()
+            banner.clear()
+            return
+        try:
+            from core.leaks.search import HIT_KINDS, find_hits
+            from core.osint.snapshot import build_osint_snapshot
+
+            snapshot = build_osint_snapshot(int(project_id))
+            seen: set[str] = set()
+            hits: list[str] = []
+            for row in snapshot.get("identifiers") or []:
+                kind = str(row.get("kind") or "").strip().upper()
+                value = str(row.get("value") or "").strip()
+                if kind not in HIT_KINDS or not value or value in seen:
+                    continue
+                seen.add(value)
+                total, summary = find_hits(value, kind=kind)
+                if total:
+                    hits.append(f"{kind} {value} → {total} in {summary}")
+        except Exception:
+            banner.hide()
+            banner.clear()
+            return
+        if hits:
+            banner.setText("\u2714  Repository hits: " + "; ".join(hits))
+            banner.show()
+        else:
+            banner.hide()
+            banner.clear()
+
     def clear(self):
         self.lbl_title.setText("Activity Profile")
         self.lbl_subtitle.setText("Open a project to build a device/user activity profile from JSON datasets, PCAP sources, findings and notes.")
+        if hasattr(self, "lbl_profile_hit"):
+            self.lbl_profile_hit.hide()
+            self.lbl_profile_hit.clear()
         self.profile = None
         self.project_name = ""
         self._profile_project_id = None

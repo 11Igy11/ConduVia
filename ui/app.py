@@ -15,6 +15,7 @@ from ui.controllers.projects_ui_controller import ProjectsUIController
 from ui.controllers.ai_task_controller import AiTaskController
 from ui.controllers.dataset_controller import DatasetController
 from ui.controllers.explore_ui_controller import ExploreUIController
+from ui.controllers.osint_ui_controller import OsintUIController
 from ui.explore_widgets import AITextWorker
 from ui.ai_output import AIOutputState, build_ai_output_state, render_ai_output_hub
 from ui.notes_page import NotesPage
@@ -105,6 +106,7 @@ class App(QWidget):
         self.projects_ui_controller = ProjectsUIController(self)
         self.dataset_controller = DatasetController(self)
         self.explore_ui_controller = ExploreUIController(self)
+        self.osint_ui_controller = OsintUIController(self)
 
         self._notes_timer.timeout.connect(self.notes_controller.flush)
         self._search_timer.timeout.connect(self.search_controller.apply_search_filter)        
@@ -261,7 +263,7 @@ class App(QWidget):
         self._ai_output_state = AIOutputState()
 
     def _build_osint_page(self) -> QWidget:
-        return build_osint_page()
+        return build_osint_page(self)
 
     def _build_ui(self) -> None:
         outer = QVBoxLayout(self)
@@ -367,6 +369,8 @@ class App(QWidget):
     def _before_page_switch(self, idx: int) -> None:
         if idx == self.IDX_PROFILE:
             self.refresh_activity_profile_ui()
+        if idx == self.IDX_OSINT and hasattr(self, "osint_ui_controller"):
+            self.osint_ui_controller.refresh()
         if idx == self.IDX_SETTINGS and hasattr(self, "settings_page"):
             self.settings_page.refresh()
 
@@ -395,6 +399,8 @@ class App(QWidget):
         self.refresh_activity_profile_ui()
         if hasattr(self, "pcap_page"):
             self.pcap_page.refresh_current_view()
+        if hasattr(self, "osint_ui_controller"):
+            self.osint_ui_controller.refresh()
 
         if hasattr(self, "settings_page"):
             self.settings_page.refresh()
@@ -405,6 +411,20 @@ class App(QWidget):
             "Refreshed projects, project dashboard, recent datasets, notes, findings, activity profile, PCAP view and settings.",
             width=460,
         )
+
+    def open_leaks_viewer(self) -> None:
+        from ui.leaks_viewer import LeaksViewerDialog
+
+        viewer = getattr(self, "_leaks_viewer", None)
+        if viewer is None:
+            viewer = LeaksViewerDialog(self)
+            self._leaks_viewer = viewer
+        else:
+            viewer.refresh_datasets()
+            viewer._run_search(reset=True)
+        viewer.show()
+        viewer.raise_()
+        viewer.activateWindow()
 
     def apply_theme(self, theme: str | None) -> None:
         qapp = QApplication.instance()
