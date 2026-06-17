@@ -6,7 +6,7 @@ from typing import Any
 from core.formatters import bytes_mb_or_b, human_bytes, safe_int, format_short_date
 from core.timeutils import parse_flow_timestamp
 from core.exporters.registry_exporter import export_registry_html
-from ui.table_export import export_table_file
+from ui.table_export import export_table_dialog
 from ui.buttons import make_action_button
 from core.db import get_app_settings, get_project
 from core.workspace import workspace_export_path
@@ -1520,6 +1520,7 @@ class RegistryPage(QWidget):
                 ("bytes", "Bytes (raw)"),
             ],
             self._daily_activity_rows,
+            export_source_label=str(self._folder or ""),
         )
 
     def _apply_hist_mode(self):
@@ -1643,6 +1644,7 @@ class RegistryPage(QWidget):
                 ("value", hdrs[1]),
             ],
             [{"item": row[0], "value": row[1]} for row in formatted],
+            export_source_label=str(self._folder or ""),
         )
 
     def _fit_pairs_height(self, n_rows: int):
@@ -1828,72 +1830,18 @@ class RegistryPage(QWidget):
     def _export_table_button(self, text: str, title: str, table: QTableView, export_format: str) -> QPushButton:
         button = QPushButton(text)
         button.setMinimumHeight(42)
-        button.clicked.connect(lambda: self._export_dataset_table(title, table, export_format))
-        return button
-
-    def _dataset_table_export_data(self, table: QTableView) -> tuple[list[str], list[list[str]]]:
-        model = table.model()
-        if model is None:
-            return [], []
-
-        headers = [
-            str(model.headerData(col, Qt.Horizontal, Qt.DisplayRole) or "")
-            for col in range(model.columnCount())
-        ]
-        rows: list[list[str]] = []
-        for row in range(model.rowCount()):
-            rows.append([
-                str(model.index(row, col).data(Qt.DisplayRole) or "")
-                for col in range(model.columnCount())
-            ])
-        return headers, rows
-
-    def _dataset_table_default_path(self, title: str, suffix: str) -> str:
-        safe_title = "".join(ch if ch.isalnum() else "_" for ch in (title or "registry_dataset").lower())
-        safe_title = "_".join(part for part in safe_title.split("_") if part) or "registry_dataset"
-        base_name = f"{safe_title}.{suffix}"
-        project = self._current_project()
-        if project and project.base_folder:
-            return str(workspace_export_path(project.base_folder, base_name, category="json"))
-        return base_name
-
-    def _export_dataset_table(self, title: str, table: QTableView, export_format: str) -> None:
-        headers, rows = self._dataset_table_export_data(table)
-        if not headers or not rows:
-            QMessageBox.information(self, "Export table", "No rows are loaded.")
-            return
-
-        filters = {
-            "csv": "CSV files (*.csv)",
-            "xlsx": "Excel files (*.xlsx)",
-            "html": "HTML files (*.html)",
-        }
-        suffix = "xlsx" if export_format == "xlsx" else export_format
-        file_path, _ = QFileDialog.getSaveFileName(
-            self,
-            f"Export {title}",
-            self._dataset_table_default_path(title, suffix),
-            filters.get(export_format, "All files (*.*)"),
-        )
-        if not file_path:
-            return
-
-        try:
-            export_table_file(
-                file_path,
+        button.clicked.connect(
+            lambda: export_table_dialog(
+                self,
                 title,
-                headers,
-                rows,
+                table,
                 export_format,
                 project_id=getattr(self.app, "current_project_id", None),
-                project_name=getattr(self.app, "current_project_name", "") or "",
+                category="json",
                 source_label=str(self._folder or ""),
             )
-        except Exception as exc:
-            QMessageBox.critical(self, "Export table failed", str(exc))
-            return
-
-        QMessageBox.information(self, "Export table", f"Exported:\n{file_path}")
+        )
+        return button
 
     def _current_project(self):
         project_id = getattr(self.app, "current_project_id", None)

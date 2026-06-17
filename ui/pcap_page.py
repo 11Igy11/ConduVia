@@ -36,7 +36,7 @@ from PySide6.QtWidgets import (
 )
 
 from core.analysis_limits import PROFILE_CHART_PREVIEW_ROWS
-from ui.table_export import export_table_file
+from ui.table_export import export_table_dialog
 from ui.buttons import make_action_button, style_action_button
 from ui.dataset_header_layout import (
     DATASET_HEADER_MARGINS,
@@ -1474,67 +1474,18 @@ class PcapPage(QWidget):
     def _export_button(self, text: str, title: str, table: QTableView, export_format: str) -> QPushButton:
         button = QPushButton(text)
         button.setMinimumHeight(42)
-        button.clicked.connect(lambda: self._export_table_dialog(title, table, export_format))
-        return button
-
-    def _table_export_data(self, table: QTableView) -> tuple[list[str], list[list[str]]]:
-        model = table.model()
-        if not isinstance(model, DictTableModel):
-            return [], []
-
-        headers = [title for _, title in model.columns]
-        rows = [
-            ["" if row.get(key) is None else str(row.get(key)) for key, _ in model.columns]
-            for row in model.rows
-        ]
-        return headers, rows
-
-    def _table_export_default_path(self, title: str, suffix: str) -> str:
-        safe_title = "".join(ch if ch.isalnum() else "_" for ch in (title or "pcap_table").lower())
-        safe_title = "_".join(part for part in safe_title.split("_") if part) or "pcap_table"
-        base_name = f"{safe_title}.{suffix}"
-        project = get_project(self._current_project_id()) if self._current_project_id() is not None else None
-        if project and project.base_folder:
-            return str(workspace_export_path(project.base_folder, base_name, category="pcap"))
-        return base_name
-
-    def _export_table_dialog(self, title: str, table: QTableView, export_format: str) -> None:
-        headers, rows = self._table_export_data(table)
-        if not headers or not rows:
-            QMessageBox.information(self, "Export table", "No rows are loaded.")
-            return
-
-        filters = {
-            "csv": "CSV files (*.csv)",
-            "xlsx": "Excel files (*.xlsx)",
-            "html": "HTML files (*.html)",
-        }
-        suffix = "xlsx" if export_format == "xlsx" else export_format
-        file_path, _ = QFileDialog.getSaveFileName(
-            self,
-            f"Export {title}",
-            self._table_export_default_path(title, suffix),
-            filters.get(export_format, "All files (*.*)"),
-        )
-        if not file_path:
-            return
-
-        try:
-            export_table_file(
-                file_path,
+        button.clicked.connect(
+            lambda: export_table_dialog(
+                self,
                 title,
-                headers,
-                rows,
+                table,
                 export_format,
                 project_id=self._current_project_id(),
-                project_name=getattr(self.app, "current_project_name", "") or "",
+                category="pcap",
                 source_label=self.lbl_file.text() or "",
             )
-        except Exception as exc:
-            QMessageBox.critical(self, "Export table failed", str(exc))
-            return
-
-        QMessageBox.information(self, "Export table", f"Exported:\n{file_path}")
+        )
+        return button
 
     def _expanded_column_width(self, column: tuple[str, str], current_width: int) -> int:
         key, title = column

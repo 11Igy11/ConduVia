@@ -219,6 +219,39 @@ def _run_export_in_background(
     thread.start()
 
 
+def append_table_export_buttons(
+    parent: QWidget,
+    footer_layout,
+    *,
+    title: str,
+    table: QTableView,
+    project_id: int | None = None,
+    category: str = "json",
+    source_label: str = "",
+) -> None:
+    from ui.buttons import make_action_button
+
+    for export_format, label in (
+        ("csv", "Export CSV"),
+        ("xlsx", "Export Excel"),
+        ("html", "Export HTML"),
+    ):
+        button = make_action_button(label)
+        button.setMinimumHeight(42)
+        button.clicked.connect(
+            lambda checked=False, fmt=export_format: export_table_dialog(
+                parent,
+                title,
+                table,
+                fmt,
+                project_id=project_id,
+                category=category,
+                source_label=source_label,
+            )
+        )
+        footer_layout.addWidget(button)
+
+
 def export_table_dialog(
     parent: QWidget,
     title: str,
