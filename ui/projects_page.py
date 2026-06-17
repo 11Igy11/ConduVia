@@ -268,6 +268,7 @@ def build_projects_page(app: App) -> QWidget:
             on_double_click=lambda row, dialog: open_pcap_dataset_row(app, row, dialog),
             multi_select=True,
             on_action=lambda rows, dialog: load_selected_pcap_dataset_rows(app, rows, dialog),
+            export_category="pcap",
         )
     )
     app.btn_expand_project_activity.clicked.connect(

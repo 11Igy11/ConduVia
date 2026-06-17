@@ -1323,11 +1323,13 @@ class DatasetController(QObject):
         else:
             return
 
+        source_label = str(getattr(self.app, "current_folder", "") or self._json_day_source or "")
         open_project_rows_dialog(
             self.app,
             title,
             [("rank", "#"), ("value", "Name"), ("count", "Count")],
             rows,
+            export_source_label=source_label,
         )
 
     def load_dataset_path(self, folder: str):

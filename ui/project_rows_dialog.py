@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
 from core.project_evidence import list_project_saved_pcap_day_rows
 from ui.buttons import make_dialog_button
 from ui.explore_widgets import CopyableTableView
+from ui.table_export import append_table_export_buttons
 
 if TYPE_CHECKING:
     from ui.app import App
@@ -34,6 +35,9 @@ def open_project_rows_dialog(
     multi_select: bool = False,
     action_label: str = "Load selected",
     on_action: Callable[[list[dict[str, Any]], QDialog], None] | None = None,
+    export_category: str = "json",
+    export_source_label: str = "",
+    show_export: bool = True,
 ) -> None:
     from ui.pcap_page import DictTableModel
 
@@ -54,7 +58,7 @@ def open_project_rows_dialog(
     layout.setContentsMargins(14, 14, 14, 28)
     layout.setSpacing(10)
 
-    hint_text = "Expanded project view. Sort columns or right-click to copy values."
+    hint_text = "Expanded table view. Sort columns, export, or right-click to copy values."
     if multi_select and on_action is not None:
         hint_text += " Select one or more rows, then use Load selected (or double-click one row)."
     hint = QLabel(hint_text)
@@ -126,6 +130,16 @@ def open_project_rows_dialog(
 
         btn_action.clicked.connect(_load_selected)
         footer.addWidget(btn_action)
+    if show_export:
+        append_table_export_buttons(
+            dlg,
+            footer,
+            title=title,
+            table=table,
+            project_id=getattr(app, "current_project_id", None),
+            category=export_category,
+            source_label=export_source_label,
+        )
     footer.addStretch()
     btn_close = make_dialog_button("Close")
     btn_close.clicked.connect(dlg.accept)

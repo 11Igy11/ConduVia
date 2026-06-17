@@ -1520,6 +1520,7 @@ class RegistryPage(QWidget):
                 ("bytes", "Bytes (raw)"),
             ],
             self._daily_activity_rows,
+            export_source_label=str(self._folder or ""),
         )
 
     def _apply_hist_mode(self):
@@ -1643,6 +1644,7 @@ class RegistryPage(QWidget):
                 ("value", hdrs[1]),
             ],
             [{"item": row[0], "value": row[1]} for row in formatted],
+            export_source_label=str(self._folder or ""),
         )
 
     def _fit_pairs_height(self, n_rows: int):
