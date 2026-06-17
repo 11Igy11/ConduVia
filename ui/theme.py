@@ -311,6 +311,7 @@ QLabel#ProjectSelectionBadge {
 }
 
 QPushButton#CompactButton,
+QPushButton#CompactDangerButton,
 QPushButton#SetActiveButton {
     padding: 4px 10px;
     min-height: 0;

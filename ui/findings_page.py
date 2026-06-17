@@ -30,10 +30,11 @@ class FindingsPage(QWidget):
 
         actions = QHBoxLayout()
         actions.setSpacing(8)
-        self.btn_finding_edit = make_action_button("Edit")
-        self.btn_finding_delete = make_action_button("Delete", object_name="DangerButton")
-        self.btn_finding_jump = make_action_button("Jump to Flow")
-        self.btn_finding_ai = make_action_button("Explain with AI")
+        actions.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        self.btn_finding_edit = make_action_button("Edit", toolbar=True)
+        self.btn_finding_delete = make_action_button("Delete", destructive=True, toolbar=True)
+        self.btn_finding_jump = make_action_button("Jump to Flow", toolbar=True)
+        self.btn_finding_ai = make_action_button("Explain with AI", toolbar=True)
 
         actions.addWidget(self.btn_finding_edit)
         actions.addWidget(self.btn_finding_delete)
@@ -71,7 +72,7 @@ class FindingsPage(QWidget):
         self.cmb_find_sort.addItems(["Newest", "Oldest", "Status", "Title"])
         frow.addWidget(self.cmb_find_sort)
 
-        self.btn_find_clear = make_action_button("Clear")
+        self.btn_find_clear = make_action_button("Clear", toolbar=True)
         frow.addWidget(self.btn_find_clear)
 
         root.addLayout(frow)

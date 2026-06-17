@@ -207,7 +207,7 @@ class SettingsPage(QWidget):
 
         leaks_buttons = QHBoxLayout()
         self.btn_import_leak = make_action_button("Import dataset…")
-        self.btn_delete_leak = make_action_button("Delete selected", object_name="DangerButton")
+        self.btn_delete_leak = make_action_button("Delete selected", destructive=True, toolbar=True)
         self.btn_open_leaks_viewer = make_action_button("Open Repository")
         leaks_buttons.addWidget(self.btn_import_leak)
         leaks_buttons.addWidget(self.btn_delete_leak)
