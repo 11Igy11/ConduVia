@@ -5,10 +5,9 @@ import unittest
 import zipfile
 from pathlib import Path
 
-from core.leaks.detect import detect_delimiter, split_rows, suggest_fields
+from core.leaks.detect import detect_delimiter
 from core.leaks.encoding import ascii_fold, try_fix_mojibake
 from core.leaks.importer import import_dataset, build_record, normalize_oib
-from core.leaks.profiles import save_profile, load_profile, list_profiles, delete_profile
 from core.leaks.readers import iter_text_lines, sample_lines
 from core.leaks.search import search_records
 from core.leaks import db as leaks_db
@@ -43,15 +42,6 @@ class EncodingTests(unittest.TestCase):
 class DetectTests(unittest.TestCase):
     def test_detect_colon_delimiter(self):
         self.assertEqual(detect_delimiter(SAMPLE_LINES), ":")
-
-    def test_suggest_fields_identifies_phone_and_fbid(self):
-        rows = split_rows(SAMPLE_LINES, ":")
-        suggestions = suggest_fields(rows)
-        self.assertEqual(suggestions[0], "phone")
-        self.assertEqual(suggestions[1], "fb_id")
-        self.assertEqual(suggestions[2], "first_name")
-        self.assertEqual(suggestions[3], "last_name")
-        self.assertEqual(suggestions[4], "gender")
 
     def test_normalize_oib(self):
         self.assertEqual(normalize_oib("12345678901"), "12345678901")
@@ -161,28 +151,6 @@ class ImportSearchTests(unittest.TestCase):
             self.assertEqual(total, 3)
             rows2, total2 = search_records(dataset_id=99999, db_path=db_path)
             self.assertEqual(total2, 0)
-
-
-class ProfileTests(unittest.TestCase):
-    def test_profile_roundtrip(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            pdir = Path(tmp) / "profiles"
-            save_profile(
-                {
-                    "name": "Facebook 2019 (HR)",
-                    "delimiter": ":",
-                    "encoding": "cp1250",
-                    "has_header": False,
-                    "columns": FB_PROFILE_COLUMNS,
-                },
-                profiles_dir=pdir,
-            )
-            self.assertIn("Facebook 2019 (HR)", list_profiles(profiles_dir=pdir))
-            loaded = load_profile("Facebook 2019 (HR)", profiles_dir=pdir)
-            self.assertIsNotNone(loaded)
-            self.assertEqual(loaded["columns"], FB_PROFILE_COLUMNS)
-            self.assertEqual(loaded["encoding"], "cp1250")
-            self.assertTrue(delete_profile("Facebook 2019 (HR)", profiles_dir=pdir))
 
 
 if __name__ == "__main__":

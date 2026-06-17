@@ -2,15 +2,6 @@
 
 from __future__ import annotations
 
-import ipaddress
-
-
-def is_private_ip(ip: str) -> bool:
-    try:
-        return ipaddress.ip_address(ip).is_private
-    except Exception:
-        return False
-
 
 def status_emoji(status: str) -> str:
     s = (status or "").strip() or "New"

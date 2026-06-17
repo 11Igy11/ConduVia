@@ -93,19 +93,6 @@ def format_duration_compact_ms(value: Any) -> str:
     return f"{minutes}m {seconds}s"
 
 
-def format_duration_hms_ms(value: Any) -> str:
-    try:
-        ms = int(float(value))
-    except Exception:
-        return "" if value is None else str(value)
-
-    hours = ms // 3_600_000
-    minutes = (ms % 3_600_000) // 60_000
-    seconds = (ms % 60_000) // 1000
-    millis = ms % 1000
-    return f"{hours:02d}:{minutes:02d}:{seconds:02d}.{millis:03d}"
-
-
 def format_export_datetime(value: Any) -> str:
     """Unified export timestamp: dd.mm.yyyy HH:MM:SS."""
     return format_flow_datetime(value)

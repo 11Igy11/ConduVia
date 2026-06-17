@@ -18,8 +18,3 @@ def stop_qthread(thread: QThread | None, wait_ms: int = 5000) -> None:
     except RuntimeError:
         # C++ object already deleted.
         return
-
-
-def stop_qthreads(*threads: QThread | None, wait_ms: int = 5000) -> None:
-    for thread in threads:
-        stop_qthread(thread, wait_ms=wait_ms)
