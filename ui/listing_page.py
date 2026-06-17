@@ -1,6 +1,7 @@
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QFrame, QTableView, QHeaderView, QHBoxLayout, QComboBox, QPushButton, QDialog, QDialogButtonBox, QListWidget, QListWidgetItem, QMessageBox, QFileDialog, QInputDialog, QMenu
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QFrame, QTableView, QHeaderView, QHBoxLayout, QComboBox, QDialog, QDialogButtonBox, QListWidget, QListWidgetItem, QFileDialog, QInputDialog, QMenu
 from ui.font_utils import label_font
-from ui.buttons import make_action_button
+from ui.buttons import make_action_button, make_dialog_button
+from ui.dialogs import choice_dialog, message_dialog
 from PySide6.QtCore import Qt, QAbstractTableModel, QModelIndex
 from core.formatters import (
     format_duration_compact_ms,
@@ -280,8 +281,8 @@ class ColumnPickerDialog(QDialog):
         center_layout = QVBoxLayout()
         center_layout.setSpacing(10)
 
-        self.btn_add = QPushButton("Add →")
-        self.btn_remove = QPushButton("← Remove")
+        self.btn_add = make_dialog_button("Add →")
+        self.btn_remove = make_dialog_button("← Remove")
 
         center_layout.addStretch()
         center_layout.addWidget(self.btn_add)
@@ -600,7 +601,7 @@ class ListingPage(QWidget):
     def _update_named_preset(self, preset_name: str) -> None:
         columns = [str(col) for col in (self.model._columns or []) if str(col).strip()]
         if not columns:
-            QMessageBox.information(self, "Update preset", "Select at least one column first.")
+            message_dialog(self, "Update preset", "Select at least one column first.", width=420)
             return
         presets = self._load_view_presets()
         updated = False
@@ -682,7 +683,7 @@ class ListingPage(QWidget):
     def _save_current_view_preset(self) -> None:
         columns = [str(col) for col in (self.model._columns or []) if str(col).strip()]
         if not columns:
-            QMessageBox.information(self, "Save preset", "Select at least one column first.")
+            message_dialog(self, "Save preset", "Select at least one column first.", width=420)
             return
         name, ok = QInputDialog.getText(self, "Save view preset", "Preset name:")
         if not ok:
@@ -691,7 +692,7 @@ class ListingPage(QWidget):
         if not preset_name:
             return
         if preset_name in LISTING_VIEW_MODES:
-            QMessageBox.warning(self, "Save preset", "That name is reserved. Choose another name.")
+            message_dialog(self, "Save preset", "That name is reserved. Choose another name.", width=440)
             return
         presets = self._load_view_presets()
         updated = False
@@ -707,7 +708,7 @@ class ListingPage(QWidget):
 
     def _open_export_dialog(self):
         if not self.flows or not self.model._columns:
-            QMessageBox.information(self, "Export", "There is no data to export.")
+            message_dialog(self, "Export", "There is no data to export.", width=400)
             return
 
         format_name = self._choose_export_format()
@@ -729,42 +730,20 @@ class ListingPage(QWidget):
             return
 
     def _choose_export_format(self):
-        dlg = QDialog(self)
-        dlg.setWindowTitle("Export")
-        dlg.setModal(True)
-        dlg.setMinimumSize(420, 260)
-
-        layout = QVBoxLayout(dlg)
-        layout.setContentsMargins(16, 16, 16, 16)
-        layout.setSpacing(12)
-
-        lbl = QLabel("Choose export format:")
-        layout.addWidget(lbl)
-
-        btn_csv = QPushButton("CSV")
-        btn_excel = QPushButton("Excel")
-        btn_html = QPushButton("HTML")
-
-        result = {"value": None}
-
-        def choose(value):
-            result["value"] = value
-            dlg.accept()
-
-        btn_csv.clicked.connect(lambda: choose("csv"))
-        btn_excel.clicked.connect(lambda: choose("xlsx"))
-        btn_html.clicked.connect(lambda: choose("html"))
-
-        layout.addWidget(btn_csv)
-        layout.addWidget(btn_excel)
-        layout.addWidget(btn_html)
-
-        buttons = QDialogButtonBox(QDialogButtonBox.Cancel)
-        buttons.rejected.connect(dlg.reject)
-        layout.addWidget(buttons)
-
-        ok = dlg.exec() == QDialog.Accepted
-        return result["value"] if ok else None
+        choice = choice_dialog(
+            self,
+            "Export",
+            "Choose export format:",
+            ["CSV", "Excel", "HTML"],
+            width=420,
+        )
+        if choice == "CSV":
+            return "csv"
+        if choice == "Excel":
+            return "xlsx"
+        if choice == "HTML":
+            return "html"
+        return None
         
     def _get_export_rows(self):
         headers = []
@@ -806,16 +785,20 @@ class ListingPage(QWidget):
         try:
             export_listing_csv(file_path, headers, rows)
 
-            QMessageBox.information(
+            message_dialog(
                 self,
                 "Export",
-                f"CSV export completed successfully.\n\n{file_path}"
+                "CSV export completed successfully.",
+                details=file_path,
+                width=460,
             )
         except Exception as e:
-            QMessageBox.critical(
+            message_dialog(
                 self,
                 "Export Error",
-                f"Failed to export CSV.\n\n{str(e)}"
+                "Failed to export CSV.",
+                details=str(e),
+                width=460,
             )
 
     def _export_excel(self, headers, rows):
@@ -833,16 +816,20 @@ class ListingPage(QWidget):
         try:
             export_listing_excel(file_path, headers, rows)
 
-            QMessageBox.information(
+            message_dialog(
                 self,
                 "Export",
-                f"Excel export completed successfully.\n\n{file_path}"
+                "Excel export completed successfully.",
+                details=file_path,
+                width=460,
             )
         except Exception as e:
-            QMessageBox.critical(
+            message_dialog(
                 self,
                 "Export Error",
-                f"Failed to export Excel.\n\n{str(e)}"
+                "Failed to export Excel.",
+                details=str(e),
+                width=460,
             )
 
     def _export_html(self, headers, rows):
@@ -881,16 +868,20 @@ class ListingPage(QWidget):
                 report_language=get_app_settings().get("output_language", "hr"),
             )
 
-            QMessageBox.information(
+            message_dialog(
                 self,
                 "Export",
-                f"HTML export completed successfully.\n\n{file_path}"
+                "HTML export completed successfully.",
+                details=file_path,
+                width=460,
             )
         except Exception as e:
-            QMessageBox.critical(
+            message_dialog(
                 self,
                 "Export Error",
-                f"Failed to export HTML.\n\n{str(e)}"
+                "Failed to export HTML.",
+                details=str(e),
+                width=460,
             )
 
     def _current_project(self):

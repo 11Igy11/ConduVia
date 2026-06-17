@@ -14,13 +14,14 @@ from PySide6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QMenu,
-    QPushButton,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
     QWidget,
 )
 
+from ui.buttons import make_action_button
+from ui.dialogs import confirm_dialog
 from core.leaks.db import (
     dataset_layout,
     delete_dataset,
@@ -95,16 +96,9 @@ class LeaksViewerDialog(QDialog):
 
         ds_buttons = QHBoxLayout()
         ds_buttons.setSpacing(6)
-        self.btn_new_dataset = QPushButton("New")
-        self.btn_edit_dataset = QPushButton("Edit")
-        self.btn_delete_dataset = QPushButton("Delete")
-        for b in (self.btn_new_dataset, self.btn_edit_dataset, self.btn_delete_dataset):
-            b.setObjectName("CompactButton")
-            b.setCursor(Qt.PointingHandCursor)
-        self.btn_delete_dataset.setStyleSheet(
-            "QPushButton { color: #fca5a5; border: 1px solid #b91c1c; }"
-            "QPushButton:hover { background: #7f1d1d; color: #ffffff; }"
-        )
+        self.btn_new_dataset = make_action_button("New")
+        self.btn_edit_dataset = make_action_button("Edit")
+        self.btn_delete_dataset = make_action_button("Delete", object_name="DangerButton")
         self.btn_new_dataset.clicked.connect(self._new_dataset)
         self.btn_edit_dataset.clicked.connect(self._edit_dataset)
         self.btn_delete_dataset.clicked.connect(self._delete_dataset)
@@ -126,8 +120,8 @@ class LeaksViewerDialog(QDialog):
         search_row.setSpacing(6)
         self.edit_search = QLineEdit()
         self.edit_search.setPlaceholderText("Search all parameters (phone, email, OIB, name, city, employer…)")
-        self.btn_search = QPushButton("Search")
-        self.btn_clear = QPushButton("Clear")
+        self.btn_search = make_action_button("Search")
+        self.btn_clear = make_action_button("Clear")
         search_row.addWidget(self.edit_search, 1)
         search_row.addWidget(self.btn_search)
         search_row.addWidget(self.btn_clear)
@@ -152,13 +146,13 @@ class LeaksViewerDialog(QDialog):
         # Pagination + actions
         bottom = QHBoxLayout()
         bottom.setSpacing(6)
-        self.btn_prev = QPushButton("◀ Previous")
-        self.btn_next = QPushButton("Next ▶")
+        self.btn_prev = make_action_button("◀ Previous")
+        self.btn_next = make_action_button("Next ▶")
         self.lbl_page = QLabel("0 results")
-        self.btn_new = QPushButton("New record")
-        self.btn_edit = QPushButton("Edit")
-        self.btn_delete = QPushButton("Delete")
-        self.btn_add_notes = QPushButton("Add to Notes")
+        self.btn_new = make_action_button("New record")
+        self.btn_edit = make_action_button("Edit")
+        self.btn_delete = make_action_button("Delete", object_name="DangerButton")
+        self.btn_add_notes = make_action_button("Add to Notes")
         bottom.addWidget(self.btn_prev)
         bottom.addWidget(self.btn_next)
         bottom.addWidget(self.lbl_page)
@@ -168,25 +162,6 @@ class LeaksViewerDialog(QDialog):
         bottom.addWidget(self.btn_delete)
         bottom.addWidget(self.btn_add_notes)
         right.addLayout(bottom)
-
-        # Use the same compact button style as the rest of the app.
-        for button in (
-            self.btn_search,
-            self.btn_clear,
-            self.btn_prev,
-            self.btn_next,
-            self.btn_new,
-            self.btn_edit,
-            self.btn_delete,
-            self.btn_add_notes,
-        ):
-            button.setObjectName("CompactButton")
-            button.setCursor(Qt.PointingHandCursor)
-        # Keep Delete compact but tinted red (DangerButton would force a large size).
-        self.btn_delete.setStyleSheet(
-            "QPushButton { color: #fca5a5; border: 1px solid #b91c1c; }"
-            "QPushButton:hover { background: #7f1d1d; color: #ffffff; }"
-        )
 
         # Footer signature (bottom-right)
         footer = QHBoxLayout()
@@ -440,18 +415,16 @@ class LeaksViewerDialog(QDialog):
         if dataset_id is None:
             self.lbl_page.setText("Select a specific dataset (not “All datasets”) to delete.")
             return
-        from PySide6.QtWidgets import QMessageBox
-
         item = self.list_datasets.currentItem()
         label = item.text() if item is not None else "this dataset"
-        confirm = QMessageBox.question(
+        if not confirm_dialog(
             self,
             "Delete dataset",
             f"Delete '{label}' and all of its records permanently?",
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No,
-        )
-        if confirm != QMessageBox.Yes:
+            ok_text="Delete",
+            destructive=True,
+            width=460,
+        ):
             return
         try:
             delete_dataset(int(dataset_id))
@@ -484,16 +457,14 @@ class LeaksViewerDialog(QDialog):
         if not row or not row.get("id"):
             self.lbl_page.setText("Select a row to delete.")
             return
-        from PySide6.QtWidgets import QMessageBox
-
-        confirm = QMessageBox.question(
+        if not confirm_dialog(
             self,
             "Delete record",
             "Delete the selected record permanently?",
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No,
-        )
-        if confirm != QMessageBox.Yes:
+            ok_text="Delete",
+            destructive=True,
+            width=420,
+        ):
             return
         try:
             delete_record(int(row["id"]))

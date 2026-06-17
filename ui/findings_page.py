@@ -4,12 +4,13 @@ from typing import Any
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
+    QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QComboBox, QLineEdit, QSplitter,
     QListWidget, QTextEdit
 )
 
-from ui.buttons import style_action_button
+from ui.buttons import make_action_button
+
 
 class FindingsPage(QWidget):
     jumpRequested = Signal()
@@ -29,12 +30,10 @@ class FindingsPage(QWidget):
 
         actions = QHBoxLayout()
         actions.setSpacing(8)
-        self.btn_finding_edit = QPushButton("Edit")
-        self.btn_finding_delete = QPushButton("Delete")
-        self.btn_finding_jump = QPushButton("Jump to Flow")
-        self.btn_finding_ai = QPushButton("Explain with AI")
-        for b in (self.btn_finding_edit, self.btn_finding_delete, self.btn_finding_jump, self.btn_finding_ai):
-            style_action_button(b)
+        self.btn_finding_edit = make_action_button("Edit")
+        self.btn_finding_delete = make_action_button("Delete", object_name="DangerButton")
+        self.btn_finding_jump = make_action_button("Jump to Flow")
+        self.btn_finding_ai = make_action_button("Explain with AI")
 
         actions.addWidget(self.btn_finding_edit)
         actions.addWidget(self.btn_finding_delete)
@@ -72,7 +71,7 @@ class FindingsPage(QWidget):
         self.cmb_find_sort.addItems(["Newest", "Oldest", "Status", "Title"])
         frow.addWidget(self.cmb_find_sort)
 
-        self.btn_find_clear = QPushButton("Clear")
+        self.btn_find_clear = make_action_button("Clear")
         frow.addWidget(self.btn_find_clear)
 
         root.addLayout(frow)
