@@ -127,7 +127,7 @@ def pick_rows_dialog(
 ) -> None:
     from PySide6.QtGui import QGuiApplication
 
-    from ui.pcap_page import DictTableModel
+    from ui.dict_table_model import DictTableModel
 
     if not rows:
         message_dialog(parent, title, "No saved values yet.", width=420)

@@ -17,12 +17,12 @@ from PySide6.QtWidgets import (
 
 from core.project_evidence import list_project_saved_pcap_day_rows
 from ui.buttons import make_dialog_button
+from ui.dict_table_model import DictTableModel
 from ui.explore_widgets import CopyableTableView
 from ui.table_export import append_table_export_buttons
 
 if TYPE_CHECKING:
     from ui.app import App
-    from ui.pcap_page import DictTableModel
 
 
 def open_project_rows_dialog(
@@ -39,8 +39,6 @@ def open_project_rows_dialog(
     export_source_label: str = "",
     show_export: bool = True,
 ) -> None:
-    from ui.pcap_page import DictTableModel
-
     if not rows:
         app._message_dialog(title, "No rows are loaded.", width=380)
         return
