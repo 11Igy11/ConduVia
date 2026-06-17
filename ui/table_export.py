@@ -262,14 +262,10 @@ def export_table_dialog(
     category: str = "json",
     source_label: str = "",
     report_language: str | None = None,
-    rows_override: list[list[str]] | None = None,
-    headers_override: list[str] | None = None,
     flows_override: list[dict[str, Any]] | None = None,
 ) -> None:
     if flows_override is not None:
         headers, rows = [], []
-    elif rows_override is not None and headers_override is not None:
-        headers, rows = headers_override, rows_override
     else:
         headers, rows = table_export_data(table)
     if flows_override is None and (not headers or not rows):

@@ -47,7 +47,6 @@ from core.db import (
 )
 from core.flow_stats import compute_registry_summary, top_field_by_bytes, top_field_values
 from core.formatters import (
-    format_duration_hms_ms,
     format_flow_date,
     format_flow_datetime,
     format_flow_time,
@@ -207,7 +206,6 @@ class TimeAndFormatterTests(unittest.TestCase):
         self.assertEqual(safe_int("12.9"), 12)
         self.assertEqual(safe_int("bad"), 0)
         self.assertEqual(human_bytes(1536, precision=1), "1.5 KB")
-        self.assertEqual(format_duration_hms_ms(3_723_004), "01:02:03.004")
         self.assertEqual(format_flow_date("2024-05-28 22:01:02"), "28.05.2024")
         self.assertEqual(format_flow_time("2024-05-28 22:01:02"), "22:01:02")
         self.assertEqual(format_flow_datetime("2024-05-28 22:01:02.123456", milliseconds=True), "28.05.2024 22:01:02.123")

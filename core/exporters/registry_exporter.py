@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import base64
 import html
 from datetime import datetime
 from pathlib import Path
@@ -9,6 +8,7 @@ from typing import Any
 from core.db import Project
 from core.analysis_limits import EMBEDDED_SUMMARY_TOP_N
 from core.exporters.case_context import build_case_context, context_cards_html
+from core.exporters.template_utils import logo_data_uri
 from core.flow_stats import build_daily_activity_rows
 from core.formatters import (
     bytes_mb_or_b,
@@ -40,17 +40,6 @@ def _fmt_dt_short(x: Any) -> str:
 def _load_template() -> str:
     project_root = Path(__file__).resolve().parents[2]
     return (project_root / "templates" / "registry_export.html").read_text(encoding="utf-8")
-
-
-def _logo_data_uri() -> str:
-    project_root = Path(__file__).resolve().parents[2]
-    logo_path = project_root / "assets" / "ViaNyquist.png"
-
-    if not logo_path.exists():
-        return ""
-
-    logo_b64 = base64.b64encode(logo_path.read_bytes()).decode("ascii")
-    return f"data:image/png;base64,{logo_b64}"
 
 
 def _simple_table(title: str, items: list[tuple[Any, Any]], col1: str, col2: str, *, limit: int = EMBEDDED_SUMMARY_TOP_N) -> str:
@@ -385,7 +374,7 @@ def export_registry_html(
     rendered = (
         template
         .replace("{{TITLE}}", text["title"])
-        .replace("{{LOGO}}", _esc(_logo_data_uri()))
+        .replace("{{LOGO}}", _esc(logo_data_uri()))
         .replace("{{FOLDER}}", _esc(Path(folder).name if folder else "—"))
         .replace("{{EXPORTED_AT}}", datetime.now().strftime("%d.%m.%Y %H:%M:%S"))
         .replace("{{CASE_CONTEXT_CARDS}}", context_cards_html(case_context, card_class="chip"))
