@@ -47,6 +47,7 @@ from ui.theme import apply_app_stylesheet
 from ui.app_sidebar import build_sidebar, wire_navigation
 from ui.projects_page import build_projects_page
 from ui.explore_page import build_explore_workspace
+from ui.dataset_header_layout import DATASET_PAGE_SPACING
 from ui.osint_page import build_osint_page
 from ui.ai_hub_page import build_ai_hub_page
 from ui.app_wiring import wire_app_ui
@@ -68,6 +69,11 @@ class App(QWidget):
         self.go_page(self.IDX_JSON, self._nav_json)
         if hasattr(self, "json_tabs"):
             self.json_tabs.setCurrentIndex(max(0, tab_index))
+        controller = getattr(self, "dataset_controller", None)
+        if controller is not None and getattr(controller, "_json_day_groups_raw", None):
+            controller._sync_json_period_selector_panel()
+            if not getattr(controller, "_json_day_groups", None):
+                controller._rebuild_json_period_combo()
 
     def _build_sidebar(self) -> QFrame:
         return build_sidebar(self)
@@ -95,6 +101,10 @@ class App(QWidget):
         self.project_dir = Path(__file__).resolve().parent.parent
         self._init_state()
 
+        self._shutdown_started = False
+        self._profile_refresh_depth = 0
+        self._profile_refresh_pending = False
+        self._profile_refresh_pending_count = 0
         self.ai_service = AIAssistantService(
             AISettings.from_mapping(get_app_settings())
         )
@@ -126,7 +136,7 @@ class App(QWidget):
         title: str,
         message: str,
         details: str = "",
-        width: int = 420,
+        width: int = 380,
     ) -> None:
         return message_dialog(
             self,
@@ -141,7 +151,7 @@ class App(QWidget):
         title: str,
         message: str,
         choices: list[str],
-        width: int = 360,
+        width: int = 480,
     ):
         return choice_dialog(
             self,
@@ -315,7 +325,7 @@ class App(QWidget):
         json_page = QWidget()
         json_layout = QVBoxLayout(json_page)
         json_layout.setContentsMargins(0, 0, 0, 0)
-        json_layout.setSpacing(4)
+        json_layout.setSpacing(DATASET_PAGE_SPACING)
         self.json_tabs = QTabWidget()
         self.json_tabs.setDocumentMode(True)
         self.json_tabs.addTab(explore_container, "Explore")
@@ -375,8 +385,31 @@ class App(QWidget):
             self.settings_page.refresh()
 
     def refresh_activity_profile_ui(self):
-        if hasattr(self, "activity_profile_page"):
-            self.activity_profile_page.refresh(self.current_project_id, self.current_project_name)
+        if not hasattr(self, "activity_profile_page"):
+            return
+        if self._profile_refresh_depth:
+            if self._profile_refresh_pending_count < 3:
+                self._profile_refresh_pending = True
+            return
+        self._profile_refresh_depth += 1
+        try:
+            quick = False
+            if hasattr(self, "dataset_controller"):
+                quick = self.dataset_controller.should_defer_profile_heavy_work()
+            self.activity_profile_page.refresh(
+                self.current_project_id,
+                self.current_project_name,
+                quick=quick,
+            )
+        finally:
+            self._profile_refresh_depth -= 1
+            if self._profile_refresh_pending and not self._profile_refresh_depth:
+                self._profile_refresh_pending = False
+                self._profile_refresh_pending_count += 1
+                if self._profile_refresh_pending_count <= 3:
+                    QTimer.singleShot(0, self.refresh_activity_profile_ui)
+                else:
+                    self._profile_refresh_pending_count = 0
 
     def refresh_all_views(self):
         self.notes_controller.flush()
@@ -384,15 +417,37 @@ class App(QWidget):
         active_project_id = self.current_project_id
         self.projects_ui_controller.refresh_projects()
 
-        if active_project_id is not None and get_project(active_project_id):
-            self.projects_ui_controller.set_active_project(active_project_id)
-            for i in range(self.projects_list.count()):
-                item = self.projects_list.item(i)
-                if int(item.data(Qt.UserRole)) == active_project_id:
-                    self.projects_list.setCurrentItem(item)
-                    break
-            self.projects_ui_controller.refresh_recent_datasets(active_project_id)
-            self.projects_ui_controller.refresh_case_dashboard()
+        project = get_project(active_project_id) if active_project_id is not None else None
+        if active_project_id is not None and not project:
+            self.projects_ui_controller._clear_active_project()
+            active_project_id = None
+            project = None
+
+        if active_project_id is None:
+            self.dataset_controller.reset_dataset_views()
+            self.findings_controller.refresh_ui()
+            self.notes_controller.refresh_ui()
+            self.refresh_activity_profile_ui()
+            if hasattr(self, "osint_ui_controller"):
+                self.osint_ui_controller.refresh()
+            if hasattr(self, "settings_page"):
+                self.settings_page.refresh()
+            self._message_dialog(
+                "Refresh All",
+                "Application views refreshed.",
+                "No active project — dataset views were cleared.",
+                width=460,
+            )
+            return
+
+        self.projects_ui_controller.set_active_project(active_project_id)
+        for i in range(self.projects_list.count()):
+            item = self.projects_list.item(i)
+            if int(item.data(Qt.UserRole)) == active_project_id:
+                self.projects_list.setCurrentItem(item)
+                break
+        self.projects_ui_controller.refresh_recent_datasets(active_project_id)
+        self.projects_ui_controller.refresh_case_dashboard()
 
         self.findings_controller.refresh_ui()
         self.notes_controller.refresh_ui()
@@ -412,7 +467,12 @@ class App(QWidget):
             width=460,
         )
 
-    def open_leaks_viewer(self) -> None:
+    def open_leaks_viewer(
+        self,
+        *,
+        search_text: str = "",
+        record_ids: list[int] | None = None,
+    ) -> None:
         from ui.leaks_viewer import LeaksViewerDialog
 
         viewer = getattr(self, "_leaks_viewer", None)
@@ -421,10 +481,15 @@ class App(QWidget):
             self._leaks_viewer = viewer
         else:
             viewer.refresh_datasets()
-            viewer._run_search(reset=True)
+        query = str(search_text or "").strip()
+        if query:
+            viewer.edit_search.setText(query)
+        elif record_ids:
+            viewer.edit_search.clear()
         viewer.show()
         viewer.raise_()
         viewer.activateWindow()
+        viewer._run_search(reset=True)
 
     def apply_theme(self, theme: str | None) -> None:
         qapp = QApplication.instance()
@@ -450,6 +515,7 @@ class App(QWidget):
             text_edit=getattr(self, "txt_ai_hub", None),
             add_notes_button=getattr(self, "btn_ai_hub_add_notes", None),
         )
+        self.go_to_ai()
 
     def add_ai_hub_to_notes(self):
         text = (self._ai_output_state.text or "").strip()
@@ -479,16 +545,28 @@ class App(QWidget):
         v = self._current_flow.get(key, "")
         return "" if v is None else str(v)
 
-    def closeEvent(self, event):
-        self.ai_task_controller.shutdown()
-        self.dataset_controller.shutdown_background_tasks()
+    def shutdown_background_tasks(self, wait_ms: int = 5000) -> None:
+        if self._shutdown_started:
+            return
+        self._shutdown_started = True
+        self.ai_task_controller.shutdown(wait_ms=wait_ms)
+        self.dataset_controller.shutdown_background_tasks(wait_ms=wait_ms)
         if hasattr(self, "pcap_page"):
-            self.pcap_page.shutdown_background_tasks()
+            self.pcap_page.shutdown_background_tasks(wait_ms=wait_ms)
         if hasattr(self, "activity_profile_page"):
-            self.activity_profile_page.shutdown_background_tasks()
+            self.activity_profile_page.shutdown_background_tasks(wait_ms=wait_ms)
+        if hasattr(self, "osint_ui_controller"):
+            self.osint_ui_controller.shutdown(wait_ms=wait_ms)
+
+    def closeEvent(self, event):
+        self.shutdown_background_tasks()
         super().closeEvent(event)
     
 def main():
+    from ui.crash_logging import install_crash_logging
+
+    install_crash_logging()
+
     app = QApplication(sys.argv)
 
     init_db()

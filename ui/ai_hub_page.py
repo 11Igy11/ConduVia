@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QTextEdit, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QTextEdit, QVBoxLayout, QWidget
+
+from ui.buttons import make_action_button
 
 if TYPE_CHECKING:
     from ui.app import App
@@ -23,8 +25,7 @@ def build_ai_hub_page(app: App) -> QWidget:
     ai_title_row = QHBoxLayout()
     app.lbl_ai_hub_title = QLabel("AI Summary")
     app.lbl_ai_hub_title.setObjectName("HeaderProjectLabel")
-    app.btn_ai_hub_add_notes = QPushButton("Add to Notes")
-    app.btn_ai_hub_add_notes.setEnabled(False)
+    app.btn_ai_hub_add_notes = make_action_button("Add to Notes", enabled=False)
     ai_title_row.addWidget(app.lbl_ai_hub_title)
     ai_title_row.addStretch()
     ai_title_row.addWidget(app.btn_ai_hub_add_notes)

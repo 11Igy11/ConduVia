@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ipaddress
 from collections import Counter, defaultdict
 from typing import Any
 
@@ -46,6 +47,7 @@ class BehaviorProfileAccumulator:
         self.hour_bytes: Counter[int] = Counter()
         self.day_counts: Counter[str] = Counter()
         self.day_bytes: Counter[str] = Counter()
+        self.public_ip_counts: Counter[str] = Counter()
         self.total_bytes = 0
         self.flow_count = 0
         self.timestamp_count = 0
@@ -72,6 +74,11 @@ class BehaviorProfileAccumulator:
             self.domain_counts[domain] += 1
             self.domain_bytes[domain] += byte_count
 
+        for key in ("dst_ip", "src_ip"):
+            ip = _public_flow_ip(str(flow.get(key) or ""))
+            if ip:
+                self.public_ip_counts[ip] += 1
+
         dt = parse_timestamp(_flow_timestamp(flow))
         if dt is not None:
             self.timestamp_count += 1
@@ -97,10 +104,24 @@ class BehaviorProfileAccumulator:
                 service_limit,
             ),
             "domain_rows": _domain_rows(self.domain_counts, self.domain_bytes, self.total_bytes, domain_limit),
+            "public_ip_rows": _public_ip_rows(self.public_ip_counts),
             "hour_rows": _hour_rows(self.hour_counts, self.hour_bytes, self.total_bytes),
             "day_rows": _day_rows(self.day_counts, self.day_bytes, self.total_bytes, limit=MAX_BEHAVIOR_DAY_ROWS),
             "routine_lines": _routine_lines(self.hour_counts, self.timestamp_count),
         }
+
+def _public_flow_ip(value: str) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    try:
+        addr = ipaddress.ip_address(text)
+    except ValueError:
+        return ""
+    if addr.is_private or addr.is_loopback or addr.is_link_local or addr.is_multicast or addr.is_reserved:
+        return ""
+    return str(addr)
+
 
 def _flow_bytes(flow: dict[str, Any]) -> int:
     for key in ("bidirectional_bytes", "bytes", "octets", "total_bytes"):
@@ -154,6 +175,19 @@ def _service_rows(
             "share": _share(bytes_value, total_bytes),
             "example": examples.get(label, ""),
         })
+    return rows
+
+
+def _public_ip_rows(counts: Counter[str], *, limit: int = 500) -> list[dict[str, Any]]:
+    rows = []
+    for ip, count in counter_most_common(counts, limit):
+        rows.append(
+            {
+                "value": ip,
+                "count": count,
+                "source": "flows",
+            }
+        )
     return rows
 
 
@@ -233,7 +267,6 @@ def _routine_lines(hour_counts: Counter[int], timestamp_count: int) -> list[str]
         lines.append(f"Quiet hours with no observed flows: {_compact_hours(quiet_hours)}.")
     else:
         lines.append("No completely quiet hour was observed in the loaded dataset.")
-    lines.append("Treat quiet/active periods as device activity indicators, not proof that a person was awake or asleep.")
     return lines
 
 

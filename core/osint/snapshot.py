@@ -6,6 +6,7 @@ from typing import Any
 
 from core.behavior_profile import _flow_domain
 from core.db import DEFAULT_DB_PATH, get_project, get_project_behavior_profile
+from core.osint.imsi import format_identifier_display
 from core.osint.normalize import (
     normalize_domain,
     normalize_email,
@@ -13,7 +14,7 @@ from core.osint.normalize import (
     normalize_msisdn,
     parse_extra_identifiers,
 )
-from core.project_evidence import saved_pcap_device_ip_counts
+from core.osint.public_ips import is_public_ip
 
 
 def build_osint_snapshot(project_id: int, *, db_path: Path = DEFAULT_DB_PATH) -> dict[str, Any]:
@@ -60,18 +61,19 @@ def _collect_identifiers(project) -> list[dict[str, Any]]:
     seen: set[tuple[str, str]] = set()
 
     def add(kind: str, value: str, *, source: str, label: str = "") -> None:
-        text = str(value or "").strip()
+        kind_text = str(kind or "").strip()
+        text = format_identifier_display(value, kind_text) if kind_text else str(value or "").strip()
         if not text:
             return
-        key = (kind.lower(), text.lower())
+        key = (kind_text.lower(), text.lower())
         if key in seen:
             return
         seen.add(key)
         rows.append(
             {
-                "kind": kind,
+                "kind": kind_text or kind,
                 "value": text,
-                "label": label or kind,
+                "label": label or kind_text or kind,
                 "source": source,
             }
         )
@@ -99,22 +101,27 @@ def _collect_identifiers(project) -> list[dict[str, Any]]:
 
 def _collect_ips(project_id: int, project, **kwargs) -> list[dict[str, Any]]:
     counts: Counter[str] = Counter()
+    sources: dict[str, str] = {}
+
+    profile = get_project_behavior_profile(project_id, **kwargs) or {}
+    for row in profile.get("public_ip_rows") or []:
+        value = normalize_ip(str(row.get("value") or ""))
+        if not value or not is_public_ip(value):
+            continue
+        counts[value] += int(row.get("count") or 0)
+        sources.setdefault(value, str(row.get("source") or "case"))
 
     subject_ip = normalize_ip(project.subject_ip)
-    if subject_ip:
+    if subject_ip and is_public_ip(subject_ip):
         counts[subject_ip] += 1
-
-    for ip, count in saved_pcap_device_ip_counts(project_id, **kwargs).items():
-        normalized = normalize_ip(ip)
-        if normalized:
-            counts[normalized] += int(count or 0)
+        sources.setdefault(subject_ip, "project")
 
     rows = []
     for value, count in counts.most_common():
         rows.append(
             {
                 "value": value,
-                "source": "case",
+                "source": sources.get(value, "case"),
                 "count": count,
             }
         )

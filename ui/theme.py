@@ -5,6 +5,7 @@ from pathlib import Path
 from PySide6.QtWidgets import QApplication
 
 from ui.app_helpers import normalize_ui_theme
+from ui.font_utils import app_font
 
 LIGHT_THEME_OVERRIDES = """
 QWidget {
@@ -216,13 +217,68 @@ QTableView QTableCornerButton::section {
 }
 
 QPushButton {
-    background: #ffffff;
-    color: #111827;
-    border-color: #cbd5e1;
+    background: #eff6ff;
+    color: #1d4ed8;
+    border: 1px solid #3b82f6;
 }
 
 QPushButton:hover {
-    background: #e2e8f0;
+    background: #dbeafe;
+    border: 1px solid #2563eb;
+    color: #1e40af;
+}
+
+QPushButton:disabled {
+    background: #f1f5f9;
+    border: 1px solid #d7dee9;
+    color: #94a3b8;
+}
+
+QPushButton#ProjectToolbarButton {
+    background: #3b82f6;
+    border: 1px solid #3b82f6;
+    color: #ffffff;
+}
+
+QPushButton#ProjectToolbarButton:hover {
+    background: #2563eb;
+    border: 1px solid #2563eb;
+}
+
+QPushButton#ProjectToolbarButton:disabled {
+    background: #f1f5f9;
+    border: 1px solid #d7dee9;
+    color: #94a3b8;
+}
+
+QToolButton#RoundRefreshToolButton {
+    background: #eff6ff;
+    border: 1px solid #3b82f6;
+    color: #1d4ed8;
+}
+
+QToolButton#RoundRefreshToolButton:hover {
+    background: #dbeafe;
+    border: 1px solid #2563eb;
+    color: #1e40af;
+}
+
+QToolButton#RoundRefreshToolButton:disabled {
+    background: #f1f5f9;
+    border: 1px solid #d7dee9;
+    color: #94a3b8;
+}
+
+QToolButton#CompactToolButton {
+    background: #eff6ff;
+    border: 1px solid #3b82f6;
+    color: #1d4ed8;
+}
+
+QToolButton#CompactToolButton:hover {
+    background: #dbeafe;
+    border: 1px solid #2563eb;
+    color: #1e40af;
 }
 
 QPushButton#NavButton {
@@ -246,13 +302,6 @@ QPushButton#NavButton[active="true"] {
     color: #ffffff;
 }
 
-QPushButton#Primary,
-QPushButton#PrimaryButton {
-    background: #3b82f6;
-    border-color: #3b82f6;
-    color: #ffffff;
-}
-
 QLabel#ProjectSelectionBadge {
     background: #eff6ff;
     border: 1px solid #93c5fd;
@@ -262,17 +311,10 @@ QLabel#ProjectSelectionBadge {
 }
 
 QPushButton#CompactButton,
-QPushButton#PrimaryButton,
 QPushButton#SetActiveButton {
     padding: 4px 10px;
     min-height: 0;
     max-height: 32px;
-}
-
-QPushButton#SetActiveButton {
-    background: #3b82f6;
-    border-color: #3b82f6;
-    color: #ffffff;
 }
 
 QPushButton#SetActiveButton:disabled {
@@ -286,17 +328,6 @@ QToolButton#CompactToolButton {
     min-height: 0;
     max-width: 32px;
     max-height: 32px;
-}
-
-QToolButton#PrimaryToolButton {
-    padding: 2px;
-    font-size: 14px;
-    min-height: 0;
-    max-width: 32px;
-    max-height: 32px;
-    background: #3b82f6;
-    border-color: #3b82f6;
-    color: #ffffff;
 }
 
 QProgressBar {
@@ -509,4 +540,5 @@ def app_stylesheet(theme: str | None = "dark") -> str:
 def apply_app_stylesheet(qapp: QApplication, theme: str | None = "dark") -> None:
     normalized_theme = normalize_ui_theme(theme)
     qapp.setProperty("ui_theme", normalized_theme)
+    qapp.setFont(app_font(point_size=10))
     qapp.setStyleSheet(app_stylesheet(normalized_theme))

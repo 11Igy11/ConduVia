@@ -4,7 +4,7 @@ import webbrowser
 from pathlib import Path
 from typing import Any
 
-from PySide6.QtCore import QThread, Qt
+from PySide6.QtCore import QThread, Qt, QEvent
 from PySide6.QtWidgets import (
     QFileDialog,
     QFrame,
@@ -12,7 +12,6 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QProgressBar,
-    QPushButton,
     QScrollArea,
     QSplitter,
     QTextEdit,
@@ -21,8 +20,6 @@ from PySide6.QtWidgets import (
 )
 
 from core.analysis_limits import (
-    PROFILE_CHART_MAX_DAYS,
-    PROFILE_CHART_MAX_DEVICE_IPS,
     PROFILE_CHART_PREVIEW_ROWS,
 )
 from core.behavior_profile import build_flow_behavior_profile
@@ -35,6 +32,7 @@ from core.workspace import workspace_export_path
 from ui.explore_widgets import AITextWorker
 from ui.thread_utils import stop_qthread
 from ui.project_rows_dialog import open_project_rows_dialog
+from ui.buttons import make_action_button
 
 
 def _compact_range(first_seen: str, last_seen: str) -> str:
@@ -71,6 +69,38 @@ def _short_label(value: str, limit: int) -> str:
     return value[: max(0, limit - 3)] + "..."
 
 
+def _top_volume_day_rows(rows: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+    cleaned = list(rows or [])
+    cleaned.sort(
+        key=lambda row: int(row.get("count") or max(int(row.get("json_bytes") or 0), int(row.get("pcap_bytes") or 0))),
+        reverse=True,
+    )
+    return cleaned
+
+
+def _sort_profile_expand_rows(key: str, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    cleaned = list(rows)
+    if key == "period_comparison_rows":
+        cleaned.sort(
+            key=lambda row: max(int(row.get("json_bytes") or 0), int(row.get("pcap_bytes") or 0)),
+            reverse=True,
+        )
+    elif key in {"pcap_day_rows", "json_day_rows"}:
+        cleaned.sort(key=lambda row: int(row.get("count") or 0), reverse=True)
+    elif key == "pcap_device_ip_rows":
+        cleaned.sort(key=lambda row: int(row.get("packets") or row.get("count") or 0), reverse=True)
+    elif key == "pcap_period_coverage":
+        cleaned.sort(key=lambda row: str(row.get("date") or row.get("label") or ""))
+    return cleaned
+
+
+def _sort_behavior_expand_rows(key: str, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    cleaned = list(rows)
+    if key in {"service_rows", "domain_rows"}:
+        cleaned.sort(key=lambda row: int(row.get("bytes") or row.get("count") or 0), reverse=True)
+    return cleaned
+
+
 class ActivityProfilePage(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -82,6 +112,8 @@ class ActivityProfilePage(QWidget):
         self._project_dataset_info: dict[str, Any] = {}
         self._ai_thread: QThread | None = None
         self._ai_worker: AITextWorker | None = None
+        self._logged_repository_hit_key = ""
+        self._last_ai_summary = ""
         self._build_ui()
         self.clear()
 
@@ -89,7 +121,12 @@ class ActivityProfilePage(QWidget):
         self._behavior_cache_key = ""
         self._behavior_cache_flows = []
         self._project_dataset_info = {}
-        self._behavior_index_requested_project_id = None
+        controller = getattr(self.app, "dataset_controller", None) if self.app else None
+        if not (controller and controller.behavior_index_running()):
+            self._behavior_index_requested_project_id = None
+        self._pending_hit_record_ids: list[int] = []
+        self._pending_hit_search = ""
+        self._logged_repository_hit_key = ""
 
     def _build_ui(self):
         root = QVBoxLayout(self)
@@ -105,14 +142,11 @@ class ActivityProfilePage(QWidget):
         title_row = QHBoxLayout()
         self.lbl_title = QLabel("Activity Profile")
         self.lbl_title.setObjectName("HeaderProjectLabel")
-        self.btn_ai_summary = QPushButton("AI Profile Summary")
-        self.btn_ai_summary.setEnabled(False)
+        self.btn_ai_summary = make_action_button("AI Profile Summary", enabled=False)
         self.btn_ai_summary.clicked.connect(self.generate_ai_summary)
-        self.btn_add_ai_to_notes = QPushButton("Add to Notes")
-        self.btn_add_ai_to_notes.setEnabled(False)
-        self.btn_add_ai_to_notes.clicked.connect(self.add_ai_summary_to_notes)
-        self.btn_export = QPushButton("Export Profile")
-        self.btn_export.setEnabled(False)
+        self.btn_add_ai_to_notes = make_action_button("Add to Notes", enabled=False)
+        self.btn_add_ai_to_notes.clicked.connect(self.add_profile_to_notes)
+        self.btn_export = make_action_button("Export Profile", enabled=False)
         self.btn_export.clicked.connect(self.export_profile)
         title_row.addWidget(self.lbl_title)
         title_row.addStretch()
@@ -124,13 +158,20 @@ class ActivityProfilePage(QWidget):
         self.lbl_subtitle.setWordWrap(True)
         self.lbl_subtitle.setObjectName("Muted")
 
+        self.lbl_readiness = QLabel("")
+        self.lbl_readiness.setWordWrap(True)
+        self.lbl_readiness.setObjectName("ProfileReadiness")
+        self.lbl_readiness.hide()
+
         header_layout.addLayout(title_row)
         header_layout.addWidget(self.lbl_subtitle)
+        header_layout.addWidget(self.lbl_readiness)
 
         self.lbl_profile_hit = QLabel("")
         self.lbl_profile_hit.setObjectName("HitBanner")
         self.lbl_profile_hit.setWordWrap(True)
         self.lbl_profile_hit.hide()
+        self.lbl_profile_hit.installEventFilter(self)
         header_layout.addWidget(self.lbl_profile_hit)
 
         root.addWidget(header)
@@ -160,6 +201,23 @@ class ActivityProfilePage(QWidget):
             metric_grid.addWidget(card, idx // 3, idx % 3)
         scroll_layout.addLayout(metric_grid)
 
+        self.txt_summary = QTextEdit()
+        self.txt_summary.setReadOnly(True)
+        self.txt_summary.setMinimumHeight(160)
+        self.txt_summary.setPlaceholderText("Project profile summary will appear here.")
+        self.txt_routine = QTextEdit()
+        self.txt_routine.setReadOnly(True)
+        self.txt_routine.setMinimumHeight(160)
+        self.txt_routine.setPlaceholderText("Load a dataset to see active and quiet periods.")
+
+        overview_row = QGridLayout()
+        overview_row.setSpacing(12)
+        overview_row.addWidget(self._section("Profile Summary", self.txt_summary), 0, 0)
+        overview_row.addWidget(self._section("Activity rhythm", self.txt_routine), 0, 1)
+        overview_row.setColumnStretch(0, 1)
+        overview_row.setColumnStretch(1, 1)
+        scroll_layout.addLayout(overview_row)
+
         self.evidence_chart = BarChartWidget(
             "Evidence sources",
             count_list=True,
@@ -168,7 +226,7 @@ class ActivityProfilePage(QWidget):
         self.device_ip_chart = BarChartWidget(
             "PCAP device IP distribution",
             count_list=True,
-            max_rows=PROFILE_CHART_MAX_DEVICE_IPS,
+            max_rows=PROFILE_CHART_PREVIEW_ROWS,
             value_label_key="badge_label",
         )
         self.activity_chart = BarChartWidget("Activity event types", count_list=True, max_rows=0)
@@ -185,30 +243,10 @@ class ActivityProfilePage(QWidget):
         behavior_title.setObjectName("SectionTitle")
         scroll_layout.addWidget(behavior_title)
 
-        expand_row = QHBoxLayout()
-        expand_row.setSpacing(8)
-        self.btn_expand_json_days = QPushButton("Expand JSON days")
-        self.btn_expand_pcap_days = QPushButton("Expand PCAP days")
-        self.btn_expand_compare_days = QPushButton("Expand JSON vs PCAP")
-        self.btn_expand_services = QPushButton("Expand services")
-        self.btn_expand_domains = QPushButton("Expand domains")
-        for button in (
-            self.btn_expand_json_days,
-            self.btn_expand_pcap_days,
-            self.btn_expand_compare_days,
-            self.btn_expand_services,
-            self.btn_expand_domains,
-        ):
-            button.setMinimumHeight(34)
-            button.setEnabled(False)
-            expand_row.addWidget(button)
-        expand_row.addStretch()
-        scroll_layout.addLayout(expand_row)
-        self.btn_expand_json_days.clicked.connect(lambda: self._expand_profile_rows("json_day_rows", "JSON activity by day"))
-        self.btn_expand_pcap_days.clicked.connect(lambda: self._expand_profile_rows("pcap_day_rows", "PCAP volume by day"))
-        self.btn_expand_compare_days.clicked.connect(lambda: self._expand_profile_rows("period_comparison_rows", "JSON vs PCAP by day"))
-        self.btn_expand_services.clicked.connect(lambda: self._expand_behavior_rows("service_rows", "Service groups by volume"))
-        self.btn_expand_domains.clicked.connect(lambda: self._expand_behavior_rows("domain_rows", "Observed domains by volume"))
+        behavior_scope = QLabel("All saved project evidence (not filtered by Explore period).")
+        behavior_scope.setObjectName("Muted")
+        behavior_scope.setWordWrap(True)
+        scroll_layout.addWidget(behavior_scope)
 
         self.service_chart = BarChartWidget(
             "Service groups by volume",
@@ -225,41 +263,62 @@ class ActivityProfilePage(QWidget):
             max_rows=PROFILE_CHART_PREVIEW_ROWS,
         )
         self.day_chart = BarChartWidget(
-            "JSON activity by day",
+            "JSON activity by day (top by volume)",
             value_key="count",
             value_label_key="detail",
             label_width=110,
-            max_rows=PROFILE_CHART_MAX_DAYS,
+            max_rows=PROFILE_CHART_PREVIEW_ROWS,
         )
         self.pcap_day_chart = BarChartWidget(
-            "PCAP volume by day",
+            "PCAP volume by day (top by volume)",
             value_key="count",
             value_label_key="detail",
             label_width=110,
-            max_rows=PROFILE_CHART_MAX_DAYS,
+            max_rows=PROFILE_CHART_PREVIEW_ROWS,
         )
         self.period_compare_chart = BarChartWidget(
-            "JSON vs PCAP by day",
+            "JSON vs PCAP by day (top by volume)",
             value_key="count",
             value_label_key="detail",
             label_width=110,
-            max_rows=PROFILE_CHART_MAX_DAYS,
+            max_rows=PROFILE_CHART_PREVIEW_ROWS,
             stacked_labels=True,
             label_limit=80,
+        )
+        self.service_chart.configure_expand_table(
+            lambda: self._expand_behavior_rows("service_rows", "Service groups by volume")
+        )
+        self.domain_chart.configure_expand_table(
+            lambda: self._expand_behavior_rows("domain_rows", "Observed domains by volume")
+        )
+        self.day_chart.configure_expand_table(
+            lambda: self._expand_profile_rows("json_day_rows", "JSON activity by day")
+        )
+        self.pcap_day_chart.configure_expand_table(
+            lambda: self._expand_profile_rows("pcap_day_rows", "PCAP volume by day")
+        )
+        self.period_compare_chart.configure_expand_table(
+            lambda: self._expand_profile_rows("period_comparison_rows", "JSON vs PCAP by day")
+        )
+        self.device_ip_chart.configure_expand_table(
+            lambda: self._expand_profile_rows("pcap_device_ip_rows", "PCAP device IP distribution")
         )
         self.pcap_coverage_chart = BarChartWidget(
             "PCAP period coverage",
             value_key="saved",
             value_label_key="detail",
             label_width=110,
-            max_rows=PROFILE_CHART_MAX_DAYS,
+            max_rows=PROFILE_CHART_PREVIEW_ROWS,
             count_list=True,
         )
-        self.hour_chart = BarChartWidget("Activity by hour", value_key="count", max_rows=0)
-        self.txt_routine = QTextEdit()
-        self.txt_routine.setReadOnly(True)
-        self.txt_routine.setMinimumHeight(150)
-        self.txt_routine.setPlaceholderText("Load a dataset to see active and quiet periods.")
+        self.pcap_coverage_chart.configure_expand_table(
+            lambda: self._expand_profile_rows("pcap_period_coverage", "PCAP period coverage")
+        )
+        self.hour_chart = BarChartWidget(
+            "Activity by hour (all saved project evidence)",
+            value_key="count",
+            max_rows=0,
+        )
 
         behavior_grid = QGridLayout()
         behavior_grid.setSpacing(12)
@@ -270,45 +329,15 @@ class ActivityProfilePage(QWidget):
         behavior_grid.addWidget(self.period_compare_chart, 2, 0, 1, 2)
         behavior_grid.addWidget(self.pcap_coverage_chart, 3, 0)
         behavior_grid.addWidget(self.hour_chart, 3, 1)
-        behavior_grid.addWidget(self._section("Activity rhythm", self.txt_routine), 4, 0, 1, 2)
         behavior_grid.setColumnStretch(0, 1)
         behavior_grid.setColumnStretch(1, 1)
         scroll_layout.addLayout(behavior_grid)
 
-        self.txt_ai_summary = QTextEdit()
-        self.txt_ai_summary.setReadOnly(True)
-        self.txt_ai_summary.setMinimumHeight(220)
-        self.txt_ai_summary.setPlaceholderText("Generate an AI profile summary grounded in the current activity profile.")
-        ai_section = QWidget()
-        ai_layout = QVBoxLayout(ai_section)
-        ai_layout.setContentsMargins(0, 0, 0, 0)
-        ai_layout.setSpacing(8)
-
-        ai_layout.addWidget(self.txt_ai_summary, 1)
-        scroll_layout.addWidget(self._section("AI Profile Summary", ai_section))
-
-        self.txt_summary = QTextEdit()
-        self.txt_summary.setReadOnly(True)
-        self.txt_summary.setMinimumHeight(190)
-        self.txt_summary.setPlaceholderText("Project profile summary will appear here.")
-
-        self.txt_next = QTextEdit()
-        self.txt_next.setReadOnly(True)
-        self.txt_next.setMinimumHeight(190)
-        self.txt_next.setPlaceholderText("Review guidance will appear here.")
-
-        top = QSplitter(Qt.Horizontal)
-        top.addWidget(self._section("Profile Summary", self.txt_summary))
-        top.addWidget(self._section("Next Review", self.txt_next))
-        top.setStretchFactor(0, 1)
-        top.setStretchFactor(1, 1)
-
-        scroll_layout.addWidget(top)
         scroll_layout.addStretch()
         scroll.setWidget(content)
         root.addWidget(scroll, 1)
 
-    def refresh(self, project_id: int | None, project_name: str = ""):
+    def refresh(self, project_id: int | None, project_name: str = "", *, quick: bool = False):
         if project_id is None:
             self.clear()
             return
@@ -343,50 +372,125 @@ class ActivityProfilePage(QWidget):
 
         summary_lines = list(profile.get("summary_lines") or [])
         self.txt_summary.setPlainText("\n".join(summary_lines))
+        self._sync_add_to_notes_button()
 
-        recommendation_lines = list(profile.get("recommendation_lines") or [])
-        self.txt_next.setPlainText("\n".join(recommendation_lines))
+        self._update_readiness(profile.get("readiness") or {})
+        if not quick:
+            self._update_hit_banner(project_id)
 
-        self._update_hit_banner(project_id)
+    def _update_readiness(self, readiness: dict) -> None:
+        banner = getattr(self, "lbl_readiness", None)
+        if banner is None:
+            return
+        label = str(readiness.get("label") or "").strip()
+        detail = str(readiness.get("detail") or "").strip()
+        state = str(readiness.get("state") or "").strip()
+        if not label:
+            banner.hide()
+            banner.clear()
+            return
+        text = label if not detail else f"{label}\n{detail}"
+        banner.setText(text)
+        banner.setProperty("readinessState", state)
+        banner.show()
 
     def _update_hit_banner(self, project_id: int | None) -> None:
         banner = getattr(self, "lbl_profile_hit", None)
         if banner is None:
             return
+        self._pending_hit_record_ids = []
+        self._pending_hit_search = ""
         if project_id is None:
             banner.hide()
             banner.clear()
+            banner.setCursor(Qt.ArrowCursor)
             return
-        try:
-            from core.leaks.search import HIT_KINDS, find_hits
-            from core.osint.snapshot import build_osint_snapshot
+        from core.leaks.search import find_repository_hits, normalize_hit_kind
+        from core.osint.snapshot import build_osint_snapshot
 
+        try:
             snapshot = build_osint_snapshot(int(project_id))
-            seen: set[str] = set()
-            hits: list[str] = []
-            for row in snapshot.get("identifiers") or []:
-                kind = str(row.get("kind") or "").strip().upper()
-                value = str(row.get("value") or "").strip()
-                if kind not in HIT_KINDS or not value or value in seen:
-                    continue
-                seen.add(value)
-                total, summary = find_hits(value, kind=kind)
-                if total:
-                    hits.append(f"{kind} {value} → {total} in {summary}")
         except Exception:
             banner.hide()
             banner.clear()
+            banner.setCursor(Qt.ArrowCursor)
             return
+
+        seen: set[str] = set()
+        hits: list[str] = []
+        all_record_ids: list[int] = []
+        first_search = ""
+        for row in snapshot.get("identifiers") or []:
+            kind = str(row.get("kind") or "").strip()
+            value = str(row.get("value") or "").strip()
+            if not value or value in seen:
+                continue
+            if kind.upper() in {"IP", "DOMAIN"}:
+                continue
+            if normalize_hit_kind(kind, value) is None and "@" not in value and not any(ch.isdigit() for ch in value):
+                continue
+            seen.add(value)
+            total, summary, record_ids = find_repository_hits(value, kind=kind)
+            if total:
+                label = kind or "Identifier"
+                hits.append(f"{label} {value} → {total} in {summary}")
+                for record_id in record_ids or []:
+                    if record_id not in all_record_ids:
+                        all_record_ids.append(record_id)
+                if not first_search:
+                    first_search = value
         if hits:
-            banner.setText("\u2714  Repository hits: " + "; ".join(hits))
+            self._pending_hit_record_ids = all_record_ids
+            self._pending_hit_search = first_search
+            banner.setText(
+                "\u2714  Repository hits: " + "; ".join(hits) + "  (click to open)"
+            )
+            banner.setCursor(Qt.PointingHandCursor)
+            banner.setMinimumHeight(32)
             banner.show()
+            hit_key = f"{project_id}:{first_search}:{len(all_record_ids)}"
+            if hit_key != getattr(self, "_logged_repository_hit_key", ""):
+                self._logged_repository_hit_key = hit_key
+                try:
+                    from core.db import add_activity
+
+                    add_activity(
+                        int(project_id),
+                        "repository_hit",
+                        "; ".join(hits[:3]),
+                    )
+                    if self.app and hasattr(self.app, "notes_controller"):
+                        self.app.notes_controller.refresh_activity_ui_for_project(int(project_id))
+                except Exception:
+                    pass
         else:
             banner.hide()
             banner.clear()
+            banner.setCursor(Qt.ArrowCursor)
+
+    def eventFilter(self, obj, event) -> bool:
+        banner = getattr(self, "lbl_profile_hit", None)
+        if obj is banner and event.type() == QEvent.Type.MouseButtonRelease:
+            if event.button() == Qt.MouseButton.LeftButton and self._pending_hit_search:
+                self._open_hit_in_repository()
+                return True
+        return super().eventFilter(obj, event)
+
+    def _open_hit_in_repository(self) -> None:
+        if not self._pending_hit_search or not self.app:
+            return
+        if hasattr(self.app, "open_leaks_viewer"):
+            self.app.open_leaks_viewer(
+                search_text=self._pending_hit_search,
+                record_ids=self._pending_hit_record_ids,
+            )
 
     def clear(self):
         self.lbl_title.setText("Activity Profile")
         self.lbl_subtitle.setText("Open a project to build a device/user activity profile from JSON datasets, PCAP sources, findings and notes.")
+        if hasattr(self, "lbl_readiness"):
+            self.lbl_readiness.hide()
+            self.lbl_readiness.clear()
         if hasattr(self, "lbl_profile_hit"):
             self.lbl_profile_hit.hide()
             self.lbl_profile_hit.clear()
@@ -413,24 +517,25 @@ class ActivityProfilePage(QWidget):
         self.hour_chart.set_rows([], empty_text="No saved project dataset is available for hourly activity.")
         self.txt_routine.clear()
         self.txt_summary.clear()
-        self.txt_next.clear()
-        self.txt_ai_summary.clear()
+        self._last_ai_summary = ""
 
     def generate_ai_summary(self):
         if not self.profile:
-            self.txt_ai_summary.setPlainText("Open an active project first.")
+            if self.app and hasattr(self.app, "_message_dialog"):
+                self.app._message_dialog("Activity Profile", "Open an active project first.", width=440)
             return
         if not self.app or not hasattr(self.app, "ai_service"):
-            self.txt_ai_summary.setPlainText("AI service is not available.")
+            if self.app and hasattr(self.app, "_message_dialog"):
+                self.app._message_dialog("Activity Profile", "AI service is not available.", width=440)
             return
         if self._ai_thread is not None:
             return
 
         self.btn_ai_summary.setEnabled(False)
         self.btn_ai_summary.setText("Generating...")
-        self.txt_ai_summary.setPlainText("Generating activity profile summary...")
+        self._last_ai_summary = ""
 
-        self._ai_thread = QThread()
+        self._ai_thread = QThread(self.app)
         self._ai_worker = AITextWorker(
             self.app.ai_service.generate_activity_profile_summary,
             dict(self.profile),
@@ -442,6 +547,8 @@ class ActivityProfilePage(QWidget):
         self._ai_worker.error.connect(self._on_ai_error, Qt.QueuedConnection)
         self._ai_worker.finished.connect(self._ai_thread.quit)
         self._ai_worker.error.connect(self._ai_thread.quit)
+        self._ai_worker.finished.connect(self._ai_worker.deleteLater)
+        self._ai_worker.error.connect(self._ai_worker.deleteLater)
         self._ai_thread.finished.connect(self._cleanup_ai_thread)
         self._ai_thread.start()
 
@@ -486,10 +593,19 @@ class ActivityProfilePage(QWidget):
                 )
 
     def _on_ai_finished(self, result: str):
-        self.txt_ai_summary.setPlainText(result)
-        self.btn_add_ai_to_notes.setEnabled(bool((result or "").strip()))
+        self._last_ai_summary = (result or "").strip()
         if self.app and hasattr(self.app, "publish_ai_output"):
             self.app.publish_ai_output("Profile", "AI Profile Summary", result)
+        project_id = getattr(self.app, "current_project_id", None) if self.app else None
+        if project_id is not None and (result or "").strip():
+            try:
+                from core.db import add_activity
+
+                add_activity(int(project_id), "ai_summary_generated", "Profile summary")
+                if self.app and hasattr(self.app, "notes_controller"):
+                    self.app.notes_controller.refresh_activity_ui_for_project(int(project_id))
+            except Exception:
+                pass
         self.btn_ai_summary.setEnabled(True)
         self.btn_ai_summary.setText("AI Profile Summary")
 
@@ -500,34 +616,60 @@ class ActivityProfilePage(QWidget):
         return get_project(project_id)
 
     def _on_ai_error(self, message: str):
-        self.txt_ai_summary.setPlainText(f"AI error: {message}")
-        self.btn_add_ai_to_notes.setEnabled(False)
+        self._last_ai_summary = ""
+        if self.app and hasattr(self.app, "_message_dialog"):
+            self.app._message_dialog("Activity Profile", "AI summary failed.", message, width=560)
         self.btn_ai_summary.setEnabled(True)
         self.btn_ai_summary.setText("AI Profile Summary")
 
-    def add_ai_summary_to_notes(self):
-        text = (self.txt_ai_summary.toPlainText() or "").strip()
-        if not text:
+    def add_profile_to_notes(self) -> None:
+        summary = (self.txt_summary.toPlainText() or "").strip()
+        rhythm = (self.txt_routine.toPlainText() or "").strip()
+        if not summary and not rhythm:
             return
-        if self.app and hasattr(self.app, "add_ai_text_to_notes"):
-            self.app.add_ai_text_to_notes(text)
+        if not self.app or self.app.current_project_id is None:
+            if hasattr(self.app, "_message_dialog"):
+                self.app._message_dialog("Notes", "Open an active project first.", width=420)
+            return
+
+        sections: list[str] = []
+        if summary:
+            sections.append(f"Profile Summary\n{summary}")
+        if rhythm:
+            sections.append(f"Activity rhythm\n{rhythm}")
+        body = "\n\n".join(sections)
+
+        from datetime import datetime
+
+        from ui.notes_format import format_notes_html_block
+
+        ts = datetime.now().strftime("%d.%m.%Y. %H:%M:%S")
+        block = format_notes_html_block(
+            source=f"Profile · {ts}",
+            title="Activity Profile",
+            body=body,
+        )
+        if not block:
+            return
+        self.app.notes_page.append_block(block)
+        self.app._notes_dirty = True
+        if hasattr(self.app, "notes_controller"):
+            self.app.notes_controller.flush()
+        self.app.go_to_notes()
+
+    def _sync_add_to_notes_button(self) -> None:
+        has_summary = bool((self.txt_summary.toPlainText() or "").strip())
+        has_rhythm = bool((self.txt_routine.toPlainText() or "").strip())
+        self.btn_add_ai_to_notes.setEnabled(has_summary or has_rhythm)
 
     def _cleanup_ai_thread(self):
-        if self._ai_worker is not None:
-            self._ai_worker.deleteLater()
-            self._ai_worker = None
-        if self._ai_thread is not None:
-            self._ai_thread.deleteLater()
-            self._ai_thread = None
+        self._ai_worker = None
+        self._ai_thread = None
 
     def shutdown_background_tasks(self, wait_ms: int = 5000) -> None:
         stop_qthread(self._ai_thread, wait_ms=wait_ms)
-        if self._ai_worker is not None:
-            self._ai_worker.deleteLater()
-            self._ai_worker = None
-        if self._ai_thread is not None:
-            self._ai_thread.deleteLater()
-            self._ai_thread = None
+        self._ai_worker = None
+        self._ai_thread = None
 
     def _set_metrics(self, metrics: list[dict[str, Any]]):
         defaults = [
@@ -578,15 +720,15 @@ class ActivityProfilePage(QWidget):
     def _apply_saved_day_charts(self) -> None:
         profile = self.profile or {}
         self.day_chart.set_rows(
-            profile.get("json_day_rows") or [],
+            _top_volume_day_rows(profile.get("json_day_rows") or []),
             empty_text="No saved JSON activity is available by day.",
         )
         self.pcap_day_chart.set_rows(
-            profile.get("pcap_day_rows") or [],
+            _top_volume_day_rows(profile.get("pcap_day_rows") or []),
             empty_text="No saved PCAP activity is available by day.",
         )
         self.period_compare_chart.set_rows(
-            profile.get("period_comparison_rows") or [],
+            _top_volume_day_rows(profile.get("period_comparison_rows") or []),
             empty_text="Load JSON and save PCAP periods to compare daily volume.",
         )
         self._update_profile_expand_buttons(profile)
@@ -599,26 +741,6 @@ class ActivityProfilePage(QWidget):
             saved_json_count = int(indexed.get("json_file_count") or 0)
             loaded_json_count = int(indexed.get("loaded_json_file_count") or 0)
             skipped_json_count = int(indexed.get("skipped_json_file_count") or 0)
-            actual_json_count = saved_json_count
-            if project_id is not None:
-                try:
-                    actual_json_count = max(saved_json_count, count_project_json_datasets(project_id, limit=50000))
-                except Exception:
-                    actual_json_count = saved_json_count
-            controller = getattr(self.app, "dataset_controller", None) if self.app else None
-            requested = getattr(self, "_behavior_index_requested_project_id", None)
-            if (
-                project_id is not None
-                and actual_json_count
-                and (actual_json_count > saved_json_count or skipped_json_count or loaded_json_count < saved_json_count)
-                and controller
-                and hasattr(controller, "refresh_project_behavior_index")
-                and requested != project_id
-            ):
-                self._behavior_index_requested_project_id = project_id
-                controller.refresh_project_behavior_index(project_id)
-            else:
-                self._behavior_index_requested_project_id = None
             behavior = indexed
             self._project_dataset_info = {
                 "json_file_count": saved_json_count,
@@ -633,12 +755,6 @@ class ActivityProfilePage(QWidget):
             saved_json_count = int(indexed.get("json_file_count") or 0)
             loaded_json_count = int(indexed.get("loaded_json_file_count") or 0)
             skipped_json_count = int(indexed.get("skipped_json_file_count") or 0)
-            if project_id is not None and saved_json_count:
-                controller = getattr(self.app, "dataset_controller", None) if self.app else None
-                requested = getattr(self, "_behavior_index_requested_project_id", None)
-                if controller and hasattr(controller, "refresh_project_behavior_index") and requested != project_id:
-                    self._behavior_index_requested_project_id = project_id
-                    controller.refresh_project_behavior_index(project_id)
             behavior = {
                 "flow_count": 0,
                 "routine_lines": [
@@ -665,9 +781,6 @@ class ActivityProfilePage(QWidget):
                     saved_json_count = int((self.profile or {}).get("dataset_count") or 0)
 
             if project_id is not None and saved_json_count:
-                controller = getattr(self.app, "dataset_controller", None) if self.app else None
-                if controller and hasattr(controller, "refresh_project_behavior_index"):
-                    controller.refresh_project_behavior_index(project_id)
                 self._project_dataset_info = {
                     "json_file_count": saved_json_count,
                     "loaded_json_file_count": 0,
@@ -713,16 +826,17 @@ class ActivityProfilePage(QWidget):
         if len(domain_rows) > PROFILE_CHART_PREVIEW_ROWS:
             self.domain_chart.setToolTip(f"{len(domain_rows):,} domains indexed. Chart shows top {PROFILE_CHART_PREVIEW_ROWS} by volume.")
         self.day_chart.set_rows(
-            (self.profile or {}).get("json_day_rows") or behavior.get("day_rows") or [],
+            _top_volume_day_rows((self.profile or {}).get("json_day_rows") or behavior.get("day_rows") or []),
             empty_text="No saved JSON activity is available by day.",
         )
         self.pcap_day_chart.set_rows(
-            (self.profile or {}).get("pcap_day_rows") or [],
+            _top_volume_day_rows((self.profile or {}).get("pcap_day_rows") or []),
             empty_text="No saved PCAP activity is available by day.",
         )
         self.hour_chart.set_rows(
             behavior.get("hour_rows") or [],
-            empty_text="No timestamps found in the loaded dataset.",
+            empty_text="No timestamps found in saved project evidence.",
+            footer_text="Project-wide aggregate — not filtered by Explore period or month selection.",
         )
         self._set_behavior_routine_text(behavior)
         self._update_profile_expand_buttons(self.profile)
@@ -731,21 +845,24 @@ class ActivityProfilePage(QWidget):
         profile = profile or self.profile or {}
         behavior = self._current_behavior_profile()
         thresholds = {
-            self.btn_expand_json_days: len(profile.get("json_day_rows") or []),
-            self.btn_expand_pcap_days: len(profile.get("pcap_day_rows") or []),
-            self.btn_expand_compare_days: len(profile.get("period_comparison_rows") or []),
-            self.btn_expand_services: len(behavior.get("service_rows") or []),
-            self.btn_expand_domains: len(behavior.get("domain_rows") or []),
+            self.day_chart: len(profile.get("json_day_rows") or []),
+            self.pcap_day_chart: len(profile.get("pcap_day_rows") or []),
+            self.period_compare_chart: len(profile.get("period_comparison_rows") or []),
+            self.device_ip_chart: len(profile.get("pcap_device_ip_rows") or []),
+            self.pcap_coverage_chart: len(profile.get("pcap_period_coverage") or []),
+            self.service_chart: len(behavior.get("service_rows") or []),
+            self.domain_chart: len(behavior.get("domain_rows") or []),
         }
-        day_limit = PROFILE_CHART_MAX_DAYS
         preview_limit = PROFILE_CHART_PREVIEW_ROWS
-        for button, count in thresholds.items():
-            limit = preview_limit if button in (self.btn_expand_services, self.btn_expand_domains) else day_limit
-            button.setEnabled(count > limit)
-            if count > limit:
-                button.setToolTip(f"{count:,} rows available — embedded chart shows first {limit}.")
-            else:
-                button.setToolTip("")
+        for chart, count in thresholds.items():
+            chart.set_expand_enabled(
+                count > preview_limit,
+                tooltip=(
+                    f"{count:,} rows available — embedded chart shows top {preview_limit}."
+                    if count > preview_limit
+                    else ""
+                ),
+            )
 
     def _current_behavior_profile(self) -> dict[str, Any]:
         project_id = getattr(self.app, "current_project_id", None) if self.app else None
@@ -761,7 +878,7 @@ class ActivityProfilePage(QWidget):
 
     def _expand_behavior_rows(self, key: str, title: str) -> None:
         behavior = self._current_behavior_profile()
-        rows = list(behavior.get(key) or [])
+        rows = _sort_behavior_expand_rows(key, list(behavior.get(key) or []))
         if not rows:
             return
         if key == "service_rows":
@@ -772,7 +889,7 @@ class ActivityProfilePage(QWidget):
 
     def _expand_profile_rows(self, key: str, title: str) -> None:
         profile = self.profile or {}
-        rows = list(profile.get(key) or [])
+        rows = _sort_profile_expand_rows(key, list(profile.get(key) or []))
         if not rows:
             return
         if key == "period_comparison_rows":
@@ -786,6 +903,15 @@ class ActivityProfilePage(QWidget):
             ]
         elif key == "pcap_day_rows":
             columns = [("label", "Day"), ("count", "Packets"), ("bytes_label", "Volume"), ("detail", "Detail")]
+        elif key == "pcap_device_ip_rows":
+            columns = [
+                ("label", "IP"),
+                ("badge_label", "Packets"),
+                ("periods", "Periods"),
+                ("detail", "Detail"),
+            ]
+        elif key == "pcap_period_coverage":
+            columns = [("label", "Day"), ("count", "Files"), ("status", "Status"), ("detail", "Detail")]
         else:
             columns = [("label", "Day"), ("count", "Flows"), ("detail", "Detail")]
         open_project_rows_dialog(self.app, title, columns, rows)
@@ -855,6 +981,7 @@ class ActivityProfilePage(QWidget):
 
         lines.extend(str(line) for line in (behavior.get("routine_lines") or []))
         self.txt_routine.setPlainText("\n".join(lines))
+        self._sync_add_to_notes_button()
 
     def _section(self, title: str, widget: QWidget, row_span: int = 1, col_span: int = 1) -> QWidget:
         box = QFrame()
@@ -900,16 +1027,42 @@ class BarChartWidget(QFrame):
         self.layout.setSpacing(8)
         self.layout.setAlignment(Qt.AlignTop)
 
+        header_row = QHBoxLayout()
+        header_row.setSpacing(8)
         title_label = QLabel(title)
         title_label.setObjectName("SectionTitle")
         title_label.setAlignment(Qt.AlignLeft | Qt.AlignTop)
-        self.layout.addWidget(title_label)
+        self.btn_expand_table = make_action_button(
+            "Expand table",
+            object_name="SummaryExpandButton",
+            enabled=False,
+        )
+        self.btn_expand_table.hide()
+        self._expand_callback = None
+        self.btn_expand_table.clicked.connect(self._on_expand_table_clicked)
+        header_row.addWidget(title_label, 1)
+        header_row.addWidget(self.btn_expand_table, 0, Qt.AlignRight | Qt.AlignTop)
+        self.layout.addLayout(header_row)
 
         self.rows = QVBoxLayout()
         self.rows.setSpacing(6)
         self.rows.setAlignment(Qt.AlignTop)
         self.layout.addLayout(self.rows, 1)
         self.setMinimumHeight(140)
+
+    def configure_expand_table(self, callback) -> None:
+        self._expand_callback = callback
+        self.btn_expand_table.show()
+
+    def _on_expand_table_clicked(self) -> None:
+        if self._expand_callback is not None:
+            self._expand_callback()
+
+    def set_expand_enabled(self, enabled: bool, *, tooltip: str = "") -> None:
+        if self._expand_callback is None:
+            return
+        self.btn_expand_table.setEnabled(enabled)
+        self.btn_expand_table.setToolTip(tooltip or "")
 
     def set_rows(
         self,

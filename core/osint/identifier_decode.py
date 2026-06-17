@@ -19,13 +19,6 @@ def decode_identifier(kind: str, value: str) -> EnrichResult | None:
     if text_kind in {"MSISDN", "MOBILE NUMBER", "PHONE"}:
         return decode_msisdn_operator(text_value)
 
-    digits_only = text_value.replace("+", "").isdigit()
-    if digits_only:
-        if len(text_value.replace("+", "")) >= 14:
-            return decode_imei(text_value)
-        if len(text_value.replace("+", "")) >= 10:
-            return decode_msisdn_operator(text_value)
-
     return None
 
 

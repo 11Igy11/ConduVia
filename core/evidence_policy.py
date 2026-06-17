@@ -26,11 +26,25 @@ def should_batch_pcap_files(file_count: int, byte_count: int) -> bool:
 
 
 def format_period_day_label(day: str) -> str:
-    if day == "undated":
+    return _format_period_day_label_impl(str(day or "").strip(), _depth=0)
+
+
+def _format_period_day_label_impl(text: str, *, _depth: int) -> str:
+    if _depth > 8:
+        return text
+    if text == "undated":
         return "Undated"
-    if len(day) == 10 and day[4] == "-" and day[7] == "-":
-        return f"{day[8:10]}/{day[5:7]}/{day[:4]}"
-    return str(day or "")
+    if text.startswith("range:"):
+        from core.period_groups import parse_range_period_key
+
+        start, end = parse_range_period_key(text)
+        if start and end:
+            left = _format_period_day_label_impl(start, _depth=_depth + 1)
+            right = _format_period_day_label_impl(end, _depth=_depth + 1)
+            return f"{left} – {right}"
+    if len(text) == 10 and text[4] == "-" and text[7] == "-":
+        return f"{text[8:10]}/{text[5:7]}/{text[:4]}"
+    return text
 
 
 def period_combo_label(day: str, file_count: int, *, kind: str = "files") -> str:

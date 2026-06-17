@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QFont, QPixmap
+from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
     QFrame,
     QGridLayout,
@@ -20,6 +20,8 @@ from PySide6.QtWidgets import (
 )
 
 from ui.project_rows_dialog import (
+    load_selected_json_dataset_rows,
+    load_selected_pcap_dataset_rows,
     open_json_dataset_row,
     open_pcap_dataset_row,
     open_project_rows_dialog,
@@ -28,25 +30,33 @@ from ui.project_rows_dialog import (
 if TYPE_CHECKING:
     from ui.app import App
 
-PROJECT_ACTION_HEIGHT = 32
-PROJECT_ACTION_FONT_PX = 12
+from ui.buttons import make_action_button, style_action_button
+from ui.ui_metrics import PROJECT_TOOLBAR_BUTTON_HEIGHT, ROUND_REFRESH_BUTTON_SIZE
+
+PROJECT_ACTION_HEIGHT = PROJECT_TOOLBAR_BUTTON_HEIGHT
+PROJECT_ACTION_FONT_PT = 11
 
 
-def _apply_action_font(widget, *, pixel_size: int = PROJECT_ACTION_FONT_PX) -> None:
-    font = QFont(widget.font())
-    font.setPixelSize(pixel_size)
-    widget.setFont(font)
+from ui.font_utils import app_font
+
+
+def _apply_action_font(widget, *, point_size: int = PROJECT_ACTION_FONT_PT) -> None:
+    widget.setFont(app_font(point_size=max(1, point_size)))
 
 
 def _compact_button(text: str, *, primary: bool = False, object_name: str = "") -> QPushButton:
-    button = QPushButton(text)
-    if object_name:
-        button.setObjectName(object_name)
-    else:
-        button.setObjectName("PrimaryButton" if primary else "CompactButton")
-    button.setFixedHeight(PROJECT_ACTION_HEIGHT)
-    button.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+    name = object_name or ("ProjectToolbarButton" if primary else "CompactButton")
+    button = make_action_button(text, object_name=name)
     _apply_action_font(button)
+    return button
+
+
+def _round_refresh_button() -> QToolButton:
+    button = QToolButton()
+    button.setText("↻")
+    button.setObjectName("RoundRefreshToolButton")
+    button.setFixedSize(ROUND_REFRESH_BUTTON_SIZE, ROUND_REFRESH_BUTTON_SIZE)
+    _apply_action_font(button, point_size=14)
     return button
 
 
@@ -54,8 +64,8 @@ def _compact_tool_button(text: str, *, primary: bool = False) -> QToolButton:
     button = QToolButton()
     button.setText(text)
     button.setObjectName("PrimaryToolButton" if primary else "CompactToolButton")
-    button.setFixedSize(PROJECT_ACTION_HEIGHT, PROJECT_ACTION_HEIGHT)
-    _apply_action_font(button, pixel_size=14)
+    button.setFixedSize(ROUND_REFRESH_BUTTON_SIZE, ROUND_REFRESH_BUTTON_SIZE)
+    _apply_action_font(button, point_size=14)
     return button
 
 
@@ -157,7 +167,7 @@ def build_projects_page(app: App) -> QWidget:
     app.btn_delete_project.setToolTip("Delete selected project")
     app.btn_delete_project.setEnabled(False)
 
-    app.btn_refresh_projects = _compact_tool_button("↻", primary=True)
+    app.btn_refresh_projects = _round_refresh_button()
     app.btn_refresh_projects.setToolTip("Refresh project list")
 
     app.projects_list = QListWidget()
@@ -184,7 +194,7 @@ def build_projects_page(app: App) -> QWidget:
     app.lbl_project_selection_state.setObjectName("ProjectSelectionBadge")
     app.lbl_project_selection_state.hide()
 
-    app.btn_open_project = _compact_button("Set active", object_name="SetActiveButton")
+    app.btn_open_project = _compact_button("Set active")
     app.btn_open_project.setToolTip("Open selected project as the active case")
     app.btn_open_project.setEnabled(False)
 
@@ -208,7 +218,7 @@ def build_projects_page(app: App) -> QWidget:
 
     right_col = QVBoxLayout()
     right_col.setSpacing(6)
-    lbl_selected = QLabel("Selected project")
+    lbl_selected = QLabel("Project details")
     lbl_selected.setObjectName("SectionTitle")
     right_col.addWidget(lbl_selected)
     right_col.addWidget(app.project_selection_panel, 1)
@@ -230,15 +240,16 @@ def build_projects_page(app: App) -> QWidget:
     app.btn_expand_json_datasets.clicked.connect(
         lambda: open_project_rows_dialog(
             app,
-            "Recent JSON datasets",
+            "Recent JSON files",
             [
-                ("status", "Status"),
-                ("name", "Name"),
-                ("kind", "Kind"),
-                ("path", "Path"),
+                ("name", "Day"),
+                ("file_count", "Files"),
+                ("period", "Period"),
             ],
             app.project_recent_json_rows,
             on_double_click=lambda row, dialog: open_json_dataset_row(app, row, dialog),
+            multi_select=True,
+            on_action=lambda rows, dialog: load_selected_json_dataset_rows(app, rows, dialog),
         )
     )
     app.btn_expand_pcap_datasets.clicked.connect(
@@ -255,6 +266,8 @@ def build_projects_page(app: App) -> QWidget:
             ],
             app.project_recent_pcap_rows,
             on_double_click=lambda row, dialog: open_pcap_dataset_row(app, row, dialog),
+            multi_select=True,
+            on_action=lambda rows, dialog: load_selected_pcap_dataset_rows(app, rows, dialog),
         )
     )
     app.btn_expand_project_activity.clicked.connect(
@@ -270,9 +283,9 @@ def build_projects_page(app: App) -> QWidget:
         )
     )
 
-    app.lbl_recent_json_count = QLabel("0 JSON datasets")
+    app.lbl_recent_json_count = QLabel("0 JSON files")
     app.lbl_recent_json_count.setObjectName("ProfileMetric")
-    app.lbl_recent_json_detail = QLabel("No JSON datasets saved for this project.")
+    app.lbl_recent_json_detail = QLabel("No JSON files saved for this project.")
     app.lbl_recent_json_detail.setObjectName("Muted")
     app.lbl_recent_json_detail.setWordWrap(True)
 
@@ -292,8 +305,8 @@ def build_projects_page(app: App) -> QWidget:
     bottom_grid.setSpacing(10)
     bottom_grid.addWidget(
         project_launcher_card(
-            "Recent JSON datasets",
-            "Unique JSON files or folders saved to the active project.",
+            "Recent JSON files",
+            "Unique JSON calendar days indexed for the active project.",
             app.lbl_recent_json_count,
             app.lbl_recent_json_detail,
             [app.btn_expand_json_datasets],

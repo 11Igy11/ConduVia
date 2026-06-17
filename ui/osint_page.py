@@ -21,7 +21,7 @@ from PySide6.QtWidgets import (
 if TYPE_CHECKING:
     from ui.app import App
 
-BTN_H = 30
+BTN_H = 28
 
 
 def _btn(text: str) -> QPushButton:

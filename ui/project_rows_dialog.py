@@ -11,12 +11,12 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QHeaderView,
     QLabel,
-    QPushButton,
     QTableView,
     QVBoxLayout,
 )
 
 from core.project_evidence import list_project_saved_pcap_day_rows
+from ui.buttons import make_dialog_button
 from ui.explore_widgets import CopyableTableView
 
 if TYPE_CHECKING:
@@ -30,6 +30,10 @@ def open_project_rows_dialog(
     columns: list[tuple[str, str]],
     rows: list[dict[str, Any]],
     on_double_click: Callable[[dict[str, Any], QDialog], None] | None = None,
+    *,
+    multi_select: bool = False,
+    action_label: str = "Load selected",
+    on_action: Callable[[list[dict[str, Any]], QDialog], None] | None = None,
 ) -> None:
     from ui.pcap_page import DictTableModel
 
@@ -50,7 +54,10 @@ def open_project_rows_dialog(
     layout.setContentsMargins(14, 14, 14, 28)
     layout.setSpacing(10)
 
-    hint = QLabel("Expanded project view. Sort columns or right-click to copy values.")
+    hint_text = "Expanded project view. Sort columns or right-click to copy values."
+    if multi_select and on_action is not None:
+        hint_text += " Select one or more rows, then use Load selected (or double-click one row)."
+    hint = QLabel(hint_text)
     hint.setObjectName("Muted")
     hint.setWordWrap(True)
     layout.addWidget(hint)
@@ -60,7 +67,9 @@ def open_project_rows_dialog(
     table.setSortingEnabled(True)
     table.setAlternatingRowColors(True)
     table.setSelectionBehavior(QTableView.SelectRows)
-    table.setSelectionMode(QAbstractItemView.SingleSelection)
+    table.setSelectionMode(
+        QAbstractItemView.ExtendedSelection if multi_select and on_action else QAbstractItemView.SingleSelection
+    )
     table.setEditTriggers(QTableView.NoEditTriggers)
     table.verticalHeader().setVisible(False)
     table.setHorizontalScrollMode(QAbstractItemView.ScrollPerPixel)
@@ -100,9 +109,25 @@ def open_project_rows_dialog(
     layout.addWidget(table, 1)
 
     footer = QHBoxLayout()
+    if multi_select and on_action is not None:
+        btn_action = make_dialog_button(action_label)
+
+        def _load_selected() -> None:
+            model = table.model()
+            if not isinstance(model, DictTableModel):
+                return
+            indexes = table.selectionModel().selectedRows()
+            if not indexes:
+                app._message_dialog(title, "Select at least one row.", width=380)
+                return
+            selected_rows = [model.rows[index.row()] for index in indexes if 0 <= index.row() < len(model.rows)]
+            if selected_rows:
+                on_action(selected_rows, dlg)
+
+        btn_action.clicked.connect(_load_selected)
+        footer.addWidget(btn_action)
     footer.addStretch()
-    btn_close = QPushButton("Close")
-    btn_close.setMinimumHeight(42)
+    btn_close = make_dialog_button("Close")
     btn_close.clicked.connect(dlg.accept)
     footer.addWidget(btn_close)
     layout.addSpacing(6)
@@ -111,6 +136,17 @@ def open_project_rows_dialog(
 
 
 def open_json_dataset_row(app: App, row: dict[str, Any], dialog: QDialog) -> None:
+    paths = [str(path) for path in (row.get("paths") or []) if str(path or "").strip()]
+    if paths:
+        dialog.accept()
+        source = str(getattr(app.dataset_controller, "_json_day_source", "") or "")
+        if not source and paths:
+            source = str(Path(paths[0]).parent)
+        app.dataset_controller._set_json_day_groups(source, {str(row.get("day") or "undated"): paths})
+        app.dataset_controller.load_dataset_files(source, paths)
+        app.go_to_json_tab(0)
+        return
+
     path_text = str(row.get("path") or "")
     path = Path(path_text)
     if not path_text or not path.exists():
@@ -195,3 +231,50 @@ def open_pcap_dataset_row(app: App, row: dict[str, Any], dialog: QDialog) -> Non
     app.go_page(app.IDX_PCAP, app._nav_pcap)
     if hasattr(app, "pcap_page"):
         app.pcap_page.load_pcap(str(path))
+
+
+def load_selected_json_dataset_rows(app: App, rows: list[dict[str, Any]], dialog: QDialog) -> None:
+    day_groups: dict[str, list[str]] = {}
+    all_paths: list[str] = []
+    source = str(getattr(app.dataset_controller, "_json_day_source", "") or "")
+    for row in rows:
+        paths = [str(path) for path in (row.get("paths") or []) if str(path or "").strip()]
+        if not paths:
+            continue
+        day = str(row.get("day") or "undated")
+        bucket = day_groups.setdefault(day, [])
+        for path in paths:
+            if path not in bucket:
+                bucket.append(path)
+            if path not in all_paths:
+                all_paths.append(path)
+        if not source:
+            source = str(Path(paths[0]).parent)
+    if not all_paths:
+        app._message_dialog("Recent JSON files", "Selected rows have no loadable JSON paths.", width=420)
+        return
+    dialog.accept()
+    app.dataset_controller._set_json_day_groups(source, day_groups)
+    app.dataset_controller.load_dataset_files(source, all_paths)
+    app.go_to_json_tab(0)
+
+
+def load_selected_pcap_dataset_rows(app: App, rows: list[dict[str, Any]], dialog: QDialog) -> None:
+    all_paths: list[str] = []
+    for row in rows:
+        resolved = resolve_project_pcap_row(app, row)
+        for path in [str(item) for item in (resolved.get("paths") or []) if str(item or "").strip()]:
+            if Path(path).is_file() and path not in all_paths:
+                all_paths.append(path)
+    if not all_paths:
+        app._message_dialog(
+            "Recent PCAP days",
+            "Selected rows have no PCAP files available at their saved paths.",
+            width=480,
+        )
+        return
+    dialog.accept()
+    app.go_page(app.IDX_PCAP, app._nav_pcap)
+    if hasattr(app, "pcap_page"):
+        label = f"{len(rows):,} selected period(s)"
+        app.pcap_page._load_pcap_files(all_paths, label=label)

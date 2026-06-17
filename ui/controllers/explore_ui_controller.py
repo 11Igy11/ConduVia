@@ -1,8 +1,11 @@
-from PySide6.QtWidgets import QApplication, QMenu
+from PySide6.QtWidgets import QMenu
 from ui.explore_widgets import AITextWorker
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QTableView
-from ui.table_export import export_table_dialog
+from ui.table_export import export_table_dialog, LARGE_EXPORT_ROW_THRESHOLD
+
+from core.formatters import human_bytes
+from core.protocols import format_ip_proto
 
 class ExploreUIController:
     def __init__(self, app):
@@ -289,11 +292,13 @@ class ExploreUIController:
         self.app.copy_text("\n".join(lines))
 
     def export_flows_table(self, export_format: str | None = None) -> None:
-        if self.app.proxy.rowCount() == 0:
+        flows = self.app.flow_controller.get_all()
+        if not flows:
             self.app._message_dialog("Export table", "No flows are loaded or visible.", width=420)
             return
 
         if export_format:
+            flows = self.app.flow_controller.get_all()
             export_table_dialog(
                 self.app,
                 "Flows",
@@ -301,6 +306,7 @@ class ExploreUIController:
                 export_format,
                 project_id=self.app.current_project_id,
                 category="json",
+                flows_override=flows if len(flows) >= LARGE_EXPORT_ROW_THRESHOLD else None,
             )
             return
 
@@ -323,15 +329,23 @@ class ExploreUIController:
         self.app.btn_ai_summary.setEnabled(False)
         self.app.txt_ai_summary.setPlainText("Generating AI summary...")
         self.app.btn_ai_summary.setText("Generating...")
-        QApplication.processEvents()
 
         dataset_path = str(self.app.current_folder) if self.app.current_folder else ""
+
+        controller = getattr(self.app, "dataset_controller", None)
+        active_day = str(getattr(controller, "_json_active_day", "") or "") if controller is not None else ""
+        period_mode = str(getattr(controller, "_json_period_granularity", "day") or "day") if controller is not None else "day"
+        from core.evidence_policy import format_period_day_label
+
+        period_label = format_period_day_label(active_day) if active_day else ""
 
         worker = AITextWorker(
             self.app.ai_service.generate_dataset_summary,
             list(flows),
             self.app.current_project_name,
             dataset_path,
+            period_label=period_label,
+            period_mode=period_mode,
         )
         self.app.ai_task_controller.start("summary", worker)
 

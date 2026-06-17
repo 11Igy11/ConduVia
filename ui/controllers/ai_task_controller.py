@@ -33,6 +33,8 @@ class AiTaskController(QObject):
         app._ai_worker.error.connect(self.on_error)
         app._ai_worker.finished.connect(app._ai_thread.quit)
         app._ai_worker.error.connect(app._ai_thread.quit)
+        app._ai_worker.finished.connect(app._ai_worker.deleteLater)
+        app._ai_worker.error.connect(app._ai_worker.deleteLater)
         app._ai_thread.finished.connect(self.cleanup)
         app._ai_thread.start()
         return True
@@ -47,6 +49,16 @@ class AiTaskController(QObject):
             "finding": "Finding Explanation",
         }.get(app._ai_mode or "", "AI Summary")
         app.publish_ai_output("JSON", title, result)
+        project_id = getattr(app, "current_project_id", None)
+        if project_id is not None and (result or "").strip() and app._ai_mode in {"summary", "flow", "finding"}:
+            try:
+                from core.db import add_activity
+
+                add_activity(int(project_id), "ai_summary_generated", title)
+                if hasattr(app, "notes_controller"):
+                    app.notes_controller.refresh_activity_ui_for_project(int(project_id))
+            except Exception:
+                pass
         self._restore_mode_ui()
 
     @Slot(str)
@@ -57,25 +69,16 @@ class AiTaskController(QObject):
     @Slot()
     def cleanup(self) -> None:
         app = self.app
-        if app._ai_worker is not None:
-            app._ai_worker.deleteLater()
-            app._ai_worker = None
-
-        if app._ai_thread is not None:
-            app._ai_thread.deleteLater()
-            app._ai_thread = None
-
+        stop_qthread(app._ai_thread, wait_ms=500)
+        app._ai_worker = None
+        app._ai_thread = None
         app._ai_mode = None
 
     def shutdown(self, wait_ms: int = 5000) -> None:
         app = self.app
-        stop_qthread(app._ai_thread, wait_ms=wait_ms)
-        if app._ai_worker is not None:
-            app._ai_worker.deleteLater()
-            app._ai_worker = None
-        if app._ai_thread is not None:
-            app._ai_thread.deleteLater()
-            app._ai_thread = None
+        stop_qthread(app._ai_thread, wait_ms=max(500, wait_ms))
+        app._ai_worker = None
+        app._ai_thread = None
         app._ai_mode = None
 
     def _restore_mode_ui(self) -> None:

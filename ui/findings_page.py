@@ -9,6 +9,8 @@ from PySide6.QtWidgets import (
     QListWidget, QTextEdit
 )
 
+from ui.buttons import style_action_button
+
 class FindingsPage(QWidget):
     jumpRequested = Signal()
     editRequested = Signal()
@@ -32,7 +34,7 @@ class FindingsPage(QWidget):
         self.btn_finding_jump = QPushButton("Jump to Flow")
         self.btn_finding_ai = QPushButton("Explain with AI")
         for b in (self.btn_finding_edit, self.btn_finding_delete, self.btn_finding_jump, self.btn_finding_ai):
-            b.setFixedHeight(34)
+            style_action_button(b)
 
         actions.addWidget(self.btn_finding_edit)
         actions.addWidget(self.btn_finding_delete)

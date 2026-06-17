@@ -104,3 +104,35 @@ def format_duration_hms_ms(value: Any) -> str:
     seconds = (ms % 60_000) // 1000
     millis = ms % 1000
     return f"{hours:02d}:{minutes:02d}:{seconds:02d}.{millis:03d}"
+
+
+def format_export_datetime(value: Any) -> str:
+    """Unified export timestamp: dd.mm.yyyy HH:MM:SS."""
+    return format_flow_datetime(value)
+
+
+def format_export_bytes(value: Any, *, precision: int = 2) -> str:
+    """Unified export volume using B / KB / MB / GB."""
+    return human_bytes(value, precision=precision)
+
+
+def format_export_cell(key: str, value: Any, *, flow: dict | None = None) -> str:
+    column = str(key or "").strip()
+    if column in ("date", "time") and flow is not None:
+        raw_value = flow.get("bidirectional_first_seen_ms", "")
+        if column == "date":
+            return format_flow_date(raw_value) or str(raw_value or "")
+        return format_flow_time(raw_value) or str(raw_value or "")
+    if column.endswith("_seen_ms"):
+        return format_export_datetime(value)
+    if column.endswith("_bytes") or column in {"bidirectional_bytes", "src2dst_bytes", "dst2src_bytes"}:
+        return format_export_bytes(value)
+    if column.endswith("_duration_ms"):
+        return format_duration_compact_ms(value)
+    if column == "protocol":
+        from core.protocols import format_ip_proto
+
+        return format_ip_proto(value)
+    if value is None:
+        return ""
+    return str(value)

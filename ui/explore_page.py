@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
     QHeaderView,
     QLineEdit,
     QLabel,
+    QProgressBar,
     QPushButton,
     QScrollArea,
     QSizePolicy,
@@ -31,6 +32,18 @@ from core.analysis_limits import (
     SUMMARY_CARDS_WRAP_WIDTH,
     SUMMARY_VALUE_COL_WIDTH,
 )
+from ui.buttons import make_action_button, style_action_button
+from ui.dataset_header_layout import (
+    DATASET_HEADER_MARGINS,
+    DATASET_HEADER_SPACING,
+    DATASET_PAGE_SPACING,
+    DATASET_PERIOD_ROW_SPACING,
+    DATASET_PERIOD_ROW_TOP_MARGIN,
+    PERIOD_COMBO_DAY_MIN_WIDTH,
+    PERIOD_COMBO_FILE_MIN_WIDTH,
+    PERIOD_COMBO_MODE_MIN_WIDTH,
+    PERIOD_CONTROL_HEIGHT,
+)
 from ui.explore_models import FlowTableModel, NumericSortProxy
 from ui.explore_widgets import FlowTableView
 from ui.findings_page import FindingsPage
@@ -47,7 +60,7 @@ def build_explore_workspace(app: App) -> tuple[QWidget, QFrame]:
     app.lbl_project_banner = QLabel("Project: (none)")
     app.lbl_project_banner.setObjectName("HeaderProjectLabel")
 
-    app.btn_load = QPushButton("Load dataset")
+    app.btn_load = make_action_button("Load dataset", object_name="ExploreTabActionButton")
 
     app.lbl_path = QLabel("No dataset loaded")
     app.lbl_path.setObjectName("HeaderPathLabel")
@@ -68,8 +81,16 @@ def build_explore_workspace(app: App) -> tuple[QWidget, QFrame]:
     app.lbl_json_day.setVisible(False)
 
     app.cmb_json_day = QComboBox()
-    app.cmb_json_day.setMinimumWidth(230)
+    app.cmb_json_day.setMinimumWidth(PERIOD_COMBO_DAY_MIN_WIDTH)
+    app.cmb_json_day.setObjectName("CompactControl")
+    app.cmb_json_day.setFixedHeight(PERIOD_CONTROL_HEIGHT)
     app.cmb_json_day.setVisible(False)
+
+    app.cmb_json_file = QComboBox()
+    app.cmb_json_file.setMinimumWidth(PERIOD_COMBO_FILE_MIN_WIDTH)
+    app.cmb_json_file.setObjectName("CompactControl")
+    app.cmb_json_file.setFixedHeight(PERIOD_CONTROL_HEIGHT)
+    app.cmb_json_file.setVisible(False)
 
     app.lbl_json_meta = QLabel("")
     app.lbl_json_meta.setObjectName("HeaderStatLabel")
@@ -82,10 +103,11 @@ def build_explore_workspace(app: App) -> tuple[QWidget, QFrame]:
     app.lbl_conv_summary = QLabel("")
     app.lbl_conv_summary.hide()
 
-    app.btn_load_more = QPushButton("Load next")
-    app.btn_load_more.setEnabled(False)
+    app.btn_load_more = make_action_button("Load next", enabled=False)
 
     app.cmb_page_size = QComboBox()
+    app.cmb_page_size.setObjectName("CompactControl")
+    app.cmb_page_size.setFixedHeight(28)
     app.cmb_page_size.addItems(["1000", "2000", "5000", "10000"])
     app.cmb_page_size.setCurrentText("2000")
 
@@ -93,8 +115,8 @@ def build_explore_workspace(app: App) -> tuple[QWidget, QFrame]:
     header_card.setObjectName("ExploreHeaderCard")
 
     header_layout = QVBoxLayout(header_card)
-    header_layout.setContentsMargins(6, 4, 6, 4)
-    header_layout.setSpacing(1)
+    header_layout.setContentsMargins(*DATASET_HEADER_MARGINS)
+    header_layout.setSpacing(DATASET_HEADER_SPACING)
 
     # row 1
     header_top = QHBoxLayout()
@@ -112,14 +134,35 @@ def build_explore_workspace(app: App) -> tuple[QWidget, QFrame]:
     header_mid.setContentsMargins(0, 0, 0, 0)
     header_mid.addWidget(app.lbl_path, 1)
 
-    # row 3
+    # row 3 — stats only; period controls sit in the bottom row above tabs
     header_bottom = QHBoxLayout()
     header_bottom.setSpacing(2)
     header_bottom.setContentsMargins(0, 0, 0, 0)
     header_bottom.addWidget(app.lbl_stats, 1)
-    header_bottom.addSpacing(8)
-    header_bottom.addWidget(app.lbl_json_day)
-    header_bottom.addWidget(app.cmb_json_day)
+
+    app.cmb_json_period_mode = QComboBox()
+    app.cmb_json_period_mode.setMinimumWidth(PERIOD_COMBO_MODE_MIN_WIDTH)
+    app.cmb_json_period_mode.setObjectName("CompactControl")
+    app.cmb_json_period_mode.setFixedHeight(PERIOD_CONTROL_HEIGHT)
+    app.cmb_json_period_mode.addItem("Day", "day")
+    app.cmb_json_period_mode.addItem("Month", "month")
+    app.cmb_json_period_mode.addItem("Selected period", "range")
+    app.cmb_json_period_mode.setVisible(False)
+
+    app.btn_json_pick_range = make_action_button("Pick range…")
+    app.btn_json_pick_range.hide()
+
+    app.json_period_row = QWidget()
+    json_period_layout = QHBoxLayout(app.json_period_row)
+    json_period_layout.setContentsMargins(0, DATASET_PERIOD_ROW_TOP_MARGIN, 0, 0)
+    json_period_layout.setSpacing(DATASET_PERIOD_ROW_SPACING)
+    json_period_layout.addWidget(app.lbl_json_day)
+    json_period_layout.addWidget(app.cmb_json_day)
+    json_period_layout.addWidget(app.cmb_json_file)
+    json_period_layout.addWidget(app.cmb_json_period_mode)
+    json_period_layout.addWidget(app.btn_json_pick_range)
+    json_period_layout.addStretch(1)
+    app.json_period_row.setVisible(False)
 
     header_meta = QHBoxLayout()
     header_meta.setSpacing(4)
@@ -129,9 +172,7 @@ def build_explore_workspace(app: App) -> tuple[QWidget, QFrame]:
     app.lbl_json_gaps = QLabel("")
     app.lbl_json_gaps.setObjectName("MutedLabel")
     app.lbl_json_gaps.setWordWrap(True)
-    app.btn_expand_json_gaps = QPushButton("Missing days")
-    app.btn_expand_json_gaps.setObjectName("CompactButton")
-    app.btn_expand_json_gaps.setFixedHeight(30)
+    app.btn_expand_json_gaps = make_action_button("Missing days")
     app.btn_expand_json_gaps.setVisible(False)
 
     json_gap_row = QHBoxLayout()
@@ -139,27 +180,41 @@ def build_explore_workspace(app: App) -> tuple[QWidget, QFrame]:
     json_gap_row.addWidget(app.lbl_json_gaps, 1)
     json_gap_row.addWidget(app.btn_expand_json_gaps)
 
+    app.lbl_json_load_progress = QLabel("")
+    app.lbl_json_load_progress.setObjectName("MutedLabel")
+    app.lbl_json_load_progress.setWordWrap(True)
+    app.lbl_json_load_progress.hide()
+
     header_layout.addLayout(header_top)
     header_layout.addLayout(header_mid)
     header_layout.addLayout(header_bottom)
     header_layout.addLayout(header_meta)
     header_layout.addLayout(json_gap_row)
+    header_layout.addWidget(app.lbl_json_load_progress)
+
+    app.json_load_progress = QProgressBar()
+    app.json_load_progress.setObjectName("InlineLoadProgress")
+    app.json_load_progress.setFixedHeight(10)
+    app.json_load_progress.setTextVisible(False)
+    app.json_load_progress.hide()
+    header_layout.addWidget(app.json_load_progress)
+    header_layout.addWidget(app.json_period_row)
 
     app.search = QLineEdit()
     app.search.setPlaceholderText("Search IP / SNI / app...")
-    app.search.setMinimumHeight(40)
+    app.search.setObjectName("CompactControl")
+    app.search.setFixedHeight(28)
 
     app.tabs = QTabWidget()
     app.tabs.setObjectName("ExploreSubTabs")
     app.tabs.setDocumentMode(True)
 
-    app.btn_ai_summary = QPushButton("Generate AI Summary")
-    app.btn_add_ai_to_notes = QPushButton("Add AI to Notes")
-    app.btn_add_ai_to_notes.setEnabled(True)
-    for btn in (app.btn_ai_summary, app.btn_add_ai_to_notes):
-        btn.setObjectName("ExploreTabActionButton")
-        btn.setFixedHeight(30)
-        btn.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+    app.btn_ai_summary = make_action_button("Generate AI Summary", object_name="ExploreTabActionButton")
+    app.btn_add_ai_to_notes = make_action_button(
+        "Add AI to Notes",
+        object_name="ExploreTabActionButton",
+        enabled=True,
+    )
 
     summary_tab = QWidget()
     summary_layout = QVBoxLayout(summary_tab)
@@ -209,10 +264,7 @@ def build_explore_workspace(app: App) -> tuple[QWidget, QFrame]:
         layout.addLayout(rows_layout)
         layout.addStretch(1)
 
-        expand = QPushButton("Expand table")
-        expand.setObjectName("SummaryExpandButton")
-        expand.setFixedHeight(30)
-        expand.setEnabled(False)
+        expand = make_action_button("Expand table", object_name="SummaryExpandButton", enabled=False)
         expand.clicked.connect(lambda _checked=False, kind=key: app.dataset_controller.expand_dataset_summary(kind))
         app.summary_expand_buttons[key] = expand
         expand_row = QHBoxLayout()
@@ -294,10 +346,10 @@ def build_explore_workspace(app: App) -> tuple[QWidget, QFrame]:
     toolbar_wrap = QFrame()
     toolbar_wrap.setObjectName("FlowToolbarCard")
     toolbar_wrap.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-    toolbar_wrap.setFixedHeight(68)
+    toolbar_wrap.setFixedHeight(40)
 
     toolbar = QHBoxLayout(toolbar_wrap)
-    toolbar.setContentsMargins(10, 10, 10, 10)
+    toolbar.setContentsMargins(10, 6, 10, 6)
     toolbar.setSpacing(10)
     toolbar.setAlignment(Qt.AlignVCenter)
 
@@ -307,28 +359,16 @@ def build_explore_workspace(app: App) -> tuple[QWidget, QFrame]:
     right_actions = QHBoxLayout()
     right_actions.setSpacing(8)
 
-    app.btn_filter_src = QPushButton("Filter source")
-    app.btn_filter_dst = QPushButton("Filter destination")
-    app.btn_filter_sni = QPushButton("Filter SNI")
+    app.btn_filter_src = make_action_button("Filter source")
+    app.btn_filter_dst = make_action_button("Filter destination")
+    app.btn_filter_sni = make_action_button("Filter SNI")
 
-    app.btn_toggle_conv = QPushButton("Conversation: OFF")
-    app.btn_expand_flows = QPushButton("Expand Flows")
-    app.btn_mark_finding = QPushButton("Mark as Finding")
-    app.btn_ai_explain = QPushButton("Explain with AI")
+    app.btn_toggle_conv = make_action_button("Conversation: OFF")
+    app.btn_expand_flows = make_action_button("Expand Flows")
+    app.btn_mark_finding = make_action_button("Mark as Finding")
+    app.btn_ai_explain = make_action_button("Explain with AI")
 
-    app.btn_export_flows = QPushButton("Export table")
-    app.btn_export_flows.setFixedHeight(34)
-    app.btn_export_flows.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
-
-    for b in (
-        app.btn_filter_src, app.btn_filter_dst,
-        app.btn_filter_sni,
-        app.btn_toggle_conv, app.btn_expand_flows,
-        app.btn_mark_finding, app.btn_ai_explain,
-        app.btn_export_flows,
-    ):
-        b.setFixedHeight(34)
-        b.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+    app.btn_export_flows = make_action_button("Export table")
 
     left_actions.addSpacing(6)
     left_actions.addWidget(app.btn_filter_src)
@@ -511,15 +551,13 @@ def build_explore_workspace(app: App) -> tuple[QWidget, QFrame]:
     explore_ai_actions = QHBoxLayout()
     explore_ai_actions.setContentsMargins(0, 0, 8, 0)
     explore_ai_actions.setSpacing(6)
-    app.btn_load.setFixedHeight(30)
-    app.btn_load.setObjectName("ExploreTabActionButton")
     explore_ai_actions.addWidget(app.btn_load)
     explore_ai_actions.addWidget(app.btn_ai_summary)
     explore_ai_actions.addWidget(app.btn_add_ai_to_notes)
     explore_ai_actions_widget = QWidget()
     explore_ai_actions_widget.setObjectName("ExploreTabActions")
     explore_ai_actions_widget.setLayout(explore_ai_actions)
-    explore_ai_actions_widget.setFixedHeight(30)
+    explore_ai_actions_widget.setFixedHeight(32)
     app.tabs.setCornerWidget(explore_ai_actions_widget, Qt.TopRightCorner)
     # Explore layout
     explore_layout.addWidget(app.lbl_mode)

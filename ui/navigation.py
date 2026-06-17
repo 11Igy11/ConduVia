@@ -4,13 +4,16 @@ from collections.abc import Iterable, Callable
 
 from PySide6.QtWidgets import QPushButton, QStackedWidget
 
+from ui.font_utils import repolish_widget
+
 
 def set_active_nav_button(buttons: Iterable[QPushButton], active: QPushButton) -> None:
     for button in buttons:
-        button.setProperty("active", button is active)
-        button.style().unpolish(button)
-        button.style().polish(button)
-        button.update()
+        is_active = button is active
+        if bool(button.property("active")) == is_active:
+            continue
+        button.setProperty("active", is_active)
+        repolish_widget(button)
 
 
 def switch_page(

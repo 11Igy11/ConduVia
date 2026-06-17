@@ -3,7 +3,7 @@ from __future__ import annotations
 import webbrowser
 from typing import TYPE_CHECKING, Any
 
-from PySide6.QtCore import QObject, Qt, QThread, Slot
+from PySide6.QtCore import QEvent, QObject, Qt, QThread, Slot
 from PySide6.QtWidgets import QListWidget, QListWidgetItem, QPushButton
 
 from core.db import get_latest_osint_lookup, list_osint_lookups, save_osint_lookup
@@ -18,6 +18,7 @@ from core.osint.identifier_decode import decode_identifier, format_identifier_no
 from core.osint.registrable_domain import registrable_domain
 from core.osint.snapshot import build_osint_snapshot
 from ui.osint_worker import OsintEnrichWorker
+from ui.buttons import style_action_button
 from ui.thread_utils import stop_qthread
 
 if TYPE_CHECKING:
@@ -47,8 +48,12 @@ class OsintUIController(QObject):
         self._worker: OsintEnrichWorker | None = None
         self._pending_enricher = ""
         self._last_decode_result = None
+        self._pending_hit_record_ids: list[int] = []
+        self._pending_hit_search = ""
+        self._pending_hit_kind = ""
 
     def refresh(self) -> None:
+        self._wire_hit_banner()
         app = self.app
         project_id = app.current_project_id
         if project_id is None:
@@ -282,8 +287,7 @@ class OsintUIController(QObject):
         labels = _LINK_PLACEHOLDERS.get(kind, _LINK_PLACEHOLDERS["identifier"])
         for label in labels:
             button = QPushButton(label)
-            button.setObjectName("OutlineButton")
-            button.setFixedHeight(30)
+            style_action_button(button, object_name="OutlineButton")
             button.setMinimumWidth(72)
             button.setCursor(Qt.PointingHandCursor)
             button.setEnabled(False)
@@ -464,8 +468,9 @@ class OsintUIController(QObject):
         self._update_identifier_buttons()
         self._run_identifier_decode(force=False)
         if kind == "identifier":
-            self._update_hit_banner(str(selected.get("identifier_kind") or ""), value)
-            self._run_leak_lookup(value)
+            identifier_kind = str(selected.get("identifier_kind") or "")
+            self._update_hit_banner(identifier_kind, value)
+            self._run_leak_lookup(value, kind=identifier_kind)
         else:
             self._update_hit_banner("", "")
 
@@ -473,31 +478,72 @@ class OsintUIController(QObject):
         banner = getattr(self.app, "lbl_osint_hit", None)
         if banner is None:
             return
-        from core.leaks.search import HIT_KINDS, find_hits
+        from core.leaks.search import find_repository_hits
 
-        kind = str(identifier_kind or "").strip().upper()
-        if kind not in HIT_KINDS or not value:
+        text = str(value or "").strip()
+        if not text:
             banner.hide()
             banner.clear()
+            self._pending_hit_record_ids = []
+            self._pending_hit_search = ""
+            self._pending_hit_kind = ""
             return
         try:
-            total, summary = find_hits(value, kind=kind)
+            total, summary, record_ids = find_repository_hits(text, kind=identifier_kind)
         except Exception:
             banner.hide()
             banner.clear()
+            self._pending_hit_record_ids = []
+            self._pending_hit_search = ""
+            self._pending_hit_kind = ""
             return
         if total:
-            banner.setText(f"\u2714  HIT in repository — {total} record(s): {summary}")
+            self._pending_hit_record_ids = list(record_ids or [])
+            self._pending_hit_search = text
+            self._pending_hit_kind = str(identifier_kind or "")
+            banner.setText(
+                f"\u2714  HIT in repository — {total} record(s): {summary}  "
+                f"(click to open)"
+            )
+            banner.setCursor(Qt.PointingHandCursor)
+            banner.setMinimumHeight(32)
             banner.show()
         else:
             banner.hide()
             banner.clear()
+            self._pending_hit_record_ids = []
+            self._pending_hit_search = ""
+            self._pending_hit_kind = ""
 
-    def _run_leak_lookup(self, value: str) -> None:
+    def open_hit_in_repository(self) -> None:
+        if not self._pending_hit_search:
+            return
+        if hasattr(self.app, "open_leaks_viewer"):
+            self.app.open_leaks_viewer(
+                search_text=self._pending_hit_search,
+                record_ids=self._pending_hit_record_ids,
+            )
+
+    def eventFilter(self, obj, event) -> bool:
+        banner = getattr(self.app, "lbl_osint_hit", None)
+        if obj is banner and event.type() == QEvent.Type.MouseButtonRelease:
+            if event.button() == Qt.MouseButton.LeftButton and self._pending_hit_search:
+                self.open_hit_in_repository()
+                return True
+        return super().eventFilter(obj, event)
+
+    def _wire_hit_banner(self) -> None:
+        banner = getattr(self.app, "lbl_osint_hit", None)
+        if banner is None or getattr(banner, "_hit_click_wired", False):
+            return
+        banner.installEventFilter(self)
+        banner._hit_click_wired = True
+
+    def _run_leak_lookup(self, value: str, *, kind: str = "") -> None:
         from core.osint.enrichers.leaks import enrich_leaks
 
         try:
-            result = enrich_leaks("identifier", value)
+            result = enrich_leaks("identifier", value, kind=kind)
         except Exception:
             return
         if result.status == "ok" and result.details.get("hits"):
@@ -596,8 +642,7 @@ class OsintUIController(QObject):
         self.app.lbl_osint_links_empty.hide()
         for link in links:
             button = QPushButton(str(link.get("label") or "Link"))
-            button.setObjectName("OutlineButton")
-            button.setFixedHeight(30)
+            style_action_button(button, object_name="OutlineButton")
             button.setMinimumWidth(72)
             button.setCursor(Qt.PointingHandCursor)
             url = str(link.get("url") or "")
@@ -693,6 +738,8 @@ class OsintUIController(QObject):
         self._worker.error.connect(self._on_fetch_error, Qt.ConnectionType.QueuedConnection)
         self._worker.finished.connect(self._thread.quit)
         self._worker.error.connect(self._thread.quit)
+        self._worker.finished.connect(self._worker.deleteLater)
+        self._worker.error.connect(self._worker.deleteLater)
         self._thread.finished.connect(self._cleanup_thread)
         self._thread.start()
 
@@ -732,12 +779,8 @@ class OsintUIController(QObject):
 
     @Slot()
     def _cleanup_thread(self) -> None:
-        if self._worker is not None:
-            self._worker.deleteLater()
-            self._worker = None
-        if self._thread is not None:
-            self._thread.deleteLater()
-            self._thread = None
+        self._worker = None
+        self._thread = None
         self._pending_enricher = ""
 
     def shutdown(self, wait_ms: int = 3000) -> None:

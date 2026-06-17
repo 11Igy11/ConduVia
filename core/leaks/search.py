@@ -6,6 +6,7 @@ from pathlib import Path
 
 from core.leaks.db import LEAKS_DB_PATH, fts_available, init_leaks_db
 from core.leaks.encoding import ascii_fold
+from core.osint.imsi import format_intercept_imsi, imsi_lookup_values, is_imsi_target_type, normalize_imsi
 from core.osint.normalize import normalize_email, normalize_msisdn
 
 _FILTER_COLUMNS = {
@@ -31,16 +32,77 @@ def _like(value: str) -> str:
     return f"%{value}%"
 
 
-def _identifier_clause(text: str) -> tuple[str, list]:
+def _hit_kind_aliases(kind: str | None) -> str:
+    text = str(kind or "").strip().upper()
+    aliases = {
+        "MOBILE NUMBER": "MSISDN",
+        "MOBILE": "MSISDN",
+        "E-MAIL": "EMAIL",
+        "FACEBOOK ID": "FB_ID",
+        "FACEBOOK": "FB_ID",
+        "TEL": "PHONE",
+        "TELEPHONE": "PHONE",
+    }
+    return aliases.get(text, text)
+
+
+def _identifier_clause(text: str, *, kind: str | None = None) -> tuple[str, list]:
     """Route a bare identifier query to the right indexed column(s)."""
     raw = text.strip()
     digits = re.sub(r"\D", "", raw)
+    normalized_kind = _hit_kind_aliases(kind)
 
     email = normalize_email(raw)
     if email or "@" in raw:
         return (
             "(lr.email LIKE ? OR lr.extra LIKE ?)",
             [_like(email or raw.lower()), _like(raw.lower())],
+        )
+
+    if normalized_kind == "OIB" and digits:
+        return (
+            "(lr.oib = ? OR lr.oib LIKE ? OR lr.extra LIKE ?)",
+            [digits, _like(digits), _like(digits)],
+        )
+
+    if normalized_kind in {"FB_ID", "USERNAME"} and raw:
+        needle = digits or raw
+        return (
+            "(lr.fb_id LIKE ? OR lr.username LIKE ? OR lr.extra LIKE ?)",
+            [_like(needle), _like(raw), _like(raw)],
+        )
+
+    if normalized_kind == "EMAIL" and raw:
+        email = normalize_email(raw)
+        needle = email or raw.lower()
+        return (
+            "(lr.email LIKE ? OR lr.extra LIKE ?)",
+            [_like(needle), _like(needle)],
+        )
+
+    if normalized_kind in {"MSISDN", "MOBILE NUMBER", "PHONE"} and digits:
+        msisdn = normalize_msisdn(raw)
+        clauses = ["lr.phone LIKE ?", "lr.fb_id LIKE ?", "lr.extra LIKE ?"]
+        params: list = [_like(digits), _like(digits), _like(digits)]
+        if msisdn:
+            clauses.insert(0, "lr.phone = ?")
+            params.insert(0, msisdn)
+        return ("(" + " OR ".join(clauses) + ")", params)
+
+    if normalized_kind == "IMSI" and digits:
+        needles = imsi_lookup_values(raw)
+        clauses = ["lr.phone LIKE ?", "lr.fb_id LIKE ?", "lr.extra LIKE ?", "lr.raw LIKE ?"]
+        combined: list[str] = []
+        params: list[str] = []
+        for needle in needles:
+            combined.extend(clauses)
+            params.extend([_like(needle)] * len(clauses))
+        return ("(" + " OR ".join(combined) + ")", params)
+
+    if normalized_kind == "IMEI" and digits:
+        return (
+            "(lr.phone LIKE ? OR lr.fb_id LIKE ? OR lr.extra LIKE ? OR lr.raw LIKE ?)",
+            [_like(digits), _like(digits), _like(digits), _like(digits)],
         )
 
     if digits:
@@ -51,7 +113,7 @@ def _identifier_clause(text: str) -> tuple[str, list]:
             )
         msisdn = normalize_msisdn(raw)
         clauses = ["lr.phone LIKE ?", "lr.fb_id LIKE ?", "lr.extra LIKE ?"]
-        params: list = [_like(digits), _like(digits), _like(digits)]
+        params = [_like(digits), _like(digits), _like(digits)]
         if msisdn:
             clauses.insert(0, "lr.phone = ?")
             params.insert(0, msisdn)
@@ -60,12 +122,12 @@ def _identifier_clause(text: str) -> tuple[str, list]:
     return ("", [])
 
 
-def _text_clause(text: str, *, fts_ok: bool) -> tuple[str, list]:
+def _text_clause(text: str, *, fts_ok: bool, kind: str | None = None) -> tuple[str, list]:
     raw = text.strip()
     if not raw:
         return ("", [])
 
-    ident_clause, ident_params = _identifier_clause(raw)
+    ident_clause, ident_params = _identifier_clause(raw, kind=kind)
     if ident_clause:
         return (ident_clause, ident_params)
 
@@ -112,6 +174,7 @@ def search_records(
     text: str = "",
     *,
     dataset_id: int | None = None,
+    kind: str | None = None,
     limit: int = 100,
     offset: int = 0,
     db_path: Path = LEAKS_DB_PATH,
@@ -132,7 +195,7 @@ def search_records(
             where.append("lr.dataset_id = ?")
             params.append(int(dataset_id))
 
-        text_clause, text_params = _text_clause(text, fts_ok=fts_ok)
+        text_clause, text_params = _text_clause(text, fts_ok=fts_ok, kind=kind)
         if text_clause:
             where.append(text_clause)
             params.extend(text_params)
@@ -157,35 +220,86 @@ def search_records(
         return rows, total
 
 
-def lookup_identifier(value: str, *, db_path: Path = LEAKS_DB_PATH) -> tuple[list[sqlite3.Row], int]:
+def lookup_identifier(value: str, *, kind: str | None = None, db_path: Path = LEAKS_DB_PATH) -> tuple[list[sqlite3.Row], int]:
     """Exact identifier lookup used by the OSINT auto-enricher."""
-    return search_records(text=value, limit=200, offset=0, db_path=db_path)
+    return search_records(text=value, kind=kind, limit=200, offset=0, db_path=db_path)
 
 
 # Identifier kinds that should trigger an automatic internal-database hit check.
-HIT_KINDS = {"MSISDN", "IMEI", "IMSI", "OIB"}
+HIT_KINDS = {
+    "MSISDN", "IMEI", "IMSI", "OIB", "EMAIL", "E-MAIL", "PHONE",
+    "MOBILE NUMBER", "MOBILE", "FB_ID", "FACEBOOK ID", "USERNAME",
+}
+
+_HIT_KIND_ALIASES = {
+    "MOBILE NUMBER": "MSISDN",
+    "MOBILE": "MSISDN",
+    "E-MAIL": "EMAIL",
+    "FACEBOOK ID": "FB_ID",
+    "FACEBOOK": "FB_ID",
+    "TEL": "PHONE",
+    "TELEPHONE": "PHONE",
+}
 
 
-def find_hits(value: str, *, kind: str | None = None, db_path: Path = LEAKS_DB_PATH) -> tuple[int, str]:
-    """Return (hit_count, 'Dataset (n), …') for a value in the internal database.
+def normalize_hit_kind(kind: str | None, value: str = "") -> str | None:
+    text = str(kind or "").strip().upper()
+    if text in _HIT_KIND_ALIASES:
+        text = _HIT_KIND_ALIASES[text]
+    if text in HIT_KINDS:
+        return text
 
-    For OIB the value must pass the checksum before it is even looked up.
-    """
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    if "@" in raw:
+        return "EMAIL"
+
+    digits = re.sub(r"\D", "", raw)
+    if not digits:
+        return None
+    if len(digits) == 11:
+        return "OIB"
+    if len(digits) == 15:
+        return "IMEI"
+    if len(digits) in {13, 14}:
+        return "IMSI"
+    if len(digits) >= 8:
+        return "MSISDN"
+    return None
+
+
+def find_hits(value: str, *, kind: str | None = None, db_path: Path = LEAKS_DB_PATH) -> tuple[int, str, list[int]]:
+    """Return (hit_count, dataset summary, record_ids) for a value in the repository."""
     text = str(value or "").strip()
     if not text:
-        return 0, ""
-    normalized_kind = str(kind or "").strip().upper()
-    if normalized_kind == "OIB":
-        from core.osint.normalize import is_valid_oib
-
-        if not is_valid_oib(text):
-            return 0, ""
-    rows, total = search_records(text=text, limit=50, offset=0, db_path=db_path)
+        return 0, "", []
+    rows, total = search_records(text=text, kind=kind, limit=50, offset=0, db_path=db_path)
     if not total:
-        return 0, ""
+        return 0, "", []
     datasets: dict[str, int] = {}
+    record_ids: list[int] = []
     for row in rows:
+        record_ids.append(int(row["id"]))
         name = str(row["dataset_name"] or "")
         datasets[name] = datasets.get(name, 0) + 1
     summary = ", ".join(f"{name} ({count})" for name, count in datasets.items())
-    return total, summary
+    return total, summary, record_ids
+
+
+def find_repository_hits(
+    value: str,
+    *,
+    kind: str | None = None,
+    db_path: Path = LEAKS_DB_PATH,
+) -> tuple[int, str, list[int]]:
+    """Lookup repository hits using kind-aware search with a broader fallback."""
+    text = str(value or "").strip()
+    if not text:
+        return 0, "", []
+    normalized_kind = normalize_hit_kind(kind, text)
+    if normalized_kind:
+        total, summary, record_ids = find_hits(text, kind=normalized_kind, db_path=db_path)
+        if total:
+            return total, summary, record_ids
+    return find_hits(text, kind=None, db_path=db_path)
