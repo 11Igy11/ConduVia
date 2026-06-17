@@ -3,7 +3,7 @@ from __future__ import annotations
 from core.osint.enrichers.base import EnrichResult
 
 
-def enrich_leaks(entity_kind: str, entity_value: str) -> EnrichResult:
+def enrich_leaks(entity_kind: str, entity_value: str, *, kind: str = "") -> EnrichResult:
     value = str(entity_value or "").strip()
     if entity_kind != "identifier":
         return EnrichResult(
@@ -16,7 +16,7 @@ def enrich_leaks(entity_kind: str, entity_value: str) -> EnrichResult:
     from core.leaks.search import lookup_identifier
 
     try:
-        rows, total = lookup_identifier(value)
+        rows, total = lookup_identifier(value, kind=kind or None)
     except Exception as exc:
         return EnrichResult("repository", "identifier", value, status="error", summary=f"Repository lookup failed: {exc}")
 

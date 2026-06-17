@@ -31,10 +31,11 @@ def build_period_comparison_rows(
         json_bytes = int(json_row.get("bytes") or 0)
         pcap_bytes = int(pcap_row.get("bytes") or 0)
         delta_pct = _volume_delta_pct(json_bytes, pcap_bytes)
+        chart_volume = max(json_bytes, pcap_bytes)
         rows.append({
             "label": format_period_day_label(day),
             "date": day,
-            "count": max(json_flows, pcap_packets),
+            "count": chart_volume,
             "json_flows": json_flows,
             "pcap_packets": pcap_packets,
             "json_bytes": json_bytes,

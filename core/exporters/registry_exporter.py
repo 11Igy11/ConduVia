@@ -7,11 +7,12 @@ from pathlib import Path
 from typing import Any
 
 from core.db import Project
+from core.analysis_limits import EMBEDDED_SUMMARY_TOP_N
 from core.exporters.case_context import build_case_context, context_cards_html
+from core.flow_stats import build_daily_activity_rows
 from core.formatters import (
     bytes_mb_or_b,
-    format_duration_hms_ms,
-    format_flow_datetime,
+    format_export_cell,
     format_short_date,
     human_bytes,
     safe_int,
@@ -52,10 +53,10 @@ def _logo_data_uri() -> str:
     return f"data:image/png;base64,{logo_b64}"
 
 
-def _simple_table(title: str, items: list[tuple[Any, Any]], col1: str, col2: str) -> str:
+def _simple_table(title: str, items: list[tuple[Any, Any]], col1: str, col2: str, *, limit: int = EMBEDDED_SUMMARY_TOP_N) -> str:
     rows = []
 
-    for k, v in (items or [])[:15]:
+    for k, v in (items or [])[:limit]:
         rows.append(
             "<tr>"
             f"<td>{_esc(k)}</td>"
@@ -105,6 +106,36 @@ def _mini_hist_24_html(vals: list[int], *, height_px: int = 42) -> str:
         )
 
     return f"<div class='histogram'>{''.join(bars)}</div>"
+
+
+def _daily_activity_table_html(rows: list[dict[str, Any]], *, limit: int = EMBEDDED_SUMMARY_TOP_N) -> str:
+    preview = list(rows or [])[:limit]
+    if not preview:
+        return "<p>—</p>"
+
+    body = []
+    for row in preview:
+        body.append(
+            "<tr>"
+            f"<td>{_esc(row.get('date_label') or row.get('date') or '—')}</td>"
+            f"<td class='num'>{int(row.get('flows') or 0):,}</td>"
+            f"<td class='num'>{_esc(row.get('bytes_label') or '')}</td>"
+            "</tr>"
+        )
+
+    note = ""
+    total = len(rows or [])
+    if total > limit:
+        note = f"<p class='muted-note'>Top {limit} days by flow volume ({total:,} days in loaded period).</p>"
+
+    return (
+        note
+        + "<table class='mini-table'>"
+        "<thead><tr><th>Date</th><th class='num'>Flows</th><th class='num'>Volume</th></tr></thead>"
+        "<tbody>"
+        + "".join(body)
+        + "</tbody></table>"
+    )
 
 
 def _direction_bar_html(out_pct: float, in_pct: float) -> str:
@@ -172,26 +203,9 @@ def _friendly_column_name(col: str) -> str:
 
     return col.replace("_", " ").strip().title()
 
-def _format_registry_value(col: str, value: Any) -> str:
+def _format_registry_value(col: str, value: Any, *, flow: dict[str, Any] | None = None) -> str:
     if value is None or value == "":
         return "—"
-
-    if col == "protocol":
-        return format_ip_proto(value)
-
-    # first/last seen - supports both epoch ms and datetime string
-    if "first_seen" in col or "last_seen" in col:
-        return format_flow_datetime(value, milliseconds=True)
-
-    # duration in ms
-    if "duration_ms" in col:
-        return format_duration_hms_ms(value)
-
-    # bytes
-    if col.endswith("_bytes") or col == "bidirectional_bytes":
-        return _human_bytes(value)
-
-    # booleans
     if col.endswith("_is_guessed") or col in (
         "application_is_guessed",
         "client_is_guessed",
@@ -201,8 +215,8 @@ def _format_registry_value(col: str, value: Any) -> str:
             return "Yes" if int(float(value)) == 1 else "No"
         except Exception:
             return str(value)
-
-    return str(value)
+    formatted = format_export_cell(col, value, flow=flow)
+    return formatted if formatted != "" else "—"
 
 def _full_dataset_table(flows: list[dict[str, Any]], columns: list[str], *, title: str = "Full Dataset") -> str:
     if not flows or not columns:
@@ -214,7 +228,7 @@ def _full_dataset_table(flows: list[dict[str, Any]], columns: list[str], *, titl
     for row in flows:
         tds = []
         for c in columns:
-            v = _format_registry_value(c, row.get(c, ""))
+            v = _format_registry_value(c, row.get(c, ""), flow=row)
             tds.append(f"<td>{_esc(v)}</td>")
 
         body_rows.append("<tr>" + "".join(tds) + "</tr>")
@@ -255,6 +269,7 @@ def export_registry_html(
     project: Project | None = None,
     project_name: str = "",
     report_language: str = "en",
+    period_context: str = "",
 ) -> None:
     lang = normalize_output_language(report_language, default="en")
     text = _report_text(lang)
@@ -287,8 +302,6 @@ def export_registry_html(
         total_bytes = sum(_safe_int(f.get("bidirectional_bytes")) for f in flows)
 
     deviation = analyst.get("behavior_deviation", {}) or {}
-    score = int(deviation.get("score", 0) or 0)
-    level = str(deviation.get("level", "LOW") or "LOW")
     reasons = list(deviation.get("reasons", []) or [])
 
     cov = analyst.get("coverage", {}) or {}
@@ -310,6 +323,9 @@ def export_registry_html(
     top_dst = domn.get("top_destination_outbound", {}) or {}
 
     act = analyst.get("activity", {}) or {}
+    day_hist = act.get("day_hist", {}) or {}
+    day_bytes = act.get("day_bytes", {}) or {}
+    daily_activity_rows = build_daily_activity_rows(day_hist, day_bytes)
     peak = act.get("peak_hour")
     quiet = act.get("quiet_hour")
     night = float(act.get("night_share_pct", 0.0) or 0.0)
@@ -327,24 +343,12 @@ def export_registry_html(
     def hfmt(h: Any) -> str:
         return "—" if h is None else f"{int(h):02d}:00"
 
-    activity_parts = [f"{total_flows} flows"]
+    activity_parts = [f"{total_flows:,} flows in loaded period"]
 
-    if cov.get("duration_days") is not None:
-        activity_parts.append(f"{float(cov.get('duration_days')):.1f} days")
+    if period_context:
+        activity_parts.append(period_context)
 
-    if cov.get("active_days"):
-        activity_parts.append(f"{int(cov.get('active_days'))} active days")
-
-    if cov.get("active_days_pct"):
-        activity_parts.append(f"{float(cov.get('active_days_pct')):.1f}% active")
-
-    if cov.get("avg_flows_per_active_day"):
-        activity_parts.append(f"{float(cov.get('avg_flows_per_active_day')):.1f} flows/day")
-
-    if cov.get("pattern"):
-        activity_parts.append(f"pattern: {cov.get('pattern')}")
-
-    reasons_html = "".join(f"<li>{_esc(r)}</li>" for r in reasons[:5]) or "<li>—</li>"
+    reasons_html = "".join(f"<li>{_esc(r)}</li>" for r in reasons[:8]) or f"<li>{_esc(text['no_pattern_flags'])}</li>"
 
     insight_cards = []
 
@@ -389,15 +393,15 @@ def export_registry_html(
         .replace("{{URBROJ}}", _esc(urbroj))
         .replace("{{TARGET}}", _esc(target))
         .replace("{{PERIOD}}", _esc(period))
-        .replace("{{TOTAL_FLOWS}}", _esc(total_flows))
+        .replace("{{PERIOD_CONTEXT}}", _esc(period_context or "—"))
+        .replace("{{TRAFFIC_FLAGS}}", reasons_html)
+        .replace("{{DAILY_ACTIVITY}}", _daily_activity_table_html(daily_activity_rows))
+        .replace("{{TOTAL_FLOWS}}", _esc(f"{total_flows:,}"))
         .replace("{{UNIQ_SRC}}", _esc(uniq_src))
         .replace("{{UNIQ_DST}}", _esc(uniq_dst))
         .replace("{{UNIQ_APPS}}", _esc(uniq_apps))
         .replace("{{TOTAL_BYTES}}", _esc(_human_bytes(total_bytes)))
         .replace("{{FILES_COUNT}}", _esc(len(files)))
-        .replace("{{DEVIATION_SCORE}}", _esc(score))
-        .replace("{{DEVIATION_LEVEL}}", _esc(level))
-        .replace("{{DEVIATION_REASONS}}", reasons_html)
         .replace("{{COVERAGE}}", _esc(" | ".join(activity_parts)))
         .replace("{{OUTBOUND_SHARE}}", f"{out_share:.1f}%")
         .replace("{{DOMINANT_APP}}", _esc(dom_b.get("name", "—")))
@@ -446,8 +450,9 @@ def _apply_registry_labels(rendered: str, text: dict[str, str], lang: str) -> st
         "UNIQ_APPS_LABEL": text["unique_apps"],
         "TOTAL_BYTES_LABEL": text["total_bytes"],
         "ANALYST_SUMMARY_LABEL": text["analyst_summary"],
-        "BEHAVIOR_DEVIATION_LABEL": text["behavior_deviation"],
-        "DEVIATION_SIGNALS_LABEL": text["deviation_signals"],
+        "TRAFFIC_PATTERN_FLAGS_LABEL": text["traffic_pattern_flags"],
+        "PERIOD_CONTEXT_LABEL": text["period_context"],
+        "DAILY_ACTIVITY_LABEL": text["daily_activity"],
         "OBSERVED_ACTIVITY_LABEL": text["observed_activity"],
         "OUTBOUND_SHARE_LABEL": text["outbound_share"],
         "DOMINANT_APPLICATION_LABEL": text["dominant_application"],
@@ -485,8 +490,10 @@ def _report_text(language: str) -> dict[str, str]:
             "unique_apps": "Jedinstvene aplikacije",
             "total_bytes": "Ukupno bajtova",
             "analyst_summary": "Analiticki sazetak",
-            "behavior_deviation": "Odstupanje ponasanja",
-            "deviation_signals": "Signali odstupanja",
+            "traffic_pattern_flags": "Oznake prometnog uzorka",
+            "period_context": "Kontekst perioda",
+            "daily_activity": "Dnevna aktivnost (top po volumenu)",
+            "no_pattern_flags": "Nema neuobicajenih oznaka prometnog uzorka za ucitani period.",
             "observed_activity": "Uocena aktivnost",
             "outbound_share": "Udio odlaznog prometa",
             "dominant_application": "Dominantna aplikacija",
@@ -500,7 +507,7 @@ def _report_text(language: str) -> dict[str, str]:
             "quiet": "Tihi sat",
             "night": "Noc",
             "business": "Radno vrijeme",
-            "insights": "Uvidi",
+            "insights": "Rang-liste",
             "generated_by": "Generirano pomocu",
             "dataset_compare": "Usporedba datasetova",
             "current_unique": "Trenutno jedinstveno",
@@ -523,8 +530,10 @@ def _report_text(language: str) -> dict[str, str]:
         "unique_apps": "Unique apps",
         "total_bytes": "Total bytes",
         "analyst_summary": "Analyst Summary",
-        "behavior_deviation": "Behavior deviation",
-        "deviation_signals": "Deviation signals",
+        "traffic_pattern_flags": "Traffic pattern flags",
+        "period_context": "Period context",
+        "daily_activity": "Daily activity (top by volume)",
+        "no_pattern_flags": "No unusual traffic pattern flags detected for the loaded period.",
         "observed_activity": "Observed activity",
         "outbound_share": "Outbound share",
         "dominant_application": "Dominant application",
@@ -538,7 +547,7 @@ def _report_text(language: str) -> dict[str, str]:
         "quiet": "Quiet",
         "night": "Night",
         "business": "Business",
-        "insights": "Insights",
+        "insights": "Rankings",
         "generated_by": "Generated by",
         "dataset_compare": "Dataset Compare",
         "current_unique": "Current unique",

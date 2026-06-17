@@ -3,6 +3,7 @@ from pathlib import Path
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import QListWidgetItem
 
+from core.analysis_limits import MAX_EVIDENCE_SNAPSHOT_ITEMS, MAX_RECENT_UI_ROWS
 from core.db import (
     create_project,
     list_projects,
@@ -17,7 +18,7 @@ from core.db import (
     update_project,
 )
 from core.formatters import format_duration_compact_ms, format_pcap_datetime, human_bytes
-from core.project_identity import project_identifiers_text, subject_display_label
+from core.project_identity import project_identifiers_text, repair_stored_imsi_identifiers, subject_display_label, target_display_label
 from core.project_evidence import build_project_evidence_snapshot
 from core.project_datasets import list_project_json_dataset_files
 from core.project_profile import build_project_activity_profile, format_project_activity_profile
@@ -53,6 +54,8 @@ class ProjectsUIController:
         self.app.project_recent_json_total_count = 0
         self.app.project_recent_pcap_rows = []
         self.app.project_activity_rows = []
+        if self.app.current_project_id is not None and not get_project(self.app.current_project_id):
+            self._clear_active_project()
         self._refresh_project_launcher_cards()
         self.refresh_case_dashboard()
         self.app.refresh_activity_profile_ui()
@@ -75,6 +78,19 @@ class ProjectsUIController:
         if len(text) <= limit:
             return text
         return text[: max(0, limit - 3)] + "..."
+
+    def _persist_case_metadata(self, project_id: int, values: dict) -> None:
+        from core.case_metadata import apply_manual_case_fields, load_case_metadata, save_case_metadata
+
+        metadata = load_case_metadata(project_id)
+        metadata = apply_manual_case_fields(
+            metadata,
+            klasa=str(values.get("klasa") or ""),
+            urbroj=str(values.get("urbroj") or ""),
+            order_validity_bt=str(values.get("order_validity_bt") or ""),
+            order_validity_et=str(values.get("order_validity_et") or ""),
+        )
+        save_case_metadata(project_id, metadata)
 
     def create_project_dialog(self):
         values, ok = project_details_dialog(
@@ -129,6 +145,10 @@ class ProjectsUIController:
             self.app._message_dialog("Error", "Project creation failed.", str(e), width=440)
             return
 
+        self._persist_case_metadata(pid, values)
+        from core.db import add_activity
+
+        add_activity(pid, "project_created", name)
         self.set_active_project(pid)
         self.sync_project_workspace(pid)
         self.refresh_projects()
@@ -166,13 +186,32 @@ class ProjectsUIController:
         if not p:
             return
 
+        from core.case_metadata import (
+            format_active_order_validity,
+            format_klasa_all,
+            format_order_validity_history,
+            format_urbroj_all,
+            load_case_metadata,
+        )
+
+        metadata = load_case_metadata(pid)
+        klasa_all = format_klasa_all(metadata)
+        urbroj_all = format_urbroj_all(metadata)
+        validity_active = format_active_order_validity(metadata)
+        validity_history = format_order_validity_history(metadata)
+
         info = []
-        info.append("Selected project")
+        info.append("Project details")
         info.append("")
         info.append(f"Name: {p.name}")
         info.append(f"ID: {p.id}")
         info.append(f"Subject: {subject_display_label(p)}")
         info.append(f"Identifiers: {project_identifiers_text(p)}")
+        info.append(f"Klasa (all): {klasa_all}")
+        info.append(f"Urbroj (all): {urbroj_all}")
+        info.append(f"Order validity (active): {validity_active}")
+        if validity_history:
+            info.append(f"Earlier validity periods: {validity_history}")
         if p.subject_oib:
             info.append(f"OIB: {p.subject_oib}")
         if p.subject_ip:
@@ -183,7 +222,7 @@ class ProjectsUIController:
             info.append(p.description)
             info.append("")
         if p.target_identifier or p.target_type:
-            info.append(f"Legacy target fallback: {p.target_type or '-'} / {p.target_identifier or '-'}")
+            info.append(f"Legacy target fallback: {target_display_label(p)}")
         info.append("")
         info.append(f"Workspace: {p.base_folder or '-'}")
         info.append(f"Created / updated: {p.created_at} / {p.updated_at}")
@@ -360,6 +399,22 @@ class ProjectsUIController:
             )
             return
 
+        self._persist_case_metadata(project.id, values)
+        from core.db import add_activity
+
+        meta_bits = []
+        klasa = str(values.get("klasa") or "").strip()
+        urbroj = str(values.get("urbroj") or "").strip()
+        if klasa:
+            meta_bits.append(f"Klasa={klasa}")
+        if urbroj:
+            meta_bits.append(f"Urbroj={urbroj}")
+        detail = name
+        if meta_bits:
+            detail = f"{name} ({'; '.join(meta_bits)})"
+        add_activity(project.id, "project_edited", detail)
+        self.refresh_recent_datasets(project.id)
+
         # refresh whole page
         self.sync_project_workspace(project.id)
         self.refresh_projects()
@@ -384,13 +439,20 @@ class ProjectsUIController:
         if not p:
             self.app._message_dialog("Project", "Project not found.", width=400)
             return
-        
+
+        repair_stored_imsi_identifiers(project_id)
+        p = get_project(project_id)
+        if not p:
+            return
         project_changed = self.app.current_project_id != p.id
 
         if project_changed:
             self.app.dataset_controller.clear_context()
             if hasattr(self.app, "activity_profile_page"):
                 self.app.activity_profile_page.invalidate_project_cache()
+        elif self.app.flow_controller.get_all():
+            # Re-activating the same project must not keep stale loaded JSON/PCAP tables.
+            self.app.dataset_controller.clear_context()
 
         self.app.current_project_id = p.id
         self.app.current_project_name = p.name
@@ -400,8 +462,7 @@ class ProjectsUIController:
 
         if hasattr(self.app, "dataset_controller"):
             controller = self.app.dataset_controller
-            controller.sync_json_periods_from_project(p.id)
-            controller.sync_pcap_periods_from_project(p.id)
+            QTimer.singleShot(0, lambda pid=p.id: controller.deferred_sync_project_periods(pid))
 
         self.app.findings_controller.refresh_ui()
         self.app.notes_controller.refresh_ui(refresh_profile=False)
@@ -414,11 +475,21 @@ class ProjectsUIController:
 
         self.refresh_recent_datasets(project_id)
         self.refresh_case_dashboard()
-        if hasattr(self.app, "refresh_activity_profile_ui"):
-            self.app.refresh_activity_profile_ui()
-        self.sync_project_workspace(project_id)
+        QTimer.singleShot(150, lambda pid=project_id: self._deferred_profile_refresh(pid))
         if hasattr(self.app, "dataset_controller"):
             self.app.dataset_controller.refresh_project_behavior_index(project_id)
+        QTimer.singleShot(250, lambda pid=project_id: self._deferred_project_workspace_sync(pid))
+
+    def _deferred_profile_refresh(self, project_id: int) -> None:
+        if self.app.current_project_id != project_id:
+            return
+        if hasattr(self.app, "refresh_activity_profile_ui"):
+            self.app.refresh_activity_profile_ui()
+
+    def _deferred_project_workspace_sync(self, project_id: int) -> None:
+        if self.app.current_project_id != project_id:
+            return
+        self.sync_project_workspace(project_id)
 
     def sync_project_workspace(self, project_id: int | None) -> None:
         if project_id is None:
@@ -429,12 +500,12 @@ class ProjectsUIController:
             return
 
         json_rows = [
-            row for row in list_project_json_dataset_files(project_id, limit=500)
+            row for row in list_project_json_dataset_files(project_id, limit=MAX_EVIDENCE_SNAPSHOT_ITEMS)
             if row.get("status") == "Available"
         ]
         json_datasets = [str(row.get("path") or "") for row in json_rows if row.get("path")]
         pcap_sources = []
-        for source in list_pcap_sources(project_id, limit=500):
+        for source in list_pcap_sources(project_id, limit=MAX_EVIDENCE_SNAPSHOT_ITEMS):
             pieces = [source.file_name or Path(source.file_path).name]
             if source.file_path:
                 pieces.append(source.file_path)
@@ -555,15 +626,15 @@ class ProjectsUIController:
         return f"{ip}:{port}" if port else ip
 
     def refresh_recent_datasets(self, project_id: int):
-        evidence = build_project_evidence_snapshot(project_id, limit=50000)
+        evidence = build_project_evidence_snapshot(project_id, limit=MAX_EVIDENCE_SNAPSHOT_ITEMS)
         json_evidence = evidence["json"]
         pcap_evidence = evidence["pcap"]
 
         self.app.project_recent_json_total_count = int(json_evidence.get("count") or 0)
-        self.app.project_recent_json_rows = list(json_evidence.get("rows") or [])[:100]
-        self.app.project_recent_pcap_rows = list(pcap_evidence.get("recent_day_rows") or [])[:500]
+        self.app.project_recent_json_rows = list(json_evidence.get("json_day_rows") or [])[:MAX_RECENT_UI_ROWS]
+        self.app.project_recent_pcap_rows = list(pcap_evidence.get("recent_day_rows") or [])[:MAX_RECENT_UI_ROWS]
 
-        activity_rows = list_activity(project_id, limit=500)
+        activity_rows = list_activity(project_id, limit=MAX_RECENT_UI_ROWS)
         self.app.project_activity_rows = []
         for row in activity_rows:
             event = self.activity_label(str(row["event_type"] or ""), str(row["message"] or ""))
@@ -588,18 +659,14 @@ class ProjectsUIController:
         activity_count = len(getattr(self.app, "project_activity_rows", []) or [])
 
         if hasattr(self.app, "lbl_recent_json_count"):
-            self.app.lbl_recent_json_count.setText(f"{json_count:,} JSON datasets")
+            self.app.lbl_recent_json_count.setText(f"{json_count:,} JSON files")
             if json_count and json_rows:
-                newest_row = next(
-                    (row for row in json_rows if row.get("status") == "Available"),
-                    json_rows[0],
-                )
-                newest = self._short_text(newest_row.get("name") or "-")
+                newest = self._short_text(json_rows[0].get("name") or "-")
                 self.app.lbl_recent_json_detail.setText(f"Most recent: {newest}")
             elif json_count:
-                self.app.lbl_recent_json_detail.setText(f"{json_count:,} JSON datasets indexed")
+                self.app.lbl_recent_json_detail.setText(f"{json_count:,} JSON files indexed")
             else:
-                self.app.lbl_recent_json_detail.setText("No JSON datasets saved for this project.")
+                self.app.lbl_recent_json_detail.setText("No JSON files saved for this project.")
 
         if hasattr(self.app, "lbl_recent_pcap_count"):
             pcap_rows = getattr(self.app, "project_recent_pcap_rows", []) or []
@@ -655,8 +722,21 @@ class ProjectsUIController:
         if not hasattr(self.app, "lbl_project_selection_title"):
             return
 
+        active_id = self.app.current_project_id
         item = self.app.projects_list.currentItem()
+        if item is None and active_id is not None:
+            for idx in range(self.app.projects_list.count()):
+                candidate = self.app.projects_list.item(idx)
+                if int(candidate.data(Qt.UserRole)) == int(active_id):
+                    item = candidate
+                    break
+
         if not item:
+            if active_id is not None:
+                project = get_project(active_id)
+                if project:
+                    self._fill_project_selection_panel(project, active=True)
+                    return
             self.app.lbl_project_selection_title.setText("Select a project")
             self.app.lbl_project_selection_state.hide()
             self.app.btn_open_project.setEnabled(False)
@@ -669,11 +749,50 @@ class ProjectsUIController:
         if not project:
             return
 
+        self._fill_project_selection_panel(project, active=(self.app.current_project_id == pid))
+
+    def _fill_project_selection_panel(self, project, *, active: bool) -> None:
+        from core.case_metadata import (
+            format_active_order_validity,
+            format_klasa_all,
+            format_order_validity_history,
+            format_urbroj_all,
+            load_case_metadata,
+        )
+
+        metadata = load_case_metadata(project.id)
+        klasa_all = format_klasa_all(metadata)
+        urbroj_all = format_urbroj_all(metadata)
+        validity_active = format_active_order_validity(metadata)
+        validity_history = format_order_validity_history(metadata)
+        info = [
+            "Project details",
+            "",
+            f"Name: {project.name}",
+            f"ID: {project.id}",
+            f"Subject: {subject_display_label(project)}",
+            f"Identifiers: {project_identifiers_text(project)}",
+            f"Klasa (all): {klasa_all}",
+            f"Urbroj (all): {urbroj_all}",
+            f"Order validity (active): {validity_active}",
+        ]
+        if validity_history:
+            info.append(f"Earlier validity periods: {validity_history}")
+        if project.subject_oib:
+            info.append(f"OIB: {project.subject_oib}")
+        if project.subject_ip:
+            info.append(f"Known IP: {project.subject_ip}")
+        info.append("")
+        if project.description:
+            info.extend(["Description:", project.description, ""])
+        if project.target_identifier or project.target_type:
+            info.append(f"Legacy target fallback: {target_display_label(project)}")
+        info.extend(["", f"Workspace: {project.base_folder or '-'}", f"Created / updated: {project.created_at} / {project.updated_at}"])
+        self.app.projects_info.setText("\n".join(info))
         self.app.lbl_project_selection_title.setText(project.name)
         self.app.btn_edit_project.setEnabled(True)
         self.app.btn_delete_project.setEnabled(True)
-
-        if self.app.current_project_id == pid:
+        if active:
             self.app.lbl_project_selection_state.setText("Active case")
             self.app.lbl_project_selection_state.show()
             self.app.btn_open_project.setEnabled(False)
@@ -701,6 +820,13 @@ class ProjectsUIController:
             "finding_created": "Finding created",
             "finding_updated": "Finding updated",
             "finding_deleted": "Finding deleted",
+            "case_metadata_mismatch": "Case metadata warning",
+            "pcap_batch_finished": "PCAP batch finished",
+            "repository_hit": "Repository hit",
+            "project_created": "Project created",
+            "project_edited": "Project edited",
+            "import_period_selected": "Period selected",
+            "ai_summary_generated": "AI summary generated",
         }
         label = labels.get(event_type, event_type.replace("_", " ").title())
         detail = Path(message).name if message else ""

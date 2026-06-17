@@ -6,13 +6,14 @@ from typing import Any
 from core.formatters import bytes_mb_or_b, human_bytes, safe_int, format_short_date
 from core.timeutils import parse_flow_timestamp
 from core.exporters.registry_exporter import export_registry_html
-from core.exporters.listing_exporter import export_listing_csv, export_listing_excel
-from core.exporters.table_exporter import export_table_html
+from ui.table_export import export_table_file
+from ui.buttons import make_action_button
 from core.db import get_app_settings, get_project
 from core.workspace import workspace_export_path
 
 from PySide6.QtCore import Qt, Signal, QAbstractTableModel, QModelIndex, QSortFilterProxyModel, QSize, QRectF
-from PySide6.QtGui import QPainter, QColor, QPen, QFont, QFontMetrics
+from PySide6.QtGui import QPainter, QColor, QPen, QFontMetrics
+from ui.font_utils import label_font
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QLineEdit,
     QTableView, QFileDialog, QMessageBox, QFrame, QGridLayout, QTabWidget,
@@ -20,9 +21,12 @@ from PySide6.QtWidgets import (
     QSizePolicy, QCheckBox, QScrollArea, QProgressBar, QToolTip, QApplication
 )
 
+from core.flow_stats import build_daily_activity_rows
 from core.parser import extract_dataset_meta, build_registry_columns, compute_registry_summary
 from core.analyst import compute_analyst_summary
 from ui.explore_widgets import CopyableTableView
+from ui.project_rows_dialog import open_project_rows_dialog
+from core.analysis_limits import EMBEDDED_SUMMARY_TOP_N
 
 # ----------------- helpers -----------------
 def _human_bytes(n: int | float | None) -> str:
@@ -182,6 +186,37 @@ def _top_active_days_html(day_hist: dict[str, Any], day_bytes: dict[str, Any], *
         "</table>"
         "</div>"
     )
+
+
+def _daily_activity_rows(day_hist: dict[str, Any], day_bytes: dict[str, Any]) -> list[dict[str, Any]]:
+    return build_daily_activity_rows(day_hist, day_bytes)
+
+
+def _daily_activity_preview_html(rows: list[dict[str, Any]], *, top_n: int = EMBEDDED_SUMMARY_TOP_N) -> str:
+    if not rows:
+        return "<span>—</span>"
+    preview = rows[:top_n]
+    body = []
+    for row in preview:
+        body.append(
+            "<tr>"
+            f"<td style='padding:7px 12px;'>{_esc(row.get('date_label') or row.get('date') or '—')}</td>"
+            f"<td style='padding:7px 12px;font-weight:700;text-align:right;'>{int(row.get('flows') or 0):,}</td>"
+            f"<td style='padding:7px 12px;font-weight:600;text-align:right;'>{_esc(row.get('bytes_label') or '')}</td>"
+            "</tr>"
+        )
+    return (
+        "<div style='margin-top:4px;max-width:640px;border-radius:10px;overflow:hidden;'>"
+        "<table style='width:100%;border-collapse:collapse;'>"
+        "<thead><tr>"
+        "<th style='padding:8px 12px;text-align:left;font-size:11px;font-weight:700;'>Date</th>"
+        "<th style='padding:8px 12px;text-align:right;font-size:11px;font-weight:700;'>Flows</th>"
+        "<th style='padding:8px 12px;text-align:right;font-size:11px;font-weight:700;'>Volume</th>"
+        "</tr></thead><tbody>"
+        + "".join(body)
+        + "</tbody></table></div>"
+    )
+
 
 def _mini_hist_24_html(vals: list[int], *, height_px: int = 14) -> str:
     """
@@ -506,10 +541,9 @@ class MiniHistogram24Widget(QWidget):
                 
             # labels
             if self._show_labels:
-                label_font = QFont()
-                label_font.setPointSize(9)
-                p.setFont(label_font)
-                fm = QFontMetrics(label_font)
+                label_font_obj = label_font(point_size=9)
+                p.setFont(label_font_obj)
+                fm = QFontMetrics(label_font_obj)
                 p.setPen(text_c)
 
                 def draw_label(hour: int, align: str):
@@ -687,6 +721,7 @@ class RegistryPage(QWidget):
         self._cols: list[str] = []
         self._analyst: dict[str, Any] = {}
         self._compare_result: dict[str, Any] | None = None
+        self._daily_activity_rows: list[dict[str, Any]] = []
 
         # ---- base layout ----
         root = QVBoxLayout(self)
@@ -745,9 +780,7 @@ class RegistryPage(QWidget):
         self.chk_full.setChecked(False)
         self.chk_full.toggled.connect(self._on_toggle_full)
 
-        self.btn_export = QPushButton("Export HTML report")
-        self.btn_export.setObjectName("Primary")
-        self.btn_export.setFixedHeight(34)
+        self.btn_export = make_action_button("Export HTML report")
         self.btn_export.clicked.connect(self.export_report)
 
         actions.addWidget(self.chk_full, 0)
@@ -817,27 +850,32 @@ class RegistryPage(QWidget):
         al.setSpacing(8)
 
         hdr2 = QHBoxLayout()
-        self.lbl_analyst_title = QLabel("Analyst summary")
+        self.lbl_analyst_title = QLabel("Observed activity")
         self.lbl_analyst_title.setObjectName("RegistryStrongTitle")
         hdr2.addWidget(self.lbl_analyst_title)
         hdr2.addStretch()
         al.addLayout(hdr2)
 
-        # Behavior deviation row: label + progress
-        deviation_row = QHBoxLayout()
-        self.lbl_deviation = QLabel("Behavior deviation: —")
-        self.lbl_deviation.setObjectName("RegistryDeviationLabel")
-        deviation_row.addWidget(self.lbl_deviation, 0)
+        self.lbl_period_context = QLabel("")
+        self.lbl_period_context.setObjectName("Muted")
+        self.lbl_period_context.setWordWrap(True)
+        al.addWidget(self.lbl_period_context)
+
+        self.lbl_deviation = QLabel("Traffic pattern flags")
+        self.lbl_deviation.setObjectName("RegistrySmallTitle")
+        self.lbl_deviation.setToolTip(
+            "Rule-based indicators from flow metadata, not a legal assessment."
+        )
+        al.addWidget(self.lbl_deviation)
+
+        self.lbl_flags_body = QLabel("")
+        self.lbl_flags_body.setTextFormat(Qt.RichText)
+        self.lbl_flags_body.setWordWrap(True)
+        self.lbl_flags_body.setObjectName("RegistryBodyText")
+        al.addWidget(self.lbl_flags_body)
 
         self.deviation_bar = QProgressBar()
-        self.deviation_bar.setRange(0, 100)
-        self.deviation_bar.setValue(0)
-        self.deviation_bar.setTextVisible(True)
-        self.deviation_bar.setFormat("%p%")
-        self.deviation_bar.setFixedHeight(18)
-        self.deviation_bar.setObjectName("RegistryDeviationBar")
-        deviation_row.addWidget(self.deviation_bar, 1)
-        al.addLayout(deviation_row)
+        self.deviation_bar.hide()
 
         # Body text (rich)
         self.lbl_analyst_body = QLabel("")
@@ -846,6 +884,20 @@ class RegistryPage(QWidget):
         self.lbl_analyst_body.setObjectName("RegistryBodyText")
         self.lbl_analyst_body.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
         al.addWidget(self.lbl_analyst_body)
+
+        daily_hdr = QHBoxLayout()
+        self.lbl_daily_activity_title = QLabel("Daily activity (top by volume)")
+        self.lbl_daily_activity_title.setObjectName("RegistrySmallTitle")
+        daily_hdr.addWidget(self.lbl_daily_activity_title)
+        daily_hdr.addStretch()
+        self.btn_expand_daily_activity = make_action_button(
+            "Expand table",
+            object_name="SummaryExpandButton",
+            enabled=False,
+        )
+        self.btn_expand_daily_activity.clicked.connect(self._expand_daily_activity)
+        daily_hdr.addWidget(self.btn_expand_daily_activity)
+        al.addLayout(daily_hdr)
 
         self.lbl_day_section = QLabel("")
         self.lbl_day_section.setTextFormat(Qt.RichText)
@@ -862,14 +914,13 @@ class RegistryPage(QWidget):
 
         hist_hdr = QHBoxLayout()
 
-        self.lbl_hist_title = QLabel("Activity by bytes")
+        self.lbl_hist_title = QLabel("Hourly pattern (loaded period · by bytes)")
         self.lbl_hist_title.setObjectName("RegistrySmallTitle")
         hist_hdr.addWidget(self.lbl_hist_title)
 
         hist_hdr.addStretch()
 
-        self.btn_hist_toggle = QPushButton("By flows")
-        self.btn_hist_toggle.setFixedHeight(28)
+        self.btn_hist_toggle = make_action_button("By flows")
         self.btn_hist_toggle.clicked.connect(self._on_toggle_hist_mode)
         hist_hdr.addWidget(self.btn_hist_toggle)
 
@@ -901,32 +952,58 @@ class RegistryPage(QWidget):
         il.setSpacing(10)
 
         hdr = QHBoxLayout()
-        lbl_ins = QLabel("Insights (Top 15)")
+        lbl_ins = QLabel("Rankings")
         lbl_ins.setObjectName("RegistryStrongTitle")
         hdr.addWidget(lbl_ins)
         hdr.addStretch()
+        self.btn_expand_insights = make_action_button(
+            "Expand table",
+            object_name="SummaryExpandButton",
+            enabled=False,
+        )
+        self.btn_expand_insights.clicked.connect(self._expand_insight_current)
+        hdr.addWidget(self.btn_expand_insights)
         il.addLayout(hdr)
 
-        self.ins_tabs = QTabWidget()
-        self.ins_tabs.setDocumentMode(True)
-
-        self._tab_defs: list[tuple[str, str, tuple[str, str]]] = [
-            ("Top Src", "top_src", ("IP", "Count")),
-            ("Top Dst", "top_dst", ("IP", "Count")),
-            ("Protocols", "top_proto", ("Protocol", "Count")),
-            ("Apps", "top_app", ("App", "Count")),
-            ("Dates", "top_date", ("Date", "Count")),
-            ("Hours", "top_hour", ("Hour", "Count")),
-            ("Bytes Src", "top_bytes_src", ("Source", "Bytes")),
-            ("Bytes Dst", "top_bytes_dst", ("Destination", "Bytes")),
-            ("Bytes App", "top_bytes_app", ("App", "Bytes")),
+        self._insight_groups: list[tuple[str, list[tuple[str, str, tuple[str, str]]]]] = [
+            (
+                "Endpoints",
+                [
+                    ("Top Src", "top_src", ("IP", "Count")),
+                    ("Top Dst", "top_dst", ("IP", "Count")),
+                ],
+            ),
+            (
+                "Applications & protocols",
+                [
+                    ("Apps", "top_app", ("App", "Count")),
+                    ("Protocols", "top_proto", ("Protocol", "Count")),
+                ],
+            ),
+            (
+                "Volume",
+                [
+                    ("Bytes Src", "top_bytes_src", ("Source", "Bytes")),
+                    ("Bytes Dst", "top_bytes_dst", ("Destination", "Bytes")),
+                    ("Bytes App", "top_bytes_app", ("App", "Bytes")),
+                ],
+            ),
         ]
+        self._tab_defs = [tab for _group, tabs in self._insight_groups for tab in tabs]
 
-        for title, _key, _hdrs in self._tab_defs:
-            self.ins_tabs.addTab(QWidget(), title)
-
-        self.ins_tabs.currentChanged.connect(self._on_insight_tab_changed)
-        il.addWidget(self.ins_tabs)
+        self.ins_group_tabs = QTabWidget()
+        self.ins_group_tabs.setDocumentMode(True)
+        self.ins_tabs_by_group: list[QTabWidget] = []
+        for group_name, tabs in self._insight_groups:
+            inner = QTabWidget()
+            inner.setDocumentMode(True)
+            for title, _key, _hdrs in tabs:
+                inner.addTab(QWidget(), title)
+            inner.currentChanged.connect(self._on_insight_tab_changed)
+            self.ins_tabs_by_group.append(inner)
+            self.ins_group_tabs.addTab(inner, group_name)
+        self.ins_group_tabs.currentChanged.connect(self._on_insight_tab_changed)
+        il.addWidget(self.ins_group_tabs)
 
         # Insights table
         self.pairs_model = PairsModel()
@@ -979,8 +1056,7 @@ class RegistryPage(QWidget):
         top.addWidget(lbl_full)
         top.addStretch()
         top.addWidget(self.lbl_full_hint)
-        self.btn_expand_dataset = QPushButton("Open dataset table")
-        self.btn_expand_dataset.setFixedHeight(34)
+        self.btn_expand_dataset = make_action_button("Open dataset table")
         self.btn_expand_dataset.clicked.connect(self._open_dataset_table_dialog)
         top.addWidget(self.btn_expand_dataset)
         dp.addLayout(top)
@@ -1064,7 +1140,7 @@ class RegistryPage(QWidget):
             except Exception:
                 self._meta = {}
 
-        self._summary = compute_registry_summary(self._flows, top_n=15)
+        self._summary = compute_registry_summary(self._flows, top_n=100)
         self._analyst = compute_analyst_summary(self._flows, self._meta)
         self._hist_mode = "bytes"
         self._last_activity = {}
@@ -1104,10 +1180,15 @@ class RegistryPage(QWidget):
         self._set_stat(self.card_bytes, "—")
         self.pairs_model.set_rows([], headers=("Item", "Value"))
         self._fit_pairs_height(0)
-        self.lbl_deviation.setText("Behavior deviation: —")
+        self.btn_expand_insights.setEnabled(False)
+        self.lbl_deviation.setText("Traffic pattern flags")
+        self.lbl_flags_body.setText("")
+        self.lbl_period_context.setText("")
         self.deviation_bar.setValue(0)
         self.lbl_analyst_body.setText("")
         self.lbl_day_section.setText("")
+        self.btn_expand_daily_activity.setEnabled(False)
+        self._daily_activity_rows = []
         self.lbl_activity_text.setText("")
         self.lbl_dir_text.setText("")
         self.dir_bar.set_pcts(0.0, 0.0)
@@ -1195,45 +1276,40 @@ class RegistryPage(QWidget):
     def _render_analyst(self):
         a = self._analyst or {}
         if not a:
-            self.lbl_risk.setText("Behavior deviation: —")
-            self.risk_bar.setValue(0)
-            self.lbl_analyst_body.setText("No analyst summary available.")
+            self.lbl_deviation.setText("Traffic pattern flags")
+            self.lbl_flags_body.setText("No pattern flags for the loaded period.")
+            self.lbl_period_context.setText("")
+            self.lbl_analyst_body.setText("No activity summary available.")
             self.lbl_day_section.setText("")
             self.lbl_activity_text.setText("")
             self.lbl_dir_text.setText("")
             self.dir_bar.set_pcts(0.0, 0.0)
             self._last_activity = {}
-            self.pairs_model.set_rows([], headers=("Item", "Value"))
-            self._fit_pairs_height(0)
+            self.btn_expand_daily_activity.setEnabled(False)
+            self._daily_activity_rows = []
 
             self._hist_mode = "bytes"
             self._hour_filter = None
-            self._last_activity = {}
             self.hist24.set_mode("bytes")
             self.hist24.set_quiet_hours([])
             self.hist24.set_values([0] * 24)
             return
 
-        # ---- behavior deviation ----
         deviation = a.get("behavior_deviation", {}) or {}
-        score = int(deviation.get("score", 0) or 0)
-        level = str(deviation.get("level", "LOW") or "LOW")
         reasons = list(deviation.get("reasons", []) or [])
+        self.lbl_deviation.setText("Traffic pattern flags")
+        if reasons:
+            rs = "".join(f"<li>{html.escape(str(r))}</li>" for r in reasons)
+            self.lbl_flags_body.setText(
+                "<ul style='margin:4px 0 6px 18px;'>" + rs + "</ul>"
+            )
+        else:
+            self.lbl_flags_body.setText(
+                "<span>No unusual traffic pattern flags detected for the loaded period.</span>"
+            )
 
-        self.lbl_deviation.setText(f"Behavior deviation: {score}/100 ({level})")
-        self.deviation_bar.setValue(max(0, min(100, score)))
-
-        # ---- dominant app ----
         cov = a.get("coverage", {}) or {}
         dom = a.get("dominant_app", {}) or {}
-
-        active_days = int(cov.get("active_days", 0) or 0)
-        active_days_pct = float(cov.get("active_days_pct", 0.0) or 0.0)
-        avg_flows_per_active_day = float(cov.get("avg_flows_per_active_day", 0.0) or 0.0)
-        pattern = str(cov.get("pattern", "unknown") or "unknown")
-        duration_days = cov.get("duration_days", None)
-        bt = str(cov.get("bt", "") or "")
-        et = str(cov.get("et", "") or "")
 
         dom_b = (dom.get("by_bytes", {}) or {})
         dom_c = (dom.get("by_count", {}) or {})
@@ -1271,34 +1347,36 @@ class RegistryPage(QWidget):
         def hfmt(h):
             return "—" if h is None else f"{int(h):02d}:00"
 
-        # ---- body text ----
-        coverage_parts = [f"{int(cov.get('total_flows', 0) or 0)} flows"]
+        controller = getattr(self.app, "dataset_controller", None)
+        active_day = str(getattr(controller, "_json_active_day", "") or "") if controller is not None else ""
+        period_mode = str(getattr(controller, "_json_period_granularity", "day") or "day")
+        from core.evidence_policy import format_period_day_label
 
-        if bt and et:
-            coverage_parts.append(f"{_fmt_dt_short(bt)} → {_fmt_dt_short(et)}")
-
-        if duration_days is not None:
-            coverage_parts.append(f"{float(duration_days):.1f} days")
-
-        if active_days > 0:
-            coverage_parts.append(f"{active_days} active days")
-
-        if active_days_pct > 0:
-            coverage_parts.append(f"{active_days_pct:.1f}% active")
-
-        if avg_flows_per_active_day > 0:
-            coverage_parts.append(f"{avg_flows_per_active_day:.1f} flows/day")
-
-        coverage_parts.append(f"pattern: {html.escape(pattern)}")
-
-        if reasons:
-            rs = "".join(f"<li>{html.escape(str(r))}</li>" for r in reasons[:3])
-            reasons_html = f"<b>Top deviation signals:</b><ul style='margin:4px 0 6px 18px;'>{rs}</ul>"
+        if active_day:
+            period_label = format_period_day_label(active_day) or active_day
+            flow_count = len(self._flows)
+            if period_mode == "month":
+                self.lbl_period_context.setText(
+                    f"Month aggregate: {period_label} · {flow_count:,} flows loaded from selected JSON period"
+                )
+            else:
+                self.lbl_period_context.setText(
+                    f"Day view: {period_label} · {flow_count:,} flows loaded"
+                )
         else:
-            reasons_html = "<b>Top deviation signals:</b> —"
+            self.lbl_period_context.setText(f"{len(self._flows):,} flows loaded")
+
+        coverage_parts = [f"{int(cov.get('total_flows', 0) or 0):,} flows in loaded period"]
+        if active_day:
+            coverage_parts.append(f"Period: {format_period_day_label(active_day) or active_day}")
+
+        if period_mode != "month":
+            avg_flows_per_active_day = float(cov.get("avg_flows_per_active_day", 0.0) or 0.0)
+            if avg_flows_per_active_day > 0:
+                coverage_parts.append(f"{avg_flows_per_active_day:.1f} flows/day avg")
 
         coverage_html = (
-            f"<b>Observed activity:</b> " + " | ".join(coverage_parts) + " | "
+            f"<b>Traffic summary:</b> " + " | ".join(coverage_parts) + " | "
             f"<b>Outbound share:</b> {out_share:.1f}%"
         )
 
@@ -1354,7 +1432,6 @@ class RegistryPage(QWidget):
                     novelty_html += " ..."
                 novelty_html += "<br>"
         analyst_html = (
-            f"{reasons_html}"
             f"{coverage_html}<br>"
             f"{compare_html}"
             f"{novelty_html}"
@@ -1364,27 +1441,22 @@ class RegistryPage(QWidget):
 
         self.lbl_analyst_body.setText(analyst_html)
 
-        recent_html = _day_activity_html(day_hist, day_bytes)
-        top_html = _top_active_days_html(day_hist, day_bytes)
+        self._daily_activity_rows = _daily_activity_rows(day_hist, day_bytes)
+        self.lbl_day_section.setText(_daily_activity_preview_html(self._daily_activity_rows))
+        total_days = len(self._daily_activity_rows)
+        self.btn_expand_daily_activity.setEnabled(total_days > EMBEDDED_SUMMARY_TOP_N)
+        if total_days > EMBEDDED_SUMMARY_TOP_N:
+            self.btn_expand_daily_activity.setToolTip(
+                f"{total_days:,} days in loaded period — preview shows top {EMBEDDED_SUMMARY_TOP_N} by volume."
+            )
+        else:
+            self.btn_expand_daily_activity.setToolTip("")
 
-        day_section = (
-            "<div style='margin-top:10px;'>"
-            "<table style='width:100%;border-collapse:collapse;' cellspacing='0' cellpadding='0'>"
-            "<tr>"
-            "<td style='width:50%;vertical-align:top;padding-right:8px;'>"
-            "<div style='font-weight:700;margin-bottom:6px;'>Activity by day</div>"
-            f"{recent_html}"
-            "</td>"
-            "<td style='width:50%;vertical-align:top;padding-left:8px;'>"
-            "<div style='font-weight:700;margin-bottom:6px;'>Top active days</div>"
-            f"{top_html}"
-            "</td>"
-            "</tr>"
-            "</table>"
-            "</div>"
+        self.lbl_hist_title.setText(
+            "Hourly pattern (loaded period · by bytes)"
+            if self._hist_mode == "bytes"
+            else "Hourly pattern (loaded period · by flows)"
         )
-
-        self.lbl_day_section.setText(day_section)
 
         self.lbl_activity_text.setText(
             "<div style='margin-top:6px;'>"
@@ -1435,15 +1507,30 @@ class RegistryPage(QWidget):
         self.btn_hist_toggle.setText("By bytes" if self._hist_mode == "flows" else "By flows")
         self._apply_hist_mode()
 
+    def _expand_daily_activity(self) -> None:
+        if not self._daily_activity_rows:
+            return
+        open_project_rows_dialog(
+            self.app,
+            "Daily activity by volume",
+            [
+                ("date_label", "Date"),
+                ("flows", "Flows"),
+                ("bytes_label", "Volume"),
+                ("bytes", "Bytes (raw)"),
+            ],
+            self._daily_activity_rows,
+        )
+
     def _apply_hist_mode(self):
         act = self._last_activity or {}
 
         if self._hist_mode == "flows":
-            self.lbl_hist_title.setText("Activity by flows")
+            self.lbl_hist_title.setText("Hourly pattern (loaded period · by flows)")
             hh = act.get("hour_hist_24") or act.get("hour_hist") or [0] * 24
             self.hist24.set_mode("flows")
         else:
-            self.lbl_hist_title.setText("Activity by bytes")
+            self.lbl_hist_title.setText("Hourly pattern (loaded period · by bytes)")
             hh = act.get("hour_bytes_24") or act.get("hour_bytes") or [0] * 24
             self.hist24.set_mode("bytes")
 
@@ -1485,24 +1572,42 @@ class RegistryPage(QWidget):
     def _on_insight_tab_changed(self, _idx: int):
         self._render_insight_current()
 
+    def _format_insight_rows(self, key: str, rows: list[tuple[Any, Any]]) -> list[tuple[Any, Any]]:
+        formatted = list(rows or [])
+        if key == "top_proto":
+            formatted = [(format_ip_proto(k), v) for (k, v) in formatted]
+        if key in ("top_bytes_src", "top_bytes_dst", "top_bytes_app"):
+            formatted = [(k, bytes_mb_or_b(v, precision=2)) for (k, v) in formatted]
+        return formatted
+
+    def _current_insight_tab_def(self) -> tuple[str, str, tuple[str, str]] | None:
+        group_idx = self.ins_group_tabs.currentIndex()
+        if group_idx < 0 or group_idx >= len(self._insight_groups):
+            return None
+        inner = self.ins_tabs_by_group[group_idx]
+        tab_idx = inner.currentIndex()
+        tabs = self._insight_groups[group_idx][1]
+        if tab_idx < 0 or tab_idx >= len(tabs):
+            return None
+        return tabs[tab_idx]
+
     def _render_insight_current(self):
         if not self._summary:
             self.pairs_model.set_rows([], headers=("Item", "Value"))
             self._fit_pairs_height(0)
+            self.btn_expand_insights.setEnabled(False)
             return
 
-        idx = self.ins_tabs.currentIndex()
-        if idx < 0 or idx >= len(self._tab_defs):
+        current = self._current_insight_tab_def()
+        if current is None:
             self.pairs_model.set_rows([], headers=("Item", "Value"))
             self._fit_pairs_height(0)
+            self.btn_expand_insights.setEnabled(False)
             return
 
-        _title, key, hdrs = self._tab_defs[idx]
-        rows = list(self._summary.get(key, []) or [])[:15]
-        if key == "top_proto":
-            rows = [(format_ip_proto(k), v) for (k, v) in rows]
-        if key in ("top_bytes_src", "top_bytes_dst", "top_bytes_app"):
-            rows = [(k, bytes_mb_or_b(v, precision=2)) for (k, v) in rows]
+        title, key, hdrs = current
+        all_rows = list(self._summary.get(key, []) or [])
+        rows = self._format_insight_rows(key, all_rows[:EMBEDDED_SUMMARY_TOP_N])
         self.pairs_model.set_rows(rows, headers=hdrs)
 
         # ergonomics
@@ -1510,6 +1615,35 @@ class RegistryPage(QWidget):
         self.pairs_view.setColumnWidth(1, 180)
 
         self._fit_pairs_height(len(rows))
+        total = len(all_rows)
+        self.btn_expand_insights.setEnabled(total > EMBEDDED_SUMMARY_TOP_N)
+        if total > EMBEDDED_SUMMARY_TOP_N:
+            self.btn_expand_insights.setToolTip(
+                f"{total:,} rows in {title} — preview shows top {EMBEDDED_SUMMARY_TOP_N}."
+            )
+        else:
+            self.btn_expand_insights.setToolTip("")
+
+    def _expand_insight_current(self) -> None:
+        if not self._summary:
+            return
+        current = self._current_insight_tab_def()
+        if current is None:
+            return
+        title, key, hdrs = current
+        all_rows = list(self._summary.get(key, []) or [])
+        if not all_rows:
+            return
+        formatted = self._format_insight_rows(key, all_rows)
+        open_project_rows_dialog(
+            self.app,
+            f"{title} — full table",
+            [
+                ("item", hdrs[0]),
+                ("value", hdrs[1]),
+            ],
+            [{"item": row[0], "value": row[1]} for row in formatted],
+        )
 
     def _fit_pairs_height(self, n_rows: int):
         header_h = self.pairs_view.horizontalHeader().height()
@@ -1524,9 +1658,23 @@ class RegistryPage(QWidget):
         if rh <= 0:
             rh = 28
 
-        show = max(1, min(15, n_rows))
+        show = max(1, min(EMBEDDED_SUMMARY_TOP_N, n_rows))
         h = header_h + (rh * show) + 14
         self.pairs_view.setFixedHeight(h)
+
+    def _export_period_context(self) -> str:
+        controller = getattr(self.app, "dataset_controller", None)
+        active_day = str(getattr(controller, "_json_active_day", "") or "") if controller is not None else ""
+        period_mode = str(getattr(controller, "_json_period_granularity", "day") or "day")
+        from core.evidence_policy import format_period_day_label
+
+        flow_count = len(self._flows)
+        if not active_day:
+            return f"{flow_count:,} flows loaded"
+        period_label = format_period_day_label(active_day) or active_day
+        if period_mode == "month":
+            return f"Month aggregate: {period_label} · {flow_count:,} flows loaded from selected JSON period"
+        return f"Day view: {period_label} · {flow_count:,} flows loaded"
 
     # ----------------- export -----------------
     def export_report(self):
@@ -1566,6 +1714,7 @@ class RegistryPage(QWidget):
                 project=project,
                 project_name=getattr(self.app, "current_project_name", "") or "",
                 report_language=get_app_settings().get("output_language", "hr"),
+                period_context=self._export_period_context(),
             )
 
             QMessageBox.information(self, "Export", f"Report saved:\n{out_path}")
@@ -1730,14 +1879,16 @@ class RegistryPage(QWidget):
             return
 
         try:
-            if export_format == "csv":
-                export_listing_csv(file_path, headers, rows)
-            elif export_format == "xlsx":
-                export_listing_excel(file_path, headers, rows)
-            elif export_format == "html":
-                export_table_html(file_path, title, headers, rows)
-            else:
-                raise ValueError(f"Unsupported export format: {export_format}")
+            export_table_file(
+                file_path,
+                title,
+                headers,
+                rows,
+                export_format,
+                project_id=getattr(self.app, "current_project_id", None),
+                project_name=getattr(self.app, "current_project_name", "") or "",
+                source_label=str(self._folder or ""),
+            )
         except Exception as exc:
             QMessageBox.critical(self, "Export table failed", str(exc))
             return
@@ -1783,14 +1934,11 @@ class RegistryPage(QWidget):
         if not item:
             return
 
-        # which insight tab is active
-        idx = self.ins_tabs.currentIndex()
-        if idx < 0 or idx >= len(self._tab_defs):
+        current = self._current_insight_tab_def()
+        if current is None:
             return
 
-        title, key, _hdrs = self._tab_defs[idx]
-
-        # Mapping: doubleclick on wich tab
+        title, key, _hdrs = current
         # - IP/app/proto: open Explore and insert in search
         # - other: fallback on search (if make sense)
         if key in ("top_src", "top_dst", "top_bytes_src", "top_bytes_dst"):

@@ -4,6 +4,7 @@ from collections import Counter
 from pathlib import Path
 from typing import Any
 
+from core.analysis_limits import MAX_EVIDENCE_SNAPSHOT_ITEMS
 from core.db import DEFAULT_DB_PATH, list_ingest_items, list_pcap_sources, list_recent_datasets
 from core.evidence_policy import format_period_day_label
 from core.formatters import format_pcap_datetime, human_bytes
@@ -14,6 +15,7 @@ from core.pcap_rollup import (
     rollup_pcap_day_group,
     rollup_pcap_sources,
 )
+from core.period_groups import month_key
 from core.project_datasets import count_project_json_datasets, list_project_json_dataset_files
 
 
@@ -21,7 +23,7 @@ def build_project_evidence_snapshot(
     project_id: int,
     *,
     db_path: Path = DEFAULT_DB_PATH,
-    limit: int = 50000,
+    limit: int = MAX_EVIDENCE_SNAPSHOT_ITEMS,
 ) -> dict[str, Any]:
     """Single source of truth for saved JSON/PCAP evidence counts and day rows."""
     json_rows = list_project_json_dataset_files(project_id, limit=limit, db_path=db_path)
@@ -35,18 +37,22 @@ def build_project_evidence_snapshot(
 
     ingest_done_paths = _ingest_pcap_paths(project_id, db_path=db_path, status="done")
     ingest_index_counts = _ingest_pcap_index_counts(project_id, db_path=db_path)
+    pcap_indexed_file_count = sum(int(count or 0) for count in ingest_index_counts.values())
+    pcap_indexed_day_count = len(ingest_index_counts)
     saved_period_days = _saved_period_days(sources)
     day_groups = _build_pcap_day_groups(sources, ingest_done_paths, saved_period_days)
     recent_day_rows = _build_pcap_recent_day_rows(sources, rollup, ingest_done_paths)
     profile_day_rows = _build_pcap_profile_day_rows(rollup)
     period_coverage = _build_pcap_period_coverage(ingest_index_counts, saved_period_days)
     capture_range = _build_capture_range(sources)
+    json_day_rows = _build_json_recent_day_rows(project_id, db_path=db_path)
 
     return {
         "project_id": project_id,
         "json": {
             "count": json_count,
             "rows": json_rows,
+            "json_day_rows": json_day_rows,
             "available_files": available_json_files,
             "dataset_sources": dataset_sources,
         },
@@ -54,6 +60,9 @@ def build_project_evidence_snapshot(
             "sources": sources,
             "source_count": len(sources),
             "day_count": rollup.pcap_day_count,
+            "indexed_file_count": pcap_indexed_file_count,
+            "indexed_day_count": pcap_indexed_day_count,
+            "indexed_day_counts": ingest_index_counts,
             "saved_period_days": saved_period_days,
             "day_groups": day_groups,
             "recent_day_rows": recent_day_rows,
@@ -73,7 +82,7 @@ def build_project_evidence_snapshot(
 def summarize_saved_json_evidence(
     project_id: int,
     *,
-    limit: int = 50000,
+    limit: int = MAX_EVIDENCE_SNAPSHOT_ITEMS,
     db_path: Path = DEFAULT_DB_PATH,
 ) -> dict[str, Any]:
     return build_project_evidence_snapshot(project_id, limit=limit, db_path=db_path)["json"]
@@ -105,6 +114,35 @@ def saved_pcap_device_ip_counts(
     return dict(build_project_evidence_snapshot(project_id, db_path=db_path)["pcap"]["device_ip_counts"])
 
 
+def pcap_day_groups_from_ingest(
+    project_id: int,
+    *,
+    db_path: Path = DEFAULT_DB_PATH,
+) -> dict[str, list[str]]:
+    """Fast period-selector source: ingest index + saved-only days (no PCAP rollup)."""
+    from core.db import list_saved_pcap_period_days
+
+    by_day: dict[str, list[str]] = {}
+    for item in list_ingest_items(project_id, file_type="pcap", limit=50000, db_path=db_path):
+        day = str(item.observed_date or "").strip() or _day_from_name(item.file_name) or "undated"
+        path = str(item.file_path or "").strip()
+        if path:
+            bucket = by_day.setdefault(day, [])
+            if path not in bucket:
+                bucket.append(path)
+        else:
+            by_day.setdefault(day, [])
+
+    for day in list_saved_pcap_period_days(project_id, db_path=db_path):
+        by_day.setdefault(str(day or "").strip(), [])
+
+    if not by_day:
+        for day in _ingest_pcap_index_counts(project_id, db_path=db_path):
+            by_day.setdefault(day, [])
+
+    return dict(sorted(by_day.items(), key=lambda pair: (pair[0] == "undated", pair[0]), reverse=True))
+
+
 def pcap_day_groups_for_selector(
     project_id: int,
     *,
@@ -128,12 +166,28 @@ def get_saved_pcap_period_source(
     matches = [
         source
         for source in sources
-        if str(getattr(source, "period_day", "") or "").strip() == day
-        or pcap_day_key(source) == day
+        if _saved_pcap_period_matches(source, day)
     ]
     if not matches:
         return None
     return max(matches, key=lambda row: int(getattr(row, "packet_count", 0) or 0))
+
+
+def _saved_pcap_period_matches(source: Any, day: str) -> bool:
+    period_day = str(getattr(source, "period_day", "") or "").strip()
+    key = pcap_day_key(source)
+    if period_day == day or key == day:
+        return True
+    # Month aggregate selector (YYYY-MM) matches daily saved periods in that month.
+    if len(day) == 7 and day[4:5] == "-" and day.count("-") == 1:
+        month_prefix = f"{day}-"
+        if period_day.startswith(month_prefix):
+            return True
+        if key.startswith(month_prefix):
+            return True
+        if month_key(period_day) == day or month_key(key) == day:
+            return True
+    return False
 
 
 def _saved_period_days(sources: list[Any]) -> list[str]:
@@ -143,6 +197,31 @@ def _saved_period_days(sources: list[Any]) -> list[str]:
         if str(getattr(source, "period_day", "") or "").strip()
     }
     return sorted(days)
+
+
+def _build_json_recent_day_rows(project_id: int, *, db_path: Path) -> list[dict[str, Any]]:
+    by_day: dict[str, list[str]] = {}
+    for item in list_ingest_items(project_id, file_type="json", limit=50000, db_path=db_path):
+        path = str(item.file_path or "").strip()
+        if not path:
+            continue
+        day = str(item.observed_date or "undated").strip() or "undated"
+        if path not in by_day.setdefault(day, []):
+            by_day[day].append(path)
+
+    rows: list[dict[str, Any]] = []
+    for day in sorted(by_day, reverse=True):
+        paths = by_day[day]
+        rows.append(
+            {
+                "day": day,
+                "name": format_period_day_label(day) if day != "undated" else "Undated",
+                "file_count": len(paths),
+                "period": day if day != "undated" else "-",
+                "paths": paths,
+            }
+        )
+    return rows
 
 
 def _ingest_pcap_paths(

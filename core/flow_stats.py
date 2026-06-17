@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections import Counter, defaultdict
 from typing import Any
 
-from core.formatters import safe_int
+from core.formatters import format_short_date, human_bytes, safe_int
 from core.timeutils import date_key, hour_key, parse_flow_timestamp
 
 
@@ -150,3 +150,30 @@ def compute_registry_summary(flows: list[dict[str, Any]], top_n: int = 10) -> di
         "total_flows": len(flows),
         "total_bytes": int(total_bytes),
     }
+
+
+def build_daily_activity_rows(
+    day_hist: dict[str, Any] | None,
+    day_bytes: dict[str, Any] | None,
+) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for day, count in (day_hist or {}).items():
+        try:
+            flows = int(count)
+        except Exception:
+            flows = 0
+        try:
+            total_bytes = int((day_bytes or {}).get(day, 0))
+        except Exception:
+            total_bytes = 0
+        rows.append(
+            {
+                "date": str(day),
+                "date_label": format_short_date(day, missing=str(day)),
+                "flows": flows,
+                "bytes": total_bytes,
+                "bytes_label": human_bytes(total_bytes, precision=2),
+            }
+        )
+    rows.sort(key=lambda row: (int(row.get("flows") or 0), int(row.get("bytes") or 0)), reverse=True)
+    return rows

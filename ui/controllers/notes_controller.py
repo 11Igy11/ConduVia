@@ -166,11 +166,6 @@ class NotesController:
             return
 
         rows = self.load_activity(project_id)
-        if not rows:
-            if hasattr(app, "projects_ui_controller"):
-                app.projects_ui_controller._refresh_project_launcher_cards()
-            return
-
         for row in rows:
             ts = row["created_at"]
             et = row["event_type"]

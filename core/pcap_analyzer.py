@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import datetime as _dt
 import base64
+import gc
+import math
 import re
 import socket
 import string
@@ -13,13 +15,22 @@ from typing import Any
 
 from core.analysis_limits import (
     MAX_COMMUNICATION_ROWS,
+    MAX_COMMUNICATION_ROWS_HARD_CAP,
+    MAX_COMMUNICATION_SCAN_HARD_CAP,
     MAX_INVESTIGATOR_SERVICE_ROWS,
+    MAX_PCAP_ARTIFACTS_HARD_CAP,
     MAX_PCAP_ARTIFACTS_PER_KIND,
+    MAX_PCAP_COUNTER_HARD_CAP,
     MAX_PCAP_ENDPOINT_ROWS,
+    MAX_PCAP_FLOW_MAP_HARD_CAP,
     MAX_PCAP_FLOWS,
+    MAX_PCAP_METADATA_COUNTER_HARD_CAP,
+    MAX_PCAP_OUTPUT_FLOWS_HARD_CAP,
+    MAX_PCAP_PACKET_SLICE_BYTES,
     MAX_PCAP_PORT_ROWS,
     MAX_PCAP_PROTOCOL_ROWS,
     MAX_PCAP_READABLE_SAMPLES,
+    MAX_PCAP_READABLE_SAMPLES_HARD_CAP,
     METADATA_TOP_DNS_ROWS,
     METADATA_TOP_HTTP_ROWS,
     METADATA_TOP_TLS_ROWS,
@@ -58,6 +69,66 @@ APP_PORT_HINTS = {
 PRINTABLE_BYTES = set(bytes(string.printable, "ascii")) | {9, 10, 13}
 
 ARTIFACT_LIMIT_PER_KIND = MAX_PCAP_ARTIFACTS_PER_KIND
+
+
+def _output_flow_limit(max_flows: int) -> int:
+    if max_flows > 0:
+        return max_flows
+    return MAX_PCAP_OUTPUT_FLOWS_HARD_CAP
+
+
+def _parse_flow_map_limit(max_flows: int, *, file_size: int = 0, hard_cap: int | None = None) -> int:
+    if max_flows > 0:
+        return max_flows
+    cap = int(hard_cap or 0) or _flow_map_hard_cap_for_file_size(file_size)
+    return max(1, cap)
+
+
+def _flow_map_hard_cap_for_file_size(file_size: int) -> int:
+    size = max(0, int(file_size or 0))
+    if size >= 2_000_000_000:
+        return 25_000
+    if size >= 500_000_000:
+        return 50_000
+    return MAX_PCAP_FLOW_MAP_HARD_CAP
+
+
+def _communication_row_limit(limit: int) -> int:
+    if limit > 0:
+        return limit
+    return MAX_COMMUNICATION_ROWS_HARD_CAP
+
+
+def _counter_hard_cap() -> int:
+    return MAX_PCAP_COUNTER_HARD_CAP
+
+
+def _increment_counter_limited(counter: Counter, key, *, hard_cap: int) -> None:
+    if hard_cap > 0 and key not in counter and len(counter) >= hard_cap:
+        return
+    counter[key] += 1
+
+
+def analyze_timeout_for_path(path: str | Path) -> float:
+    try:
+        size = Path(path).stat().st_size
+    except Exception:
+        return 3600.0
+    # ~90s per 100MB, floor 10 min, ceiling 6 hours
+    minutes = max(10.0, min(360.0, (size / (100 * 1024 * 1024)) * 1.5))
+    return minutes * 60.0
+
+
+def _output_sample_limit(max_evidence: int) -> int:
+    if max_evidence > 0:
+        return max_evidence
+    return MAX_PCAP_READABLE_SAMPLES_HARD_CAP
+
+
+def _metadata_counter_limit(configured: int) -> int:
+    if configured > 0:
+        return configured
+    return MAX_PCAP_METADATA_COUNTER_HARD_CAP
 
 
 @dataclass
@@ -117,9 +188,10 @@ class _Packet:
 
 
 class _PcapAccumulator:
-    def __init__(self, *, max_flows: int, max_evidence: int):
+    def __init__(self, *, max_flows: int, max_evidence: int, flow_map_hard_cap: int | None = None):
         self.max_flows = max_flows
         self.max_evidence = max_evidence
+        self.flow_map_hard_cap = int(flow_map_hard_cap or 0)
         self.packet_count = 0
         self.wire_bytes = 0
         self.truncated_packets = 0
@@ -137,24 +209,41 @@ class _PcapAccumulator:
         self.total_readable_samples = 0
         self.artifacts: dict[tuple[str, str, str], dict[str, Any]] = {}
         self.flow_map: dict[tuple[Any, ...], dict[str, Any]] = {}
+        self.flows_capped = False
+
+    def _flow_map_limit(self) -> int:
+        if self.max_flows > 0:
+            return self.max_flows
+        if self.flow_map_hard_cap > 0:
+            return self.flow_map_hard_cap
+        return MAX_PCAP_FLOW_MAP_HARD_CAP
+
+    def _artifact_kind_limit(self) -> int:
+        if ARTIFACT_LIMIT_PER_KIND > 0:
+            return ARTIFACT_LIMIT_PER_KIND
+        return MAX_PCAP_ARTIFACTS_HARD_CAP
 
     def add_packet(self, packet: _Packet) -> None:
         self.packet_count += 1
         self.wire_bytes += max(0, int(packet.wire_len or 0))
 
-        if packet.ts is not None:
+        if packet.ts is not None and math.isfinite(packet.ts):
             self.first_ts = packet.ts if self.first_ts is None else min(self.first_ts, packet.ts)
             self.last_ts = packet.ts if self.last_ts is None else max(self.last_ts, packet.ts)
-            self.hourly_activity[_dt.datetime.fromtimestamp(packet.ts).strftime("%Y-%m-%d %H:00")] += 1
+            try:
+                self.hourly_activity[_dt.datetime.fromtimestamp(packet.ts).strftime("%Y-%m-%d %H:00")] += 1
+            except (OverflowError, OSError, ValueError):
+                pass
 
         self.protocols[packet.protocol] += 1
-        self.endpoints[packet.src_ip] += 1
-        self.endpoints[packet.dst_ip] += 1
+        endpoint_cap = _counter_hard_cap()
+        _increment_counter_limited(self.endpoints, packet.src_ip, hard_cap=endpoint_cap)
+        _increment_counter_limited(self.endpoints, packet.dst_ip, hard_cap=endpoint_cap)
 
         if packet.src_port is not None:
-            self.ports[(packet.protocol, packet.src_port)] += 1
+            _increment_counter_limited(self.ports, (packet.protocol, packet.src_port), hard_cap=endpoint_cap)
         if packet.dst_port is not None:
-            self.ports[(packet.protocol, packet.dst_port)] += 1
+            _increment_counter_limited(self.ports, (packet.protocol, packet.dst_port), hard_cap=endpoint_cap)
 
         self._add_flow(packet)
         self._inspect_payload(packet)
@@ -169,6 +258,10 @@ class _PcapAccumulator:
         )
         flow = self.flow_map.get(key)
         if not flow:
+            limit = self._flow_map_limit()
+            if limit > 0 and len(self.flow_map) >= limit:
+                self.flows_capped = True
+                return
             flow = {
                 "src_ip": packet.src_ip,
                 "src_port": packet.src_port or "",
@@ -207,14 +300,14 @@ class _PcapAccumulator:
         if packet.protocol in (6, 17) and (packet.src_port == 53 or packet.dst_port == 53):
             query = _parse_dns_query(payload)
             if query:
-                self.dns_queries[query] += 1
+                _increment_counter_limited(self.dns_queries, query, hard_cap=_metadata_counter_limit(METADATA_TOP_DNS_ROWS))
                 evidence_type = "DNS query"
                 value = query
 
         if packet.protocol == 6:
             sni = _parse_tls_sni(payload)
             if sni:
-                self.tls_sni[sni] += 1
+                _increment_counter_limited(self.tls_sni, sni, hard_cap=_metadata_counter_limit(METADATA_TOP_TLS_ROWS))
                 evidence_type = evidence_type or "TLS SNI"
                 value = value or sni
 
@@ -223,7 +316,7 @@ class _PcapAccumulator:
             if _looks_like_http(packet, text):
                 host = _extract_http_host(text)
                 if host:
-                    self.http_hosts[host] += 1
+                    _increment_counter_limited(self.http_hosts, host, hard_cap=_metadata_counter_limit(METADATA_TOP_HTTP_ROWS))
                 evidence_type = "HTTP cleartext"
                 value = text
             elif packet.protocol == 17 and (packet.src_port == 1900 or packet.dst_port == 1900):
@@ -312,7 +405,8 @@ class _PcapAccumulator:
             for item in self.artifacts.values()
             if item.get("category") == category and item.get("type") == artifact_type
         )
-        if ARTIFACT_LIMIT_PER_KIND > 0 and kind_count >= ARTIFACT_LIMIT_PER_KIND:
+        kind_limit = self._artifact_kind_limit()
+        if kind_limit > 0 and kind_count >= kind_limit:
             return
 
         self.artifacts[key] = {
@@ -332,7 +426,8 @@ class _PcapAccumulator:
 
     def _store_sample(self, packet: _Packet, evidence_type: str, value: str) -> None:
         self.total_readable_samples += 1
-        if self.max_evidence > 0 and len(self.readable_samples) >= self.max_evidence:
+        sample_limit = _output_sample_limit(self.max_evidence)
+        if sample_limit > 0 and len(self.readable_samples) >= sample_limit:
             return
 
         self.readable_samples.append({
@@ -366,7 +461,7 @@ class _PcapAccumulator:
             key=lambda f: int(f.get("bidirectional_bytes") or 0),
             reverse=True,
         )
-        flows = slice_rows(all_flows, self.max_flows)
+        flows = slice_rows(all_flows, _output_flow_limit(self.max_flows))
 
         likely_device = self.endpoints.most_common(1)[0][0] if self.endpoints else ""
         first_seen = _format_ts(self.first_ts)
@@ -378,12 +473,17 @@ class _PcapAccumulator:
         notes = [
             "Encrypted traffic payload is not readable; ViaNyquist reports metadata such as endpoints, ports, DNS and TLS SNI.",
         ]
+        if self.flows_capped:
+            notes.append(
+                f"Unique flow tracking capped at {self._flow_map_limit():,} connections to protect memory; "
+                "packet and metadata counters still include all traffic."
+            )
         if self.max_evidence > 0 and self.total_readable_samples > len(self.readable_samples):
             notes.append(
                 f"Readable payload samples: {len(self.readable_samples):,} shown of {self.total_readable_samples:,} observed."
             )
 
-        communication_rows = build_communication_rows(all_flows)
+        communication_rows = build_communication_rows(flows)
 
         return PcapSummary(
             file_path=str(path),
@@ -413,9 +513,9 @@ class _PcapAccumulator:
             total_dns_names=len(self.dns_queries),
             total_tls_sni_hosts=len(self.tls_sni),
             total_http_hosts=len(self.http_hosts),
-            dns_query_counts=dict(self.dns_queries),
-            tls_sni_counts=dict(self.tls_sni),
-            http_host_counts=dict(self.http_hosts),
+            dns_query_counts=dict(counter_most_common(self.dns_queries, _metadata_counter_limit(METADATA_TOP_DNS_ROWS))),
+            tls_sni_counts=dict(counter_most_common(self.tls_sni, _metadata_counter_limit(METADATA_TOP_TLS_ROWS))),
+            http_host_counts=dict(counter_most_common(self.http_hosts, _metadata_counter_limit(METADATA_TOP_HTTP_ROWS))),
             dns_queries=[
                 {"query": k, "count": v}
                 for k, v in counter_most_common(self.dns_queries, METADATA_TOP_DNS_ROWS)
@@ -450,7 +550,11 @@ def analyze_pcap(path: str | Path, *, max_flows: int = MAX_PCAP_FLOWS, max_evide
     if not p.exists() or not p.is_file():
         raise FileNotFoundError(f"PCAP file not found: {p}")
 
-    acc = _PcapAccumulator(max_flows=max_flows, max_evidence=max_evidence)
+    acc = _PcapAccumulator(
+        max_flows=max_flows,
+        max_evidence=max_evidence,
+        flow_map_hard_cap=_parse_flow_map_limit(max_flows, file_size=p.stat().st_size),
+    )
     with p.open("rb") as f:
         magic = f.read(4)
         f.seek(0)
@@ -481,11 +585,119 @@ def analyze_pcap_files(
     if len(clean_paths) == 1:
         return analyze_pcap(clean_paths[0], max_flows=max_flows, max_evidence=max_evidence)
 
-    summaries = [
-        analyze_pcap(path, max_flows=max_flows, max_evidence=max_evidence)
-        for path in clean_paths
-    ]
-    return merge_pcap_summaries(summaries, label=label or f"{len(summaries)} PCAP files")
+    aggregate_label = label or f"{len(clean_paths)} PCAP files"
+    merged: PcapSummary | None = None
+    for path in clean_paths:
+        summary = analyze_pcap(path, max_flows=max_flows, max_evidence=max_evidence)
+        if merged is None:
+            merged = summary
+        else:
+            merged = merge_pcap_summaries([merged, summary], label=aggregate_label)
+            summary = None
+        gc.collect()
+
+    return merged or PcapSummary(file_name=aggregate_label)
+
+
+def _run_isolated_subprocess(args: list[str], *, stdin_payload: bytes | None = None, timeout: float | None = None) -> PcapSummary:
+    import subprocess
+    import sys
+
+    proc = subprocess.run(
+        [sys.executable, "-m", "core.pcap_isolated", *args],
+        input=stdin_payload,
+        capture_output=True,
+        timeout=timeout,
+        check=False,
+    )
+    if proc.returncode != 0:
+        detail = (proc.stderr or b"").decode("utf-8", errors="replace").strip()
+        raise RuntimeError(detail or f"PCAP child process exited with code {proc.returncode}")
+    try:
+        import pickle
+
+        return pickle.loads(proc.stdout)
+    except Exception as exc:
+        raise RuntimeError("PCAP child process returned invalid data.") from exc
+
+
+def analyze_pcap_files_isolated(
+    paths: list[str | Path],
+    *,
+    label: str = "",
+    max_flows: int = MAX_PCAP_FLOWS,
+    max_evidence: int = MAX_PCAP_READABLE_SAMPLES,
+    timeout: float | None = None,
+) -> PcapSummary:
+    """Run multi-file PCAP analysis in a child process so native crashes do not kill the UI."""
+    import pickle
+
+    clean_paths = [str(path) for path in paths if str(path or "").strip()]
+    if not clean_paths:
+        raise FileNotFoundError("No PCAP files were provided.")
+    if len(clean_paths) == 1:
+        return analyze_pcap_isolated(clean_paths[0], max_flows=max_flows, max_evidence=max_evidence, timeout=timeout)
+
+    payload = pickle.dumps(
+        {
+            "paths": clean_paths,
+            "label": label,
+            "max_flows": max_flows,
+            "max_evidence": max_evidence,
+        },
+        protocol=pickle.HIGHEST_PROTOCOL,
+    )
+    try:
+        return _run_isolated_subprocess(["--batch"], stdin_payload=payload, timeout=timeout)
+    except Exception as exc:
+        raise RuntimeError(
+            f"PCAP re-analysis crashed or failed for {len(clean_paths):,} files "
+            f"({Path(clean_paths[0]).name} …)."
+        ) from exc
+
+
+def analyze_pcap_isolated(
+    path: str | Path,
+    *,
+    max_flows: int = MAX_PCAP_FLOWS,
+    max_evidence: int = MAX_PCAP_READABLE_SAMPLES,
+    timeout: float | None = None,
+) -> PcapSummary:
+    """Run single-file PCAP analysis in a child process so native crashes do not kill the UI."""
+    target = str(path)
+    if timeout is None:
+        timeout = analyze_timeout_for_path(target)
+    try:
+        return _run_isolated_subprocess(
+            [target, str(max_flows), str(max_evidence)],
+            timeout=timeout,
+        )
+    except Exception as exc:
+        raise RuntimeError(f"PCAP analysis crashed or failed for {Path(target).name}.") from exc
+
+
+def merge_pcap_summaries_isolated(
+    summaries: list[PcapSummary],
+    *,
+    label: str = "",
+    timeout: float | None = 1800.0,
+) -> PcapSummary:
+    """Merge PCAP summaries in a child process to protect the UI from native crashes."""
+    import pickle
+
+    items = [summary for summary in summaries if summary is not None]
+    if not items:
+        return PcapSummary(file_name=label or "PCAP aggregate")
+    if len(items) == 1:
+        return items[0]
+    payload = pickle.dumps(
+        {"summaries": items, "label": label},
+        protocol=pickle.HIGHEST_PROTOCOL,
+    )
+    try:
+        return _run_isolated_subprocess(["--merge"], stdin_payload=payload, timeout=timeout)
+    except Exception as exc:
+        raise RuntimeError(f"PCAP merge crashed or failed for {len(items):,} summaries.") from exc
 
 
 def merge_pcap_summaries(summaries: list[PcapSummary], *, label: str = "") -> PcapSummary:
@@ -509,6 +721,9 @@ def merge_pcap_summaries(summaries: list[PcapSummary], *, label: str = "") -> Pc
     total_readable = 0
     total_flow_candidates = 0
     source_paths: list[str] = []
+    flows_capped = False
+    sample_limit = _output_sample_limit(MAX_PCAP_READABLE_SAMPLES)
+    flow_map_limit = _output_flow_limit(MAX_PCAP_FLOWS)
 
     packet_count = 0
     wire_bytes = 0
@@ -553,11 +768,11 @@ def merge_pcap_summaries(summaries: list[PcapSummary], *, label: str = "") -> Pc
 
         total_readable += int(getattr(summary, "total_readable_samples", 0) or len(summary.readable_samples or []))
         total_flow_candidates += int(getattr(summary, "total_flows", 0) or len(summary.flows or []))
-        if MAX_PCAP_READABLE_SAMPLES > 0 and len(samples) < MAX_PCAP_READABLE_SAMPLES:
+        if sample_limit > 0 and len(samples) < sample_limit:
             samples.extend(
-                summary.readable_samples[: max(0, MAX_PCAP_READABLE_SAMPLES - len(samples))]
+                (summary.readable_samples or [])[: max(0, sample_limit - len(samples))]
             )
-        else:
+        elif sample_limit <= 0:
             samples.extend(summary.readable_samples or [])
 
         for artifact in summary.artifacts:
@@ -582,6 +797,9 @@ def merge_pcap_summaries(summaries: list[PcapSummary], *, label: str = "") -> Pc
             )
             existing = flow_map.get(key)
             if not existing:
+                if flow_map_limit > 0 and len(flow_map) >= flow_map_limit:
+                    flows_capped = True
+                    continue
                 flow_map[key] = dict(flow)
                 continue
             existing["bidirectional_bytes"] = _safe_int(existing.get("bidirectional_bytes")) + _safe_int(flow.get("bidirectional_bytes"))
@@ -599,7 +817,7 @@ def merge_pcap_summaries(summaries: list[PcapSummary], *, label: str = "") -> Pc
 
     flow_map_values = sorted(flow_map.values(), key=lambda row: _safe_int(row.get("bidirectional_bytes")), reverse=True)
     total_flows = len(flow_map_values)
-    flows = slice_rows(flow_map_values, MAX_PCAP_FLOWS)
+    flows = slice_rows(flow_map_values, flow_map_limit)
     first_seen = _format_ts(first_ts)
     last_seen = _format_ts(last_ts)
     duration = max(0.0, (last_ts or 0) - (first_ts or 0)) if first_ts is not None and last_ts is not None else 0.0
@@ -654,12 +872,12 @@ def merge_pcap_summaries(summaries: list[PcapSummary], *, label: str = "") -> Pc
             for host, count in counter_most_common(http, METADATA_TOP_HTTP_ROWS)
             if host
         ],
-        readable_samples=slice_rows(samples, MAX_PCAP_READABLE_SAMPLES),
+        readable_samples=slice_rows(samples, sample_limit),
         artifacts=sorted(
             artifacts.values(),
             key=lambda item: (str(item.get("category", "")), str(item.get("type", "")), -_safe_int(item.get("count"))),
         ),
-        communication_rows=build_communication_rows(flow_map_values),
+        communication_rows=build_communication_rows(flows),
         hourly_activity=[
             {"hour": hour, "packets": packets}
             for hour, packets in sorted(hourly.items())
@@ -671,7 +889,15 @@ def merge_pcap_summaries(summaries: list[PcapSummary], *, label: str = "") -> Pc
         notes=[
             f"Aggregated PCAP view built from {len(items):,} files.",
             "Encrypted traffic payload is not readable; ViaNyquist reports metadata such as endpoints, ports, DNS and TLS SNI.",
-        ],
+        ]
+        + (
+            [
+                f"Flow merge capped at {flow_map_limit:,} unique connections to protect memory; "
+                "packet and metadata counters still include all traffic."
+            ]
+            if flows_capped
+            else []
+        ),
     )
 
 
@@ -696,8 +922,11 @@ def _max_time_text(left: Any, right: Any) -> str:
 
 
 def build_communication_rows(flows: list[dict[str, Any]], *, limit: int = MAX_COMMUNICATION_ROWS) -> list[dict[str, Any]]:
+    output_limit = _communication_row_limit(limit)
+    scan_limit = MAX_COMMUNICATION_SCAN_HARD_CAP if output_limit <= 0 else max(output_limit, MAX_COMMUNICATION_SCAN_HARD_CAP)
+    scan_source = flows[:scan_limit] if scan_limit > 0 else flows
     rows: list[dict[str, Any]] = []
-    for flow in flows:
+    for flow in scan_source:
         service = _communication_service(flow)
         if not service:
             continue
@@ -727,7 +956,7 @@ def build_communication_rows(flows: list[dict[str, Any]], *, limit: int = MAX_CO
             str(row.get("service") or ""),
         )
     )
-    return rows[:limit] if limit > 0 else rows
+    return rows[:output_limit] if output_limit > 0 else rows
 
 
 def build_investigator_view(summary: PcapSummary) -> dict[str, Any]:
@@ -1094,11 +1323,17 @@ def _read_pcap(f, acc: _PcapAccumulator) -> None:
             acc.malformed_blocks += 1
             break
         ts_sec, ts_frac, inc_len, orig_len = struct.unpack(endian + "IIII", hdr)
-        data = f.read(inc_len)
-        if len(data) < inc_len:
+        safe_len = min(int(inc_len), MAX_PCAP_PACKET_SLICE_BYTES)
+        data = f.read(safe_len)
+        if len(data) < safe_len:
             acc.malformed_blocks += 1
             break
-        if inc_len < orig_len:
+        if safe_len < int(inc_len):
+            acc.malformed_blocks += 1
+            remainder = int(inc_len) - safe_len
+            if remainder > 0:
+                f.read(remainder)
+        if safe_len < orig_len:
             acc.truncated_packets += 1
         packet = _parse_packet(data, linktype, ts_sec + (ts_frac / ts_div), orig_len)
         if packet:
@@ -1138,18 +1373,33 @@ def _read_pcapng(f, acc: _PcapAccumulator) -> None:
             interfaces.append(_Interface(linktype=linktype, snaplen=snaplen, ts_factor=_pcapng_ts_factor(body[8:], endian)))
         elif block_type == 6 and len(body) >= 20:
             iface_id, ts_high, ts_low, cap_len, orig_len = struct.unpack(endian + "IIIII", body[:20])
-            iface = interfaces[iface_id] if iface_id < len(interfaces) else _Interface(linktype=1, snaplen=65535)
-            data = body[20:20 + cap_len]
-            if cap_len < orig_len:
+            if iface_id < 0 or iface_id >= len(interfaces):
+                iface = _Interface(linktype=1, snaplen=65535)
+            else:
+                iface = interfaces[iface_id]
+            payload_max = max(0, len(body) - 20)
+            snap_cap = max(64, min(int(iface.snaplen or 65535), MAX_PCAP_PACKET_SLICE_BYTES))
+            safe_cap = min(int(cap_len), payload_max, snap_cap)
+            if safe_cap < int(cap_len):
+                acc.malformed_blocks += 1
+            data = body[20:20 + safe_cap]
+            if safe_cap < orig_len:
                 acc.truncated_packets += 1
             ts = ((ts_high << 32) | ts_low) * iface.ts_factor
+            if not math.isfinite(ts) or abs(ts) > 1e15:
+                ts = None
             packet = _parse_packet(data, iface.linktype, ts, orig_len)
             if packet:
                 acc.add_packet(packet)
         elif block_type == 3 and len(body) >= 4:
             iface = interfaces[0] if interfaces else _Interface(linktype=1, snaplen=65535)
             cap_len = struct.unpack(endian + "I", body[:4])[0]
-            packet = _parse_packet(body[4:4 + cap_len], iface.linktype, None, cap_len)
+            payload_max = max(0, len(body) - 4)
+            snap_cap = max(64, min(int(iface.snaplen or 65535), MAX_PCAP_PACKET_SLICE_BYTES))
+            safe_cap = min(int(cap_len), payload_max, snap_cap)
+            if safe_cap < int(cap_len):
+                acc.malformed_blocks += 1
+            packet = _parse_packet(body[4:4 + safe_cap], iface.linktype, None, safe_cap)
             if packet:
                 acc.add_packet(packet)
 
@@ -1518,9 +1768,12 @@ def _endpoint(ip: str, port: int | None) -> str:
 
 
 def _format_ts(ts: float | None) -> str:
-    if ts is None:
+    if ts is None or not math.isfinite(ts):
         return ""
-    return _dt.datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+    try:
+        return _dt.datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+    except (OverflowError, OSError, ValueError):
+        return ""
 
 
 def _parse_ts(value: str) -> float | None:

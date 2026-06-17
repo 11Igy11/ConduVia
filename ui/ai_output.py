@@ -18,11 +18,13 @@ def make_ai_note_block(text: str) -> str:
     if not body:
         return ""
 
+    from ui.notes_format import format_notes_html_block
+
     ts = datetime.now().strftime("%d.%m.%Y. %H:%M:%S")
-    return (
-        f"[AI note added: {ts}]\n"
-        f"{body}\n"
-        f"{'-' * 60}\n"
+    return format_notes_html_block(
+        source=f"AI output · {ts}",
+        title="AI summary",
+        body=body,
     )
 
 

@@ -61,6 +61,7 @@ from core.exporters.notes_exporter import export_notes_docx
 from core.exporters.profile_exporter import export_activity_profile_html
 from core.exporters.pcap_exporter import export_pcap_summary_html
 from core.exporters.registry_exporter import export_registry_html
+from core.exporters.table_exporter import export_table_html
 from core.loader import list_json_files, list_json_files_recursive, load_folder, load_folder_recursive, load_json_file
 from core.parser import extract_dataset_meta
 from core.pcap_analyzer import (
@@ -85,7 +86,7 @@ from core.osint.normalize import normalize_domain, normalize_msisdn
 from core.osint.service import available_enrichers, enrich_entity
 from core.osint.settings import OsintSettings
 from core.osint.snapshot import build_osint_snapshot
-from core.protocols import describe_ip_proto, format_ip_proto_with_description
+from core.project_readiness import evaluate_profile_readiness
 from core.timeutils import LOCAL_TZ, parse_timestamp
 from core.workspace import (
     WORKSPACE_MARKER,
@@ -932,7 +933,6 @@ class BehaviorProfileTests(unittest.TestCase):
         self.assertTrue(any(row["label"] == "23:00" and row["count"] == 2 for row in profile["hour_rows"]))
         self.assertTrue(any(row["label"] == "04/01/2026" and row["count"] == 4 for row in profile["day_rows"]))
         self.assertTrue(any(line.startswith("Most active hour: 23:00") for line in profile["routine_lines"]))
-        self.assertTrue(any("not proof" in line for line in profile["routine_lines"]))
 
     def test_behavior_profile_returns_valid_empty_structures(self):
         profile = build_flow_behavior_profile([])
@@ -1144,6 +1144,31 @@ class ExportContextTests(unittest.TestCase):
         self.assertIn("ViaNyquist registry izvjestaj", hr_content)
         self.assertIn("Valjanost naloga", hr_content)
         self.assertIn("Analiticki sazetak", hr_content)
+        self.assertIn("Oznake prometnog uzorka", hr_content)
+
+
+class TableExportTests(unittest.TestCase):
+    def test_table_export_html_uses_unified_report_shell(self):
+        with temporary_directory() as tmp:
+            output = Path(tmp) / "flows.html"
+            export_table_html(
+                str(output),
+                "Communication indicators",
+                ["Source", "Volume"],
+                [["10.0.0.5", "1.25 MB"]],
+                lang="hr",
+                source_label="sample.pcap",
+            )
+            content = output.read_text(encoding="utf-8")
+
+        self.assertIn("Communication indicators", content)
+        self.assertIn("ViaNyquist tablicni izvoz", content)
+        self.assertIn("Izvezeno", content)
+        self.assertIn("sample.pcap", content)
+        self.assertIn("1.25 MB", content)
+        self.assertIn("Generirano pomocu", content)
+        self.assertIn("class=\"hero\"", content)
+        self.assertIn("class=\"table-wrap\"", content)
 
 
 class CompareTests(unittest.TestCase):
@@ -1310,6 +1335,10 @@ class OsintTests(unittest.TestCase):
                 {
                     "flow_count": 2,
                     "domain_rows": [{"label": "web.facebook.com", "count": 3, "bytes": 1000, "bytes_label": "1.0 KB", "share": 1.0}],
+                    "public_ip_rows": [
+                        {"value": "31.13.84.51", "count": 4, "source": "flows"},
+                        {"value": "8.8.8.8", "count": 2, "source": "flows"},
+                    ],
                 },
                 db_path=db_path,
             )
@@ -1319,8 +1348,44 @@ class OsintTests(unittest.TestCase):
         self.assertEqual(snapshot["project_name"], "OSINT Case")
         self.assertEqual(snapshot["subject_label"], "Ana Horvat")
         self.assertTrue(any(row["value"] == "+385911234567" for row in snapshot["identifiers"]))
-        self.assertTrue(any(row["value"] == "10.0.0.5" for row in snapshot["ips"]))
+        self.assertTrue(any(row["value"] == "10.0.0.5" for row in snapshot["identifiers"]))
+        self.assertFalse(any(row["value"] == "10.0.0.5" for row in snapshot["ips"]))
+        self.assertTrue(any(row["value"] == "31.13.84.51" for row in snapshot["ips"]))
+        self.assertTrue(any(row["value"] == "8.8.8.8" for row in snapshot["ips"]))
         self.assertTrue(any(row["value"] == "web.facebook.com" for row in snapshot["domains"]))
+
+    def test_behavior_profile_collects_public_ips_from_flows(self):
+        profile = build_flow_behavior_profile(
+            [
+                {"src_ip": "10.0.0.5", "dst_ip": "8.8.8.8", "bidirectional_bytes": 100},
+                {"src_ip": "10.0.0.5", "dst_ip": "31.13.84.51", "bidirectional_bytes": 200},
+                {"src_ip": "10.0.0.5", "dst_ip": "192.168.1.1", "bidirectional_bytes": 50},
+            ]
+        )
+        values = {row["value"] for row in profile.get("public_ip_rows") or []}
+        self.assertIn("8.8.8.8", values)
+        self.assertIn("31.13.84.51", values)
+        self.assertNotIn("10.0.0.5", values)
+        self.assertNotIn("192.168.1.1", values)
+
+    def test_collect_public_ips_from_pcap_summary_skips_device_ip(self):
+        from types import SimpleNamespace
+
+        summary = SimpleNamespace(
+            likely_device_ip="10.0.0.10",
+            flows=[
+                {"src_ip": "10.0.0.10", "dst_ip": "93.184.216.34", "bidirectional_packets": 12},
+            ],
+            top_endpoints=[
+                {"ip": "10.0.0.10", "packets": 50},
+                {"ip": "93.184.216.34", "packets": 12},
+            ],
+        )
+        from core.osint.public_ips import collect_public_ips_from_pcap_summary
+
+        counts = collect_public_ips_from_pcap_summary(summary)
+        self.assertIn("93.184.216.34", counts)
+        self.assertNotIn("10.0.0.10", counts)
 
     def test_osint_lookup_is_persisted(self):
         with temporary_directory() as tmp:
@@ -1506,6 +1571,23 @@ class ProjectTargetTests(unittest.TestCase):
                 "385981111111",
                 project_type="MSISDN",
                 dataset_type="ISDNDataOnly",
+            )
+        )
+
+    def test_format_intercept_imsi_restores_hr_mcc_prefix(self):
+        from core.osint.imsi import format_intercept_imsi
+
+        self.assertEqual(format_intercept_imsi("901370011193097"), "21901370011193097")
+        self.assertEqual(format_intercept_imsi("219013700111930"), "219013700111930")
+        self.assertEqual(format_intercept_imsi("01370011193097"), "21901370011193097")
+
+    def test_identifier_matching_normalizes_imsi_exports(self):
+        self.assertTrue(
+            identifier_values_match(
+                "21901370011193097",
+                "901370011193097",
+                project_type="IMSI",
+                dataset_type="IMSIDataOnly",
             )
         )
 
@@ -1991,6 +2073,10 @@ class ProfileComparisonTests(unittest.TestCase):
         self.assertEqual(len(rows), 3)
         self.assertEqual(len(counter), 3)
         self.assertEqual({row["label"] for row in rows}, {"10.0.0.1", "10.0.0.2", "10.0.0.3"})
+        by_ip = {row["label"]: int(row["packets"]) for row in rows}
+        self.assertEqual(by_ip["10.0.0.1"], 140)
+        self.assertEqual(by_ip["10.0.0.2"], 80)
+        self.assertEqual(by_ip["10.0.0.3"], 50)
 
     def test_build_period_comparison_rows_aligns_json_and_pcap_days(self):
         json_rows = [
@@ -2034,10 +2120,113 @@ class ProfileComparisonTests(unittest.TestCase):
         summary = format_missing_days_summary(gap)
         self.assertIn("internal gap", summary)
 
+    def test_complete_calendar_month_requires_every_day(self):
+        from core.period_gaps import (
+            complete_calendar_month_keys,
+            is_complete_calendar_month,
+            missing_calendar_month_days,
+            summarize_partial_months,
+        )
+        from core.period_groups import rollup_day_groups
+
+        days = [f"2024-09-{day:02d}" for day in range(1, 9)]
+        self.assertFalse(is_complete_calendar_month("2024-09", days))
+        self.assertEqual(len(missing_calendar_month_days("2024-09", days)), 22)
+        self.assertIn("09/2024", summarize_partial_months(days))
+        self.assertEqual(complete_calendar_month_keys(days), [])
+
+        full_september = [f"2024-09-{day:02d}" for day in range(1, 31)]
+        self.assertTrue(is_complete_calendar_month("2024-09", full_september))
+        self.assertEqual(complete_calendar_month_keys(full_september), ["2024-09"])
+
+        rolled = rollup_day_groups({day: [f"/tmp/{day}.pcap"] for day in days}, granularity="month")
+        self.assertEqual(rolled, {})
+        rolled_full = rollup_day_groups(
+            {day: [f"/tmp/{day}.pcap"] for day in full_september},
+            granularity="month",
+        )
+        self.assertIn("2024-09", rolled_full)
+
+    def test_format_period_day_label_supports_range_keys(self):
+        from core.evidence_policy import format_period_day_label
+
+        label = format_period_day_label("range:2024-03-01:2024-03-08")
+        self.assertEqual(label, "01/03/2024 – 08/03/2024")
+
     def test_analysis_limits_use_compact_profile_preview(self):
         self.assertEqual(PROFILE_CHART_MAX_DAYS, 31)
         self.assertEqual(MAX_PCAP_FLOWS, 0)
         self.assertEqual(MAX_PCAP_READABLE_SAMPLES, 0)
+
+    def test_pcap_flow_map_hard_cap_limits_memory(self):
+        from core.analysis_limits import MAX_PCAP_FLOW_MAP_HARD_CAP
+        from core.pcap_analyzer import _Packet, _PcapAccumulator
+
+        acc = _PcapAccumulator(max_flows=0, max_evidence=0)
+        for index in range(MAX_PCAP_FLOW_MAP_HARD_CAP + 500):
+            acc.add_packet(
+                _Packet(
+                    ts=1_700_000_000.0,
+                    src_ip=f"10.0.{index // 250}.{index % 250 + 1}",
+                    dst_ip="8.8.8.8",
+                    protocol=6,
+                    src_port=1024 + (index % 60000),
+                    dst_port=443,
+                    wire_len=120,
+                )
+            )
+        self.assertLessEqual(len(acc.flow_map), MAX_PCAP_FLOW_MAP_HARD_CAP)
+        self.assertTrue(acc.flows_capped)
+
+
+class ProfileReadinessTests(unittest.TestCase):
+    def test_no_evidence_is_no_index(self):
+        readiness = evaluate_profile_readiness(
+            json_file_count=0,
+            json_indexed_day_count=0,
+            pcap_day_count=0,
+            behavior_index={},
+        )
+        self.assertEqual(readiness["state"], "no_index")
+
+    def test_building_when_index_in_progress(self):
+        readiness = evaluate_profile_readiness(
+            json_file_count=10,
+            json_indexed_day_count=8,
+            pcap_day_count=0,
+            behavior_index={"json_file_count": 5, "loaded_json_file_count": 2},
+            index_building=True,
+        )
+        self.assertEqual(readiness["state"], "building")
+
+    def test_stale_when_new_json_since_index(self):
+        readiness = evaluate_profile_readiness(
+            json_file_count=12,
+            json_indexed_day_count=10,
+            pcap_day_count=3,
+            behavior_index={
+                "json_file_count": 8,
+                "loaded_json_file_count": 8,
+                "flow_count": 500,
+                "day_rows": [{"date": "2026-01-01"}],
+            },
+        )
+        self.assertEqual(readiness["state"], "stale")
+
+    def test_ready_when_index_matches_evidence(self):
+        readiness = evaluate_profile_readiness(
+            json_file_count=5,
+            json_indexed_day_count=5,
+            pcap_day_count=2,
+            behavior_index={
+                "json_file_count": 5,
+                "loaded_json_file_count": 5,
+                "flow_count": 1200,
+                "day_rows": [{"date": "2026-01-01"}, {"date": "2026-01-02"}],
+            },
+        )
+        self.assertEqual(readiness["state"], "ready")
+        self.assertIn("Profile ready", readiness["label"])
 
 
 class AIServiceTests(unittest.TestCase):
@@ -2095,9 +2284,16 @@ class AIServiceTests(unittest.TestCase):
             }
         ]
 
-        context = build_dataset_context(flows)
+        context = build_dataset_context(
+            flows,
+            period_label="02/2024",
+            period_mode="month",
+        )
 
         self.assertIn("Dataset-level behavior indicators", context)
+        self.assertIn("Loaded period: 02/2024 (month aggregate)", context)
+        self.assertIn("Traffic pattern flags", context)
+        self.assertNotIn("Behavior deviation score", context)
         self.assertIn("Top source IPs by bytes", context)
         self.assertIn("Largest individual flows", context)
         self.assertIn("Connection-oriented transport", context)

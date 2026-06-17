@@ -118,6 +118,9 @@ class AIAssistantService:
         flows: list[dict[str, Any]],
         project_name: str = "",
         dataset_path: str = "",
+        *,
+        period_label: str = "",
+        period_mode: str = "day",
     ) -> str:
         if not flows:
             return "No dataset loaded."
@@ -125,11 +128,13 @@ class AIAssistantService:
         total_flows = len(flows)
 
         context = build_dataset_context(
-        flows=flows,
-        project_name=project_name,
-        dataset_path=dataset_path,
-        total_flows=total_flows,
-    )
+            flows=flows,
+            project_name=project_name,
+            dataset_path=dataset_path,
+            total_flows=total_flows,
+            period_label=period_label,
+            period_mode=period_mode,
+        )
 
         prompt = SYSTEM_PROMPT + "\n\n" + build_dataset_summary_prompt(
             context,
@@ -163,11 +168,19 @@ class AIAssistantService:
         self,
         summary: PcapSummary,
         project_name: str = "",
+        *,
+        period_label: str = "",
+        period_mode: str = "day",
     ) -> str:
         if not summary or not summary.packet_count:
             return "No PCAP analysis loaded."
 
-        context = build_pcap_context(summary, project_name=project_name)
+        context = build_pcap_context(
+            summary,
+            project_name=project_name,
+            period_label=period_label,
+            period_mode=period_mode,
+        )
         prompt = SYSTEM_PROMPT + "\n\n" + build_pcap_summary_prompt(
             context,
             language=self.settings.output_language,

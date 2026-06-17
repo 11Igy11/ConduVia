@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import html
 import base64
+import unicodedata
 from datetime import datetime
 from pathlib import Path
 
@@ -12,8 +13,37 @@ from core.formatters import format_short_date
 from core.output_language import normalize_output_language
 
 from openpyxl import Workbook
+from openpyxl.cell.cell import ILLEGAL_CHARACTERS_RE
 from openpyxl.styles import Font, PatternFill
 from openpyxl.utils import get_column_letter
+
+_EXCEL_MAX_CELL_LEN = 32767
+_EXCEL_MAX_SHEET_TITLE_LEN = 31
+
+
+def _sanitize_excel_sheet_title(title: str) -> str:
+    text = ILLEGAL_CHARACTERS_RE.sub("", str(title or ""))
+    text = "".join(ch for ch in text if ch not in "[]:*?/\\'")
+    text = text.strip() or "Export"
+    return text[:_EXCEL_MAX_SHEET_TITLE_LEN] or "Export"
+
+
+def _sanitize_excel_cell(value: object) -> str:
+    if value is None:
+        return ""
+    text = ILLEGAL_CHARACTERS_RE.sub("", str(value))
+    cleaned: list[str] = []
+    for ch in text:
+        code = ord(ch)
+        if unicodedata.category(ch) in {"Cc", "Cs"}:
+            continue
+        if code in {0xFEFF} or 0xE0000 <= code <= 0xE007F:
+            continue
+        cleaned.append(ch)
+    text = "".join(cleaned)
+    if len(text) > _EXCEL_MAX_CELL_LEN:
+        return text[: _EXCEL_MAX_CELL_LEN - 3] + "..."
+    return text
 
 
 def export_listing_csv(file_path: str, headers: list[str], rows: list[list[str]]) -> None:
@@ -24,27 +54,32 @@ def export_listing_csv(file_path: str, headers: list[str], rows: list[list[str]]
         writer.writerow(headers)
         writer.writerows(rows)
 
-def export_listing_excel(file_path: str, headers: list[str], rows: list[list[str]]) -> None:
+def export_listing_excel(
+    file_path: str,
+    headers: list[str],
+    rows: list[list[str]],
+    *,
+    sheet_title: str = "Listing",
+) -> None:
     path = Path(file_path)
 
     wb = Workbook()
     ws = wb.active
-    ws.title = "Listing"
+    ws.title = _sanitize_excel_sheet_title(sheet_title)
 
-    # Header
-    ws.append(headers)
+    safe_headers = [_sanitize_excel_cell(header) for header in headers]
+    ws.append(safe_headers)
 
     header_fill = PatternFill(fill_type="solid", fgColor="1F2937")
     header_font = Font(bold=True, color="FFFFFF")
 
-    for col_idx, header in enumerate(headers, start=1):
+    for col_idx, header in enumerate(safe_headers, start=1):
         cell = ws.cell(row=1, column=col_idx)
         cell.fill = header_fill
         cell.font = header_font
 
-    # Data
     for row in rows:
-        ws.append(row)
+        ws.append([_sanitize_excel_cell(cell) for cell in row])
 
     # Freeze header
     ws.freeze_panes = "A2"
@@ -53,7 +88,7 @@ def export_listing_excel(file_path: str, headers: list[str], rows: list[list[str
     ws.auto_filter.ref = ws.dimensions
 
     # Autosize columns
-    for col_idx, header in enumerate(headers, start=1):
+    for col_idx, header in enumerate(safe_headers, start=1):
         max_len = len(str(header))
 
         for row_idx in range(2, ws.max_row + 1):

@@ -65,6 +65,16 @@ def build_project_behavior_index(
     profile["skipped_json_file_count"] = skipped_json_file_count
     profile["failed_json_file_count"] = failed
     profile["source_key"] = source_key
+    previous = get_project_behavior_profile(project_id, db_path=db_path) or {}
+    pcap_rows = [
+        row
+        for row in (previous.get("public_ip_rows") or [])
+        if str(row.get("source") or "") == "pcap"
+    ]
+    if pcap_rows:
+        from core.osint.public_ips import merge_public_ip_row_lists
+
+        profile["public_ip_rows"] = merge_public_ip_row_lists(profile.get("public_ip_rows"), pcap_rows)
     save_project_behavior_profile(
         project_id,
         profile,

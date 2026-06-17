@@ -16,6 +16,9 @@ def wire_app_ui(app: App) -> None:
     app.btn_load_more.clicked.connect(app.explore_ui_controller.load_next_page)
     app.cmb_page_size.currentTextChanged.connect(app.explore_ui_controller.on_page_size_changed)
     app.cmb_json_day.currentIndexChanged.connect(app.dataset_controller.on_json_day_changed)
+    app.cmb_json_file.currentIndexChanged.connect(app.dataset_controller.on_json_file_changed)
+    app.cmb_json_period_mode.currentIndexChanged.connect(app.dataset_controller.on_json_period_mode_changed)
+    app.btn_json_pick_range.clicked.connect(app.dataset_controller.configure_json_period_range)
     app.btn_expand_json_gaps.clicked.connect(app.dataset_controller.open_json_missing_days_dialog)
 
     app.btn_load.clicked.connect(app.dataset_controller.load_dataset_dialog)

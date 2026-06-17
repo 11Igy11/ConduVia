@@ -93,6 +93,24 @@ def rollup_pcap_day_group(group: list[Any]) -> tuple[int, int, Counter[str]]:
     return _rollup_day_group(group)
 
 
+def _packet_weight_by_ip(group: list[Any]) -> Counter[str]:
+    """Sum packet counts per likely device IP within one day group (respects aggregate rollup)."""
+    aggregates = [item for item in group if is_aggregate_pcap_source(item)]
+    singles = [item for item in group if not is_aggregate_pcap_source(item)]
+    weights: Counter[str] = Counter()
+    if aggregates:
+        best = max(aggregates, key=lambda item: int(getattr(item, "packet_count", 0) or 0))
+        ip = str(getattr(best, "likely_device_ip", "") or "").strip()
+        if ip:
+            weights[ip] += int(getattr(best, "packet_count", 0) or 0)
+        return weights
+    for item in singles:
+        ip = str(getattr(item, "likely_device_ip", "") or "").strip()
+        if ip:
+            weights[ip] += int(getattr(item, "packet_count", 0) or 0)
+    return weights
+
+
 def _rollup_day_group(group: list[Any]) -> tuple[int, int, Counter[str]]:
     aggregates = [item for item in group if is_aggregate_pcap_source(item)]
     singles = [item for item in group if not is_aggregate_pcap_source(item)]
@@ -134,12 +152,8 @@ def collect_device_ip_stats(sources: list[Any]) -> tuple[Counter[str], list[dict
         _packets, _wire_bytes, day_ips = _rollup_day_group(group)
         for ip, count in day_ips.items():
             period_ips[ip] += count
-            best = max(
-                group,
-                key=lambda item: int(getattr(item, "packet_count", 0) or 0),
-            )
-            if str(getattr(best, "likely_device_ip", "") or "").strip() == ip:
-                packet_weight[ip] += int(getattr(best, "packet_count", 0) or 0)
+        for ip, packets in _packet_weight_by_ip(group).items():
+            packet_weight[ip] += packets
 
     rows = []
     for ip in sorted(all_ips):

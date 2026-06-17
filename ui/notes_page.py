@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+from ui.notes_format import plain_block_to_html
 
 
 def _looks_like_html(text: str) -> bool:
@@ -209,13 +210,12 @@ class NotesPage(QWidget):
         if not block:
             return
 
+        html_block = plain_block_to_html(block)
         cursor = self.editor.textCursor()
         cursor.movePosition(QTextCursor.End)
         if self.editor.toPlainText().strip():
             cursor.insertBlock()
-            cursor.insertBlock()
-        cursor.insertText(block)
-        cursor.insertBlock()
+        cursor.insertHtml(html_block)
         self.editor.setTextCursor(cursor)
 
     def _tool_button(self, text: str, tooltip: str) -> QPushButton:

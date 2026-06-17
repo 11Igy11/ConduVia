@@ -12,10 +12,21 @@ from core.db import (
     list_findings,
 )
 from core.formatters import human_bytes
-from core.analysis_limits import MAX_PROFILE_ACTIVITY_EVENTS, MAX_PROFILE_TIMELINE_LINES
+from core.analysis_limits import (
+    MAX_EVIDENCE_SNAPSHOT_ITEMS,
+    MAX_PROFILE_ACTIVITY_EVENTS,
+    MAX_PROFILE_TIMELINE_LINES,
+)
 from core.period_comparison import build_period_comparison_rows
 from core.project_evidence import build_project_evidence_snapshot
 from core.project_identity import project_identifiers_text, subject_display_label, target_display_label
+from core.project_readiness import evaluate_profile_readiness
+from core.case_metadata import (
+    format_active_order_validity,
+    format_klasa_summary,
+    format_urbroj_summary,
+    load_case_metadata,
+)
 
 
 def build_project_activity_profile(
@@ -46,7 +57,7 @@ def build_project_activity_profile(
             "total_pcap_bytes_label": human_bytes(0, precision=2),
         }
 
-    evidence = build_project_evidence_snapshot(project_id, db_path=db_path)
+    evidence = build_project_evidence_snapshot(project_id, db_path=db_path, limit=MAX_EVIDENCE_SNAPSHOT_ITEMS)
     json_evidence = evidence["json"]
     pcap_evidence = evidence["pcap"]
 
@@ -68,18 +79,40 @@ def build_project_activity_profile(
     activity_types = Counter(str(row["event_type"] or "event") for row in activity)
     pcap_day_count = int(pcap_evidence["day_count"] or 0)
     pcap_file_count = int(pcap_evidence["source_count"] or 0)
+    pcap_indexed_file_count = int(pcap_evidence.get("indexed_file_count") or 0)
+    pcap_indexed_day_count = int(pcap_evidence.get("indexed_day_count") or 0)
     pcap_day_rows = list(pcap_evidence["day_rows"])
     pcap_period_coverage = list(pcap_evidence["period_coverage"])
 
+    json_file_day_count = len({str(row.get("day") or "").strip() for row in json_evidence.get("json_day_rows") or [] if str(row.get("day") or "").strip() and str(row.get("day") or "") != "undated"})
+    json_index_file_count = int(behavior_index.get("json_file_count") or 0)
+    index_building = bool(dataset_count and not json_day_rows and (json_index_file_count or json_file_day_count))
+    readiness = evaluate_profile_readiness(
+        json_file_count=dataset_count,
+        json_indexed_day_count=json_file_day_count,
+        pcap_day_count=pcap_day_count,
+        pcap_indexed_day_count=pcap_indexed_day_count,
+        behavior_index=behavior_index,
+        index_building=index_building,
+    )
     json_day_count = len(json_day_rows)
+    json_days_label = (
+        f"{json_day_count:,} flow days"
+        if json_day_count
+        else ("index building…" if readiness["state"] == "building" else "0 flow days")
+    )
+    case_metadata = load_case_metadata(project_id, db_path=db_path)
 
     summary_lines = [
         "Project Activity Profile",
         f"- Case subject: {subject_display_label(project)}",
         f"- Known identifiers: {project_identifiers_text(project)}",
         f"- Target fallback: {target_display_label(project)}",
-        f"- JSON datasets: {dataset_count:,} files / {json_day_count:,} days",
-        f"- PCAP periods: {pcap_file_count:,} files / {pcap_day_count:,} days",
+        f"- Klasa: {format_klasa_summary(case_metadata)}",
+        f"- Urbroj: {format_urbroj_summary(case_metadata)}",
+        f"- Order validity (active): {format_active_order_validity(case_metadata)}",
+        f"- JSON datasets: {dataset_count:,} files / {json_file_day_count:,} indexed days / {json_days_label}",
+        f"- PCAP evidence: {pcap_indexed_file_count:,} indexed files / {pcap_indexed_day_count:,} indexed days / {pcap_day_count:,} saved days",
         f"- Findings: {len(findings)}",
     ]
 
@@ -87,17 +120,10 @@ def build_project_activity_profile(
         summary_lines.extend([
             f"- PCAP packet volume: {total_packets:,} packets / {human_bytes(total_pcap_bytes, precision=2)}",
             f"- PCAP capture range: {capture_start or '-'} to {capture_end or '-'}",
-            f"- PCAP device IPs: {_counter_label(pcap_ips)}",
+            f"- PCAP device IPs: {len(pcap_device_ip_rows):,} unique",
         ])
     else:
         summary_lines.append("- PCAP capture range: no PCAP sources saved yet")
-
-    if dataset_files:
-        summary_lines.append(f"- Most recent dataset: {dataset_files[0].get('path')}")
-    elif dataset_sources:
-        summary_lines.append(f"- Most recent dataset source: {dataset_sources[0]}")
-    else:
-        summary_lines.append("- Most recent dataset: none")
 
     timeline_lines = []
     for row in activity:
@@ -109,6 +135,7 @@ def build_project_activity_profile(
     recommendation_lines = _recommendations(
         dataset_count=dataset_count,
         pcap_count=pcap_day_count,
+        pcap_indexed_day_count=pcap_indexed_day_count,
         finding_count=len(findings),
         pcap_ips=pcap_ips,
         pcap_period_coverage=pcap_period_coverage,
@@ -122,25 +149,39 @@ def build_project_activity_profile(
         "metrics": [
             {
                 "label": "JSON",
-                "value": f"{dataset_count:,} files / {json_day_count:,} days",
-                "detail": f"{dataset_count:,} JSON files across {json_day_count:,} activity days",
+                "value": f"{dataset_count:,} files / {json_file_day_count:,} d / {json_days_label}",
+                "detail": (
+                    f"{dataset_count:,} JSON files — behavior index building from saved evidence"
+                    if index_building
+                    else (
+                        f"{dataset_count:,} JSON files · {json_file_day_count:,} indexed file-days · "
+                        f"{json_day_count:,} flow-activity days"
+                    )
+                ),
             },
             {
                 "label": "PCAP",
-                "value": f"{pcap_file_count:,} files / {pcap_day_count:,} days",
-                "detail": f"{pcap_file_count:,} saved PCAP sources across {pcap_day_count:,} daily periods",
+                "value": f"{pcap_indexed_file_count:,} indexed / {pcap_day_count:,} saved d",
+                "detail": (
+                    f"{pcap_indexed_file_count:,} PCAP files in ingest index · "
+                    f"{pcap_indexed_day_count:,} indexed file-days · "
+                    f"{pcap_day_count:,} daily periods saved to project"
+                ),
             },
             {"label": "Findings", "value": len(findings), "detail": "saved"},
-            {"label": "Device IPs", "value": len(pcap_device_ip_rows), "detail": f"{len(pcap_device_ip_rows)} unique IPs across {pcap_day_count} PCAP periods"},
+            {"label": "Device IPs", "value": len(pcap_device_ip_rows), "detail": f"{len(pcap_device_ip_rows)} unique IPs across {pcap_day_count} saved PCAP days"},
         ],
         "dataset_count": dataset_count,
         "pcap_count": len(pcaps),
+        "pcap_file_count": pcap_file_count,
+        "pcap_indexed_file_count": pcap_indexed_file_count,
+        "pcap_indexed_day_count": pcap_indexed_day_count,
         "pcap_day_count": pcap_day_count,
         "finding_count": len(findings),
         "pcap_device_ips": dict(pcap_ips),
         "evidence_counts": [
             {"label": "JSON", "count": dataset_count, "badge_label": f"{dataset_count:,} / {json_day_count:,} d"},
-            {"label": "PCAP", "count": pcap_file_count, "badge_label": f"{pcap_file_count:,} / {pcap_day_count:,} d"},
+            {"label": "PCAP", "count": pcap_indexed_file_count, "badge_label": f"{pcap_indexed_file_count:,} / {pcap_day_count:,} d"},
             {"label": "Findings", "count": len(findings), "badge_label": str(len(findings))},
         ],
         "pcap_device_ip_rows": pcap_device_ip_rows,
@@ -149,6 +190,7 @@ def build_project_activity_profile(
         "pcap_period_coverage": pcap_period_coverage,
         "period_comparison_rows": period_comparison_rows,
         "json_day_rows": json_day_rows,
+        "readiness": readiness,
         "capture_range": {
             "first_seen": capture_start,
             "last_seen": capture_end,
@@ -165,22 +207,12 @@ def format_project_activity_profile(profile: dict[str, Any]) -> str:
     recommendations = list(profile.get("recommendation_lines") or [])
     timeline = list(profile.get("timeline_lines") or [])
 
-    if recommendations:
-        lines.extend(["", "Next review:"])
-        lines.extend(recommendations)
-
     if timeline:
         lines.extend(["", "Recent project activity:"])
         visible_timeline = timeline if MAX_PROFILE_TIMELINE_LINES <= 0 else timeline[:MAX_PROFILE_TIMELINE_LINES]
         lines.extend(visible_timeline)
 
     return "\n".join(lines)
-
-
-def _counter_label(values: Counter[str]) -> str:
-    if not values:
-        return "-"
-    return ", ".join(f"{value} ({count})" for value, count in values.most_common())
 
 
 def _activity_type_rows(activity_types: Counter[str], *, pcap_day_count: int) -> list[dict[str, Any]]:
@@ -205,6 +237,13 @@ def _event_label(event_type: str) -> str:
         "finding_deleted": "Finding deleted",
         "pcap_saved": "PCAP saved",
         "pcap_notes_added": "PCAP notes added",
+        "project_created": "Project created",
+        "project_edited": "Project edited",
+        "import_period_selected": "Period selected",
+        "pcap_batch_finished": "PCAP batch finished",
+        "case_metadata_mismatch": "Case metadata warning",
+        "repository_hit": "Repository hit",
+        "ai_summary_generated": "AI summary generated",
     }
     return labels.get(event_type, event_type.replace("_", " ").title())
 
@@ -213,6 +252,7 @@ def _recommendations(
     *,
     dataset_count: int,
     pcap_count: int,
+    pcap_indexed_day_count: int = 0,
     finding_count: int,
     pcap_ips: Counter[str],
     pcap_period_coverage: list[dict[str, Any]] | None = None,
@@ -231,6 +271,12 @@ def _recommendations(
     if pcap_ips:
         recommendations.append("- Treat observed PCAP device IPs as session/context indicators; mobile devices may change IP over time.")
 
+    if pcap_indexed_day_count and pcap_count and pcap_indexed_day_count > pcap_count:
+        recommendations.append(
+            f"- PCAP ingest covers {pcap_indexed_day_count:,} indexed days but only {pcap_count:,} "
+            "daily periods are saved — run Re-analyze Period on the PCAP page to save missing days."
+        )
+
     missing_periods = [
         row for row in (pcap_period_coverage or [])
         if str(row.get("status") or "") == "Not saved yet"
@@ -240,7 +286,7 @@ def _recommendations(
         extra = f" (+{len(missing_periods) - 8} more)" if len(missing_periods) > 8 else ""
         recommendations.append(
             f"- PCAP periods not saved to project yet: {labels}{extra}. "
-            "Use Save Period to Project or Save All Periods on the PCAP page."
+            "Use Save Period to Project on the PCAP page."
         )
 
     if finding_count:

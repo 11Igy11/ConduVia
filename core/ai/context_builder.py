@@ -21,15 +21,27 @@ def build_dataset_context(
     dataset_path: str = "",
     total_flows: int | None = None,
     limit: int = 10,
+    *,
+    period_label: str = "",
+    period_mode: str = "day",
 ) -> str:
     lines: list[str] = []
 
     actual_total = total_flows if total_flows is not None else len(flows)
+    mode = str(period_mode or "day").strip().casefold()
+    month_aggregate = mode.startswith("month")
 
     lines.append(f"Project: {project_name or '(none)'}")
     lines.append(f"Dataset: {dataset_path or '(none)'}")
+    if period_label:
+        scope = "month aggregate" if month_aggregate else "single day"
+        lines.append(f"Loaded period: {period_label} ({scope})")
+        if month_aggregate:
+            lines.append(
+                "Period scope: all flows in the selected calendar month bucket, not the whole project."
+            )
     lines.append("Goal: describe observable device or user communication behavior based on network flow metadata.")
-    lines.append(f"Total flows in dataset: {actual_total}")
+    lines.append(f"Total flows in loaded period: {actual_total}")
     lines.append("")
 
     analyst = compute_analyst_summary(flows)
@@ -43,14 +55,21 @@ def build_dataset_context(
 
     lines.append("Dataset-level behavior indicators:")
     lines.append(f"- Total bytes: {human_bytes(bytes_info.get('total_bytes', 0))}")
-    lines.append(f"- Coverage pattern: {coverage.get('pattern', 'unknown')}")
-    lines.append(f"- Active days: {coverage.get('active_days', 0)}")
-    lines.append(f"- Avg flows per active day: {float(coverage.get('avg_flows_per_active_day', 0.0) or 0.0):.1f}")
+    if not month_aggregate:
+        lines.append(f"- Coverage pattern: {coverage.get('pattern', 'unknown')}")
+        lines.append(f"- Active days: {coverage.get('active_days', 0)}")
+        lines.append(f"- Avg flows per active day: {float(coverage.get('avg_flows_per_active_day', 0.0) or 0.0):.1f}")
     lines.append(f"- Outbound share of total bytes: {_pct(bytes_info.get('outbound_share_total_pct', 0.0))}")
     lines.append(f"- Peak hour: {activity.get('peak_hour', 'unknown')}")
     lines.append(f"- Night share: {_pct(activity.get('night_share_pct', 0.0))}")
     lines.append(f"- Business-hours share: {_pct(activity.get('business_share_pct', 0.0))}")
-    lines.append(f"- Behavior deviation score: {deviation.get('score', 0)}/100 ({deviation.get('level', 'LOW')})")
+    reasons = list(deviation.get("reasons", []) or [])
+    if reasons:
+        lines.append("- Traffic pattern flags:")
+        for reason in reasons[:8]:
+            lines.append(f"  • {reason}")
+    else:
+        lines.append("- Traffic pattern flags: none notable")
     lines.append("")
 
     dom_bytes = dominant_app.get("by_bytes", {}) or {}
@@ -179,6 +198,9 @@ def build_pcap_context(
     summary: PcapSummary,
     project_name: str = "",
     limit: int = 12,
+    *,
+    period_label: str = "",
+    period_mode: str = "day",
 ) -> str:
     investigator = build_investigator_view(summary)
     artifact_counts: dict[str, int] = {}
@@ -186,10 +208,16 @@ def build_pcap_context(
         category = str(artifact.get("category") or "Other")
         artifact_counts[category] = artifact_counts.get(category, 0) + 1
 
+    mode = str(period_mode or "day").strip().casefold()
+    month_aggregate = mode.startswith("month")
+
     lines: list[str] = []
     lines.append(f"Project: {project_name or '(none)'}")
     lines.append(f"PCAP file: {summary.file_name}")
     lines.append(f"Source path: {summary.file_path}")
+    if period_label:
+        scope = "month aggregate" if month_aggregate else "single day"
+        lines.append(f"Loaded period: {period_label} ({scope})")
     lines.append("Goal: explain what is visible in this packet capture for an investigator.")
     lines.append("")
     lines.append("Capture facts:")
@@ -300,6 +328,7 @@ def build_activity_profile_context(
     lines: list[str] = []
     lines.append(f"Project: {project_name or '(none)'}")
     lines.append("Goal: explain the case activity profile built from saved ViaNyquist project evidence.")
+    lines.append("Scope: project-wide saved evidence, not filtered by the Explore/PCAP period selector.")
     lines.append("")
 
     lines.append("Case snapshot:")
@@ -372,11 +401,6 @@ def build_activity_profile_context(
         for line in behavior.get("routine_lines") or []:
             lines.append(f"- {line}")
         lines.append("")
-
-    lines.append("Deterministic next-review guidance:")
-    for line in profile.get("recommendation_lines") or []:
-        lines.append(str(line))
-    lines.append("")
 
     lines.append("Recent project timeline:")
     timeline = profile.get("timeline_lines") or []

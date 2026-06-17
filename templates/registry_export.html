@@ -216,6 +216,22 @@ h1{
     gap:18px;
 }
 
+.period-context{
+    margin:0 0 16px;
+    color:var(--muted);
+    font-size:14px;
+}
+
+.block-wide{
+    grid-column:1 / -1;
+}
+
+.muted-note{
+    margin:0 0 8px;
+    color:var(--muted);
+    font-size:12px;
+}
+
 .block{
     background:var(--panel2);
     border:1px solid var(--line);
@@ -573,21 +589,14 @@ td.num,th.num{
 <section class="panel">
 <h2>{{ANALYST_SUMMARY_LABEL}}</h2>
 
-<div class="risk-wrap">
-<div class="risk-text">{{BEHAVIOR_DEVIATION_LABEL}}: {{DEVIATION_SCORE}} / 100 ({{DEVIATION_LEVEL}})</div>
-<div class="risk-bar">
-    <div class="risk-fill">
-        <span class="risk-fill-inner" data-score="{{DEVIATION_SCORE}}"></span>
-    </div>
-</div>
-</div>
+<div class="period-context">{{PERIOD_CONTEXT_LABEL}}: {{PERIOD_CONTEXT}}</div>
 
 <div class="two">
 
 <div class="block">
-<h3>{{DEVIATION_SIGNALS_LABEL}}</h3>
+<h3>{{TRAFFIC_PATTERN_FLAGS_LABEL}}</h3>
 <ul>
-{{DEVIATION_REASONS}}
+{{TRAFFIC_FLAGS}}
 </ul>
 </div>
 
@@ -595,6 +604,11 @@ td.num,th.num{
 <h3>{{OBSERVED_ACTIVITY_LABEL}}</h3>
 <div>{{COVERAGE}}</div>
 <div style="margin-top:8px;">{{OUTBOUND_SHARE_LABEL}}: {{OUTBOUND_SHARE}}</div>
+</div>
+
+<div class="block block-wide">
+<h3>{{DAILY_ACTIVITY_LABEL}}</h3>
+{{DAILY_ACTIVITY}}
 </div>
 
 <div class="block">
@@ -652,14 +666,6 @@ IN {{IN_BYTES}} ({{IN_PCT}})
 </div>
 
 </div>
-<script>
-document.querySelectorAll(".risk-fill-inner").forEach(function(el){
-    var score = parseFloat(el.getAttribute("data-score") || "0");
-    if (isNaN(score)) score = 0;
-    if (score < 0) score = 0;
-    if (score > 100) score = 100;
-    el.style.width = score + "%";
-});
-</script>
+
 </body>
 </html>

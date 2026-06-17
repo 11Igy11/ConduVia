@@ -1,8 +1,10 @@
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QFrame, QTableView, QHeaderView, QHBoxLayout, QComboBox, QPushButton, QDialog, QDialogButtonBox, QListWidget, QListWidgetItem, QMessageBox, QFileDialog
-from PySide6.QtGui import QFont
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QFrame, QTableView, QHeaderView, QHBoxLayout, QComboBox, QPushButton, QDialog, QDialogButtonBox, QListWidget, QListWidgetItem, QMessageBox, QFileDialog, QInputDialog, QMenu
+from ui.font_utils import label_font
+from ui.buttons import make_action_button
 from PySide6.QtCore import Qt, QAbstractTableModel, QModelIndex
 from core.formatters import (
     format_duration_compact_ms,
+    format_export_cell,
     format_flow_date,
     format_flow_datetime,
     format_flow_time,
@@ -10,7 +12,7 @@ from core.formatters import (
 )
 from core.protocols import format_ip_proto
 from core.exporters.listing_exporter import export_listing_csv, export_listing_excel, export_listing_html
-from core.db import get_app_settings, get_project
+from core.db import get_app_settings, get_project, get_app_setting, set_app_setting
 from core.parser import extract_dataset_meta
 from core.timeutils import parse_timestamp
 from core.workspace import workspace_export_path
@@ -402,6 +404,11 @@ class ColumnPickerDialog(QDialog):
 
         return key.replace("_", " ").title()
 
+
+LISTING_VIEW_PRESETS_KEY = "listing_view_presets"
+LISTING_VIEW_MODES = ("Default", "All fields", "Custom")
+
+
 class ListingPage(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -417,11 +424,7 @@ class ListingPage(QWidget):
 
         # ---------- Header ----------
         self.lbl_title = QLabel("Listing")
-        font = QFont()
-        font.setPointSize(20)
-        if font.pointSize() <= 0:
-            font.setPixelSize(20)
-        font.setBold(True)
+        font = label_font(point_size=20, bold=True)
         self.lbl_title.setFont(font)
 
         self.lbl_dataset = QLabel("Loaded JSON summary")
@@ -449,21 +452,30 @@ class ListingPage(QWidget):
 
         self.lbl_view_mode = QLabel("View:")
         self.cmb_view_mode = QComboBox()
-        self.cmb_view_mode.addItems(["Default", "All fields", "Custom"])
-        self.cmb_view_mode.currentTextChanged.connect(self._on_view_mode_changed)
+        self.cmb_view_mode.setMinimumWidth(160)
+        self.cmb_view_mode.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContents)
+        self.cmb_view_mode.setMinimumContentsLength(18)
+        self.cmb_view_mode.currentIndexChanged.connect(self._on_view_mode_changed)
 
-        self.btn_customize_view = QPushButton("Customize")
+        self.btn_customize_view = make_action_button("Customize")
         self.btn_customize_view.clicked.connect(self._open_customize_dialog)
         self.btn_customize_view.hide()
 
-        self.btn_export = QPushButton("Export")
+        self.btn_presets = make_action_button("Presets ▾")
+        self.btn_presets.clicked.connect(self._open_presets_menu)
+        self.btn_presets.hide()
+
+        self.btn_export = make_action_button("Export")
         self.btn_export.clicked.connect(self._open_export_dialog)
 
         self.view_bar.addWidget(self.lbl_view_mode)
         self.view_bar.addWidget(self.cmb_view_mode)
         self.view_bar.addWidget(self.btn_customize_view)
+        self.view_bar.addWidget(self.btn_presets)
         self.view_bar.addWidget(self.btn_export)
         self.view_bar.addStretch()
+
+        self._reload_view_mode_combo()
 
         layout.addLayout(self.view_bar)
         layout.addWidget(self.card)
@@ -522,24 +534,117 @@ class ListingPage(QWidget):
         self.model.set_data(self.flows)
 
         # reset na default kad se učita novi dataset
-        self.cmb_view_mode.setCurrentText("Default")
+        self._reload_view_mode_combo(select="Default")
         self.model.set_columns(self.DEFAULT_COLUMNS)
 
-    def _on_view_mode_changed(self, mode):
-        if not self.flows:
+    def _load_view_presets(self) -> list[dict]:
+        import json
+
+        raw = get_app_setting(LISTING_VIEW_PRESETS_KEY, "[]")
+        try:
+            data = json.loads(raw)
+        except Exception:
+            return []
+        presets: list[dict] = []
+        for item in data or []:
+            if not isinstance(item, dict):
+                continue
+            name = str(item.get("name") or "").strip()
+            columns = [str(col) for col in (item.get("columns") or []) if str(col).strip()]
+            if name and columns:
+                presets.append({"name": name, "columns": columns})
+        return presets
+
+    def _save_view_presets(self, presets: list[dict]) -> None:
+        import json
+
+        set_app_setting(LISTING_VIEW_PRESETS_KEY, json.dumps(presets))
+
+    def _reload_view_mode_combo(self, *, select: str = "") -> None:
+        self.cmb_view_mode.blockSignals(True)
+        previous = select or self.cmb_view_mode.currentText()
+        self.cmb_view_mode.clear()
+        for mode in LISTING_VIEW_MODES:
+            self.cmb_view_mode.addItem(mode, mode)
+        for preset in self._load_view_presets():
+            self.cmb_view_mode.addItem(str(preset["name"]), preset)
+        self.cmb_view_mode.adjustSize()
+        if previous:
+            index = self.cmb_view_mode.findText(previous)
+            if index < 0:
+                index = self.cmb_view_mode.findData({"name": previous, "columns": []})
+            if index >= 0:
+                self.cmb_view_mode.setCurrentIndex(index)
+        self.cmb_view_mode.blockSignals(False)
+        if self.flows and self.cmb_view_mode.currentIndex() >= 0:
+            self._on_view_mode_changed(self.cmb_view_mode.currentIndex())
+
+    def _current_named_preset(self) -> str:
+        index = self.cmb_view_mode.currentIndex()
+        if index < 0:
+            return ""
+        data = self.cmb_view_mode.itemData(index)
+        if isinstance(data, dict):
+            return str(data.get("name") or "").strip()
+        return ""
+
+    def _open_presets_menu(self) -> None:
+        menu = QMenu(self)
+        menu.addAction("Save as new preset…", self._save_current_view_preset)
+        preset_name = self._current_named_preset()
+        if preset_name:
+            menu.addAction(f"Update “{preset_name}”", lambda: self._update_named_preset(preset_name))
+            menu.addAction(f"Delete “{preset_name}”", lambda: self._delete_named_preset(preset_name))
+        menu.exec(self.btn_presets.mapToGlobal(self.btn_presets.rect().bottomLeft()))
+
+    def _update_named_preset(self, preset_name: str) -> None:
+        columns = [str(col) for col in (self.model._columns or []) if str(col).strip()]
+        if not columns:
+            QMessageBox.information(self, "Update preset", "Select at least one column first.")
+            return
+        presets = self._load_view_presets()
+        updated = False
+        for preset in presets:
+            if str(preset.get("name") or "") == preset_name:
+                preset["columns"] = columns
+                updated = True
+                break
+        if not updated:
+            return
+        self._save_view_presets(presets)
+        self._reload_view_mode_combo(select=preset_name)
+
+    def _delete_named_preset(self, preset_name: str) -> None:
+        presets = [preset for preset in self._load_view_presets() if str(preset.get("name") or "") != preset_name]
+        self._save_view_presets(presets)
+        self._reload_view_mode_combo(select="Custom")
+
+    def _on_view_mode_changed(self, index: int) -> None:
+        if index < 0 or not self.flows:
+            self.btn_customize_view.hide()
+            self.btn_presets.hide()
             return
 
+        data = self.cmb_view_mode.itemData(index)
+        if isinstance(data, dict) and data.get("columns"):
+            self.btn_customize_view.show()
+            self.btn_presets.show()
+            self.model.set_columns(list(data["columns"]))
+            return
+
+        mode = str(self.cmb_view_mode.itemText(index) or "")
         if mode == "Default":
             self.btn_customize_view.hide()
+            self.btn_presets.hide()
             self.model.set_columns(self.DEFAULT_COLUMNS)
-
         elif mode == "All fields":
             self.btn_customize_view.hide()
+            self.btn_presets.hide()
             all_cols = list(self.flows[0].keys())
             self.model.set_columns(all_cols)
-
         elif mode == "Custom":
             self.btn_customize_view.show()
+            self.btn_presets.show()
 
     def _get_all_available_columns(self):
         if not self.flows:
@@ -570,6 +675,35 @@ class ListingPage(QWidget):
             if not selected_columns:
                 return
             self.model.set_columns(selected_columns)
+            index = self.cmb_view_mode.findText("Custom")
+            if index >= 0:
+                self.cmb_view_mode.setCurrentIndex(index)
+
+    def _save_current_view_preset(self) -> None:
+        columns = [str(col) for col in (self.model._columns or []) if str(col).strip()]
+        if not columns:
+            QMessageBox.information(self, "Save preset", "Select at least one column first.")
+            return
+        name, ok = QInputDialog.getText(self, "Save view preset", "Preset name:")
+        if not ok:
+            return
+        preset_name = str(name or "").strip()
+        if not preset_name:
+            return
+        if preset_name in LISTING_VIEW_MODES:
+            QMessageBox.warning(self, "Save preset", "That name is reserved. Choose another name.")
+            return
+        presets = self._load_view_presets()
+        updated = False
+        for preset in presets:
+            if str(preset.get("name") or "") == preset_name:
+                preset["columns"] = columns
+                updated = True
+                break
+        if not updated:
+            presets.append({"name": preset_name, "columns": columns})
+        self._save_view_presets(presets)
+        self._reload_view_mode_combo(select=preset_name)
 
     def _open_export_dialog(self):
         if not self.flows or not self.model._columns:
@@ -647,11 +781,11 @@ class ListingPage(QWidget):
 
         for row_idx in range(export_model.rowCount()):
             row_values = []
+            flow = self.flows[row_idx] if row_idx < len(self.flows) else {}
 
-            for col_idx in range(export_model.columnCount()):
-                index = export_model.index(row_idx, col_idx)
-                value = export_model.data(index, Qt.DisplayRole)
-                row_values.append("" if value is None else str(value))
+            for col_idx, key in enumerate(columns):
+                value = flow.get(key, "")
+                row_values.append(format_export_cell(key, value, flow=flow))
 
             rows.append(row_values)
 

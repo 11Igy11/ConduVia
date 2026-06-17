@@ -31,6 +31,7 @@ class Project:
     subject_imei: str = ""
     subject_ip: str = ""
     subject_extra_identifiers: str = ""
+    case_metadata_json: str = ""
 
 @dataclass
 class PcapSource:
@@ -125,6 +126,7 @@ def init_db(db_path: Path = DEFAULT_DB_PATH) -> None:
             ("subject_imei", "TEXT NOT NULL DEFAULT ''"),
             ("subject_ip", "TEXT NOT NULL DEFAULT ''"),
             ("subject_extra_identifiers", "TEXT NOT NULL DEFAULT ''"),
+            ("case_metadata_json", "TEXT NOT NULL DEFAULT ''"),
         ])
 
         # --- Datasets (load history) ---
@@ -470,6 +472,22 @@ def update_project(
             ),
         )
 
+def update_project_case_metadata(
+    project_id: int,
+    case_metadata_json: str,
+    db_path: Path = DEFAULT_DB_PATH,
+) -> None:
+    with _connect(db_path) as con:
+        con.execute(
+            """
+            UPDATE projects
+            SET case_metadata_json = ?, updated_at = datetime('now')
+            WHERE id = ?;
+            """,
+            (case_metadata_json or "", project_id),
+        )
+
+
 def list_projects(db_path: Path = DEFAULT_DB_PATH) -> list[Project]:
     with _connect(db_path) as con:
         rows = con.execute(
@@ -490,7 +508,8 @@ def list_projects(db_path: Path = DEFAULT_DB_PATH) -> list[Project]:
                 subject_imsi,
                 subject_imei,
                 subject_ip,
-                subject_extra_identifiers
+                subject_extra_identifiers,
+                case_metadata_json
             FROM projects
             ORDER BY updated_at DESC;
             """
@@ -514,6 +533,7 @@ def list_projects(db_path: Path = DEFAULT_DB_PATH) -> list[Project]:
             subject_imei=str(r["subject_imei"] or ""),
             subject_ip=str(r["subject_ip"] or ""),
             subject_extra_identifiers=str(r["subject_extra_identifiers"] or ""),
+            case_metadata_json=str(r["case_metadata_json"] or ""),
         )
         for r in rows
     ]
@@ -538,7 +558,8 @@ def get_project(project_id: int, db_path: Path = DEFAULT_DB_PATH) -> Optional[Pr
                 subject_imsi,
                 subject_imei,
                 subject_ip,
-                subject_extra_identifiers
+                subject_extra_identifiers,
+                case_metadata_json
             FROM projects
             WHERE id = ?;
             """,
@@ -565,6 +586,7 @@ def get_project(project_id: int, db_path: Path = DEFAULT_DB_PATH) -> Optional[Pr
         subject_imei=str(r["subject_imei"] or ""),
         subject_ip=str(r["subject_ip"] or ""),
         subject_extra_identifiers=str(r["subject_extra_identifiers"] or ""),
+        case_metadata_json=str(r["case_metadata_json"] or ""),
     )
 
 def touch_project(project_id: int, db_path: Path = DEFAULT_DB_PATH) -> None:
@@ -580,6 +602,12 @@ def set_project_target(
     target_type: str = "",
     db_path: Path = DEFAULT_DB_PATH,
 ) -> None:
+    from core.osint.imsi import format_intercept_imsi, is_imsi_target_type
+
+    ident = (target_identifier or "").strip()
+    kind = (target_type or "").strip()
+    if ident and is_imsi_target_type(kind):
+        ident = format_intercept_imsi(ident)
     with _connect(db_path) as con:
         con.execute(
             """
@@ -591,8 +619,8 @@ def set_project_target(
             WHERE id = ?;
             """,
             (
-                (target_identifier or "").strip(),
-                (target_type or "").strip(),
+                ident,
+                kind,
                 project_id,
             ),
         )
@@ -610,6 +638,11 @@ def set_project_subject(
     extra_identifiers: str = "",
     db_path: Path = DEFAULT_DB_PATH,
 ) -> None:
+    from core.osint.imsi import format_intercept_imsi
+
+    imsi_value = (imsi or "").strip()
+    if imsi_value:
+        imsi_value = format_intercept_imsi(imsi_value)
     with _connect(db_path) as con:
         con.execute(
             """
@@ -631,7 +664,7 @@ def set_project_subject(
                 (last_name or "").strip(),
                 (oib or "").strip(),
                 (msisdn or "").strip(),
-                (imsi or "").strip(),
+                imsi_value,
                 (imei or "").strip(),
                 (ip or "").strip(),
                 (extra_identifiers or "").strip(),
@@ -683,6 +716,23 @@ def list_activity(project_id: int, limit: int = 200, db_path: Path = DEFAULT_DB_
     return rows
 
 
+def list_all_activity(limit: int = 500, db_path: Path = DEFAULT_DB_PATH) -> list[sqlite3.Row]:
+    with _connect(db_path) as con:
+        rows = con.execute(
+            """
+            SELECT
+                activity_log.*,
+                projects.name AS project_name
+            FROM activity_log
+            JOIN projects ON projects.id = activity_log.project_id
+            ORDER BY activity_log.created_at DESC, activity_log.id DESC
+            LIMIT ?;
+            """,
+            (limit,),
+        ).fetchall()
+    return rows
+
+
 # ---------------- Evidence ingest status ----------------
 def upsert_ingest_items(
     project_id: int,
@@ -707,41 +757,46 @@ def upsert_ingest_items(
     if not rows:
         return
 
+    insert_sql = """
+        INSERT INTO ingest_items (
+            project_id, source_root, file_path, file_name, file_type,
+            file_size, observed_date, status, updated_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', strftime('%Y-%m-%d %H:%M:%f', 'now'))
+        ON CONFLICT(project_id, file_path) DO UPDATE SET
+            source_root = excluded.source_root,
+            file_name = excluded.file_name,
+            file_type = excluded.file_type,
+            file_size = excluded.file_size,
+            observed_date = excluded.observed_date,
+            status = CASE
+                WHEN ingest_items.status = 'done' THEN ingest_items.status
+                ELSE 'pending'
+            END,
+            message = CASE
+                WHEN ingest_items.status = 'done' THEN ingest_items.message
+                ELSE ''
+            END,
+            updated_at = strftime('%Y-%m-%d %H:%M:%f', 'now');
+    """
+    chunk_size = 500
     with _connect(db_path) as con:
-        for row in rows:
-            con.execute(
-                """
-                INSERT INTO ingest_items (
-                    project_id, source_root, file_path, file_name, file_type,
-                    file_size, observed_date, status, updated_at
+        for start in range(0, len(rows), chunk_size):
+            chunk = rows[start:start + chunk_size]
+            for row in chunk:
+                con.execute(
+                    insert_sql,
+                    (
+                        project_id,
+                        row["source_root"],
+                        row["file_path"],
+                        row["file_name"],
+                        row["file_type"],
+                        row["file_size"],
+                        row["observed_date"],
+                    ),
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', strftime('%Y-%m-%d %H:%M:%f', 'now'))
-                ON CONFLICT(project_id, file_path) DO UPDATE SET
-                    source_root = excluded.source_root,
-                    file_name = excluded.file_name,
-                    file_type = excluded.file_type,
-                    file_size = excluded.file_size,
-                    observed_date = excluded.observed_date,
-                    status = CASE
-                        WHEN ingest_items.status = 'done' THEN ingest_items.status
-                        ELSE 'pending'
-                    END,
-                    message = CASE
-                        WHEN ingest_items.status = 'done' THEN ingest_items.message
-                        ELSE ''
-                    END,
-                    updated_at = strftime('%Y-%m-%d %H:%M:%f', 'now');
-                """,
-                (
-                    project_id,
-                    row["source_root"],
-                    row["file_path"],
-                    row["file_name"],
-                    row["file_type"],
-                    row["file_size"],
-                    row["observed_date"],
-                ),
-            )
+            con.commit()
 
 
 def mark_ingest_item(
@@ -842,17 +897,20 @@ def ingest_status_map(
     if not paths:
         return {}
     out: dict[str, str] = {}
+    chunk_size = 400
     with _connect(db_path) as con:
-        for path in paths:
-            row = con.execute(
-                """
+        for start in range(0, len(paths), chunk_size):
+            chunk = paths[start:start + chunk_size]
+            placeholders = ", ".join("?" for _ in chunk)
+            rows = con.execute(
+                f"""
                 SELECT file_path, status
                 FROM ingest_items
-                WHERE project_id = ? AND file_path = ?;
+                WHERE project_id = ? AND file_path IN ({placeholders});
                 """,
-                (project_id, path),
-            ).fetchone()
-            if row:
+                (project_id, *chunk),
+            ).fetchall()
+            for row in rows:
                 out[str(row["file_path"])] = str(row["status"] or "")
     return out
 

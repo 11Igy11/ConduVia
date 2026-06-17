@@ -8,13 +8,16 @@ if TYPE_CHECKING:
     from ui.app import App
 
 
+from ui.ui_metrics import NAV_BUTTON_HEIGHT
+
+
 def build_sidebar(app: App) -> QFrame:
     sidebar_frame = QFrame()
     sidebar_frame.setObjectName("SidebarFrame")
-    sidebar_frame.setFixedWidth(220)
+    sidebar_frame.setFixedWidth(110)
     sidebar = QVBoxLayout(sidebar_frame)
     sidebar.setContentsMargins(0, 0, 12, 0)
-    sidebar.setSpacing(8)
+    sidebar.setSpacing(6)
 
     app.btn_nav_projects = QPushButton("Projects")
     app.btn_nav_json = QPushButton("JSON")
@@ -40,7 +43,7 @@ def build_sidebar(app: App) -> QFrame:
         app.btn_nav_help,
     ):
         b.setObjectName("NavButton")
-        b.setFixedHeight(40)
+        b.setFixedHeight(NAV_BUTTON_HEIGHT)
     app.btn_global_refresh.setToolTip(
         "Refresh projects, notes, findings, profile, PCAP view and settings."
     )

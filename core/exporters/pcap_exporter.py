@@ -8,7 +8,7 @@ from typing import Any
 from core.db import Project
 from core.exporters.case_context import build_case_context, context_cards_html
 from core.exporters.template_utils import load_template, render_template
-from core.formatters import format_flow_datetime, human_bytes
+from core.formatters import format_export_datetime, format_flow_datetime, human_bytes
 from core.output_language import normalize_output_language
 from core.pcap_analyzer import PcapSummary, build_investigator_view
 
@@ -47,8 +47,8 @@ def export_pcap_summary_html(
             "host": flow.get("requested_server_name"),
             "bytes": human_bytes(flow.get("bidirectional_bytes"), precision=2),
             "packets": flow.get("bidirectional_packets"),
-            "first": flow.get("bidirectional_first_seen_ms"),
-            "last": flow.get("bidirectional_last_seen_ms"),
+            "first": format_export_datetime(flow.get("bidirectional_first_seen_ms")),
+            "last": format_export_datetime(flow.get("bidirectional_last_seen_ms")),
             "visible": flow.get("pcap_payload_preview"),
         })
 
@@ -59,6 +59,7 @@ def export_pcap_summary_html(
             **row,
             "bytes": human_bytes(row.get("bytes"), precision=2),
             "duration": _duration_compact(row.get("duration_ms")),
+            "first_seen": format_export_datetime(row.get("first_seen")),
         }
         for row in (summary.communication_rows or [])
     ]

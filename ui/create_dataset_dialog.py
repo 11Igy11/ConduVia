@@ -15,8 +15,7 @@ from PySide6.QtWidgets import (
 )
 
 from core.leaks.db import create_dataset, dataset_layout, update_dataset
-from core.leaks.schema import DEDICATED_FIELDS
-from ui.leaks_import_dialog import _normalize_field_name
+from ui.buttons import make_action_button
 
 
 _ROW_H = 40
@@ -97,17 +96,12 @@ class CreateDatasetDialog(QDialog):
 
         buttons = QHBoxLayout()
         buttons.setSpacing(6)
-        self.btn_add_col = QPushButton("+ Add column")
-        self.btn_add_col.setObjectName("CompactButton")
-        self.btn_add_col.setFixedHeight(28)
+        self.btn_add_col = make_action_button("+ Add column")
         self.btn_add_col.clicked.connect(lambda: self._add_column(""))
         buttons.addWidget(self.btn_add_col)
         buttons.addStretch(1)
-        self.btn_create = QPushButton("Save" if self._editing else "Create")
-        self.btn_cancel = QPushButton("Cancel")
-        for b in (self.btn_create, self.btn_cancel):
-            b.setObjectName("CompactButton")
-            b.setFixedHeight(28)
+        self.btn_create = make_action_button("Save" if self._editing else "Create")
+        self.btn_cancel = make_action_button("Cancel")
         self.btn_create.clicked.connect(self._save)
         self.btn_cancel.clicked.connect(self.reject)
         buttons.addWidget(self.btn_create)
