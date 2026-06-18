@@ -33,12 +33,6 @@ from ui.registry_widgets import (
 from core.analysis_limits import EMBEDDED_SUMMARY_TOP_N
 
 # ----------------- helpers -----------------
-def _human_bytes(n: int | float | None) -> str:
-    return human_bytes(n, precision=1)
-
-def _safe_int(x: Any) -> int:
-    return safe_int(x)
-
 def _esc(x: Any) -> str:
     return html.escape("" if x is None else str(x))
 
@@ -854,7 +848,7 @@ class RegistryPage(QWidget):
 
     def _render_stats(self):
         s = self._summary or {}
-        total_flows = _safe_int(s.get("total_flows", len(self._flows)))
+        total_flows = safe_int(s.get("total_flows", len(self._flows)))
 
         uniq_src = len({str(f.get("src_ip") or "") for f in self._flows if f.get("src_ip")})
         uniq_dst = len({str(f.get("dst_ip") or "") for f in self._flows if f.get("dst_ip")})
@@ -862,13 +856,13 @@ class RegistryPage(QWidget):
 
         total_bytes = s.get("total_bytes", None)
         if total_bytes is None:
-            total_bytes = sum(_safe_int(f.get("bidirectional_bytes")) for f in self._flows)
+            total_bytes = sum(safe_int(f.get("bidirectional_bytes")) for f in self._flows)
 
         self._set_stat(self.card_total, str(total_flows))
         self._set_stat(self.card_usrc, str(uniq_src))
         self._set_stat(self.card_udst, str(uniq_dst))
         self._set_stat(self.card_uapps, str(uniq_apps))
-        self._set_stat(self.card_bytes, _human_bytes(total_bytes))    
+        self._set_stat(self.card_bytes, human_bytes(total_bytes))    
 
     def _render_analyst(self):
         a = self._analyst or {}
@@ -922,8 +916,8 @@ class RegistryPage(QWidget):
         out_share = float(bytes_s.get("outbound_share_total_pct", 0.0) or 0.0)
 
         dirb = bytes_s.get("direction_bar", {}) or {}
-        out_b = _human_bytes(dirb.get("outbound_bytes", 0))
-        in_b = _human_bytes(dirb.get("inbound_bytes", 0))
+        out_b = human_bytes(dirb.get("outbound_bytes", 0))
+        in_b = human_bytes(dirb.get("inbound_bytes", 0))
         out_p = float(dirb.get("outbound_bytes_pct", 0.0) or 0.0)
         in_p = float(dirb.get("inbound_bytes_pct", 0.0) or 0.0)
 
