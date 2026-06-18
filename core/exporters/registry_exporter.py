@@ -21,14 +21,6 @@ from core.output_language import normalize_output_language
 from core.protocols import format_ip_proto
 
 
-def _human_bytes(n: int | float | None) -> str:
-    return human_bytes(n, precision=1)
-
-
-def _safe_int(x: Any) -> int:
-    return safe_int(x)
-
-
 def _esc(x: Any) -> str:
     return html.escape("" if x is None else str(x))
 
@@ -78,11 +70,11 @@ def _mini_hist_24_html(vals: list[int], *, height_px: int = 42) -> str:
     if not isinstance(vals, list) or len(vals) != 24:
         vals = [0] * 24
 
-    mx = max([_safe_int(v) for v in vals] or [0])
+    mx = max([safe_int(v) for v in vals] or [0])
     bars = []
 
     for h, raw in enumerate(vals):
-        v = _safe_int(raw)
+        v = safe_int(raw)
         pct = 0 if mx <= 0 else max(3, int((v / mx) * 100))
 
         bars.append(
@@ -281,14 +273,14 @@ def export_registry_html(
 
     case_context = build_case_context(project, project_name=project_name, dataset_meta=meta)
 
-    total_flows = _safe_int(summary.get("total_flows", len(flows)))
+    total_flows = safe_int(summary.get("total_flows", len(flows)))
     uniq_src = len({str(f.get("src_ip") or "") for f in flows if f.get("src_ip")})
     uniq_dst = len({str(f.get("dst_ip") or "") for f in flows if f.get("dst_ip")})
     uniq_apps = len({str(f.get("application_name") or "") for f in flows if f.get("application_name")})
 
     total_bytes = summary.get("total_bytes")
     if total_bytes is None:
-        total_bytes = sum(_safe_int(f.get("bidirectional_bytes")) for f in flows)
+        total_bytes = sum(safe_int(f.get("bidirectional_bytes")) for f in flows)
 
     deviation = analyst.get("behavior_deviation", {}) or {}
     reasons = list(deviation.get("reasons", []) or [])
@@ -302,8 +294,8 @@ def export_registry_html(
     out_share = float(bytes_s.get("outbound_share_total_pct", 0.0) or 0.0)
 
     dirb = bytes_s.get("direction_bar", {}) or {}
-    out_b = _human_bytes(dirb.get("outbound_bytes", 0))
-    in_b = _human_bytes(dirb.get("inbound_bytes", 0))
+    out_b = human_bytes(dirb.get("outbound_bytes", 0))
+    in_b = human_bytes(dirb.get("inbound_bytes", 0))
     out_p = float(dirb.get("outbound_bytes_pct", 0.0) or 0.0)
     in_p = float(dirb.get("inbound_bytes_pct", 0.0) or 0.0)
 
@@ -389,7 +381,7 @@ def export_registry_html(
         .replace("{{UNIQ_SRC}}", _esc(uniq_src))
         .replace("{{UNIQ_DST}}", _esc(uniq_dst))
         .replace("{{UNIQ_APPS}}", _esc(uniq_apps))
-        .replace("{{TOTAL_BYTES}}", _esc(_human_bytes(total_bytes)))
+        .replace("{{TOTAL_BYTES}}", _esc(human_bytes(total_bytes)))
         .replace("{{FILES_COUNT}}", _esc(len(files)))
         .replace("{{COVERAGE}}", _esc(" | ".join(activity_parts)))
         .replace("{{OUTBOUND_SHARE}}", f"{out_share:.1f}%")
