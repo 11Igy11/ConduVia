@@ -15,7 +15,9 @@ from PySide6.QtWidgets import (
 )
 
 from core.leaks.db import create_dataset, dataset_layout, update_dataset
+from core.leaks.schema import DEDICATED_FIELDS
 from ui.buttons import make_action_button
+from ui.leaks_import_dialog import _normalize_field_name
 
 
 _ROW_H = 40

@@ -9,7 +9,6 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QListWidget,
     QListWidgetItem,
-    QPushButton,
     QScrollArea,
     QSizePolicy,
     QVBoxLayout,
@@ -21,6 +20,7 @@ from core.ai.assistant_service import AISettings
 from core.db import get_app_settings, set_app_setting
 from core.osint.settings import OsintSettings
 from core.output_language import normalize_output_language
+from ui.buttons import make_action_button, make_dialog_button
 
 SETTINGS_LABEL_WIDTH = 170
 SETTINGS_FIELD_WIDTH = 360
@@ -172,7 +172,7 @@ class SettingsPage(QWidget):
         ):
             osint_layout.addLayout(_settings_form_row(label, field))
 
-        self.btn_import_tac = QPushButton("Import TAC CSV…")
+        self.btn_import_tac = make_action_button("Import TAC CSV…")
         self.btn_import_tac.setFixedHeight(SETTINGS_FIELD_HEIGHT)
         self.lbl_tac_status = QLabel("")
         self.lbl_tac_status.setObjectName("ProfileSubtitle")
@@ -206,9 +206,9 @@ class SettingsPage(QWidget):
         leaks_layout.addWidget(self.list_leak_datasets)
 
         leaks_buttons = QHBoxLayout()
-        self.btn_import_leak = QPushButton("Import dataset…")
-        self.btn_delete_leak = QPushButton("Delete selected")
-        self.btn_open_leaks_viewer = QPushButton("Open Repository")
+        self.btn_import_leak = make_action_button("Import dataset…")
+        self.btn_delete_leak = make_action_button("Delete selected", destructive=True, toolbar=True)
+        self.btn_open_leaks_viewer = make_action_button("Open Repository")
         leaks_buttons.addWidget(self.btn_import_leak)
         leaks_buttons.addWidget(self.btn_delete_leak)
         leaks_buttons.addStretch(1)
@@ -229,10 +229,8 @@ class SettingsPage(QWidget):
         button_row = QHBoxLayout()
         button_row.setContentsMargins(22, 0, 22, 0)
         button_row.addStretch(1)
-        self.btn_save_ai = QPushButton("Save settings")
-        self.btn_reload = QPushButton("Reload settings")
-        self.btn_save_ai.setFixedWidth(150)
-        self.btn_reload.setFixedWidth(150)
+        self.btn_save_ai = make_dialog_button("Save settings")
+        self.btn_reload = make_dialog_button("Reload settings")
         button_row.addWidget(self.btn_save_ai)
         button_row.addWidget(self.btn_reload)
         root.addLayout(button_row)

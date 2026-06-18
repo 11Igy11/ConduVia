@@ -19,8 +19,11 @@ from PySide6.QtWidgets import (
     QTableWidgetItem,
     QVBoxLayout,
     QWidget,
+    QSizePolicy,
 )
 
+from ui.buttons import button_min_width_for_text, make_action_button
+from ui.dialogs import confirm_dialog
 from core.leaks.db import (
     dataset_layout,
     delete_dataset,
@@ -63,6 +66,19 @@ _DEFAULT_COLUMNS = [("dataset_name", "Dataset"), ("phone", "Phone"),
                     ("first_name", "First name"), ("last_name", "Last name")]
 
 
+def _repo_toolbar_button(text: str, *, delete: bool = False, tooltip: str = "") -> QPushButton:
+    """Compact Repository toolbar buttons that keep a fixed width (no overlap)."""
+    button = make_action_button(
+        text,
+        object_name="RepositoryDangerButton" if delete else "RepositoryActionButton",
+        toolbar=True,
+        tight=True,
+        tooltip=tooltip,
+    )
+    button.setFixedWidth(button_min_width_for_text(button, padding=16))
+    return button
+
+
 class LeaksViewerDialog(QDialog):
     def __init__(self, app=None):
         super().__init__(app)
@@ -93,25 +109,22 @@ class LeaksViewerDialog(QDialog):
         self.list_datasets.itemDoubleClicked.connect(lambda *_: self._on_dataset_changed())
         left.addWidget(self.list_datasets, 1)
 
-        ds_buttons = QHBoxLayout()
+        ds_button_row = QWidget()
+        ds_button_row.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        ds_buttons = QHBoxLayout(ds_button_row)
+        ds_buttons.setContentsMargins(0, 0, 0, 0)
         ds_buttons.setSpacing(6)
-        self.btn_new_dataset = QPushButton("New")
-        self.btn_edit_dataset = QPushButton("Edit")
-        self.btn_delete_dataset = QPushButton("Delete")
-        for b in (self.btn_new_dataset, self.btn_edit_dataset, self.btn_delete_dataset):
-            b.setObjectName("CompactButton")
-            b.setCursor(Qt.PointingHandCursor)
-        self.btn_delete_dataset.setStyleSheet(
-            "QPushButton { color: #fca5a5; border: 1px solid #b91c1c; }"
-            "QPushButton:hover { background: #7f1d1d; color: #ffffff; }"
-        )
+        self.btn_new_dataset = _repo_toolbar_button("New", tooltip="New dataset")
+        self.btn_edit_dataset = _repo_toolbar_button("Edit", tooltip="Edit dataset")
+        self.btn_delete_dataset = _repo_toolbar_button("Delete", delete=True, tooltip="Delete dataset")
         self.btn_new_dataset.clicked.connect(self._new_dataset)
         self.btn_edit_dataset.clicked.connect(self._edit_dataset)
         self.btn_delete_dataset.clicked.connect(self._delete_dataset)
         ds_buttons.addWidget(self.btn_new_dataset)
         ds_buttons.addWidget(self.btn_edit_dataset)
         ds_buttons.addWidget(self.btn_delete_dataset)
-        left.addLayout(ds_buttons)
+        ds_buttons.setSizeConstraint(QHBoxLayout.SizeConstraint.SetFixedSize)
+        left.addWidget(ds_button_row)
 
         left_box = QWidget()
         left_box.setLayout(left)
@@ -126,8 +139,8 @@ class LeaksViewerDialog(QDialog):
         search_row.setSpacing(6)
         self.edit_search = QLineEdit()
         self.edit_search.setPlaceholderText("Search all parameters (phone, email, OIB, name, city, employer…)")
-        self.btn_search = QPushButton("Search")
-        self.btn_clear = QPushButton("Clear")
+        self.btn_search = make_action_button("Search", toolbar=True)
+        self.btn_clear = make_action_button("Clear", toolbar=True)
         search_row.addWidget(self.edit_search, 1)
         search_row.addWidget(self.btn_search)
         search_row.addWidget(self.btn_clear)
@@ -152,41 +165,33 @@ class LeaksViewerDialog(QDialog):
         # Pagination + actions
         bottom = QHBoxLayout()
         bottom.setSpacing(6)
-        self.btn_prev = QPushButton("◀ Previous")
-        self.btn_next = QPushButton("Next ▶")
+        bottom.setAlignment(Qt.AlignVCenter)
+        self.btn_prev = make_action_button("◀ Previous", toolbar=True)
+        self.btn_next = make_action_button("Next ▶", toolbar=True)
         self.lbl_page = QLabel("0 results")
-        self.btn_new = QPushButton("New record")
-        self.btn_edit = QPushButton("Edit")
-        self.btn_delete = QPushButton("Delete")
-        self.btn_add_notes = QPushButton("Add to Notes")
+        self.lbl_page.setAlignment(Qt.AlignVCenter | Qt.AlignLeft)
+        self.lbl_page.setMinimumWidth(0)
+        self.lbl_page.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        self.btn_new = _repo_toolbar_button("New", tooltip="New record")
+        self.btn_edit = _repo_toolbar_button("Edit", tooltip="Edit selected record")
+        self.btn_delete = _repo_toolbar_button("Delete", delete=True, tooltip="Delete selected record")
+        self.btn_add_notes = _repo_toolbar_button("Notes", tooltip="Add to Notes")
         bottom.addWidget(self.btn_prev)
         bottom.addWidget(self.btn_next)
-        bottom.addWidget(self.lbl_page)
-        bottom.addStretch(1)
-        bottom.addWidget(self.btn_new)
-        bottom.addWidget(self.btn_edit)
-        bottom.addWidget(self.btn_delete)
-        bottom.addWidget(self.btn_add_notes)
+        bottom.addWidget(self.lbl_page, 1)
+        action_row = QWidget()
+        action_row.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        action_layout = QHBoxLayout(action_row)
+        action_layout.setContentsMargins(0, 0, 0, 0)
+        action_layout.setSpacing(6)
+        action_layout.setAlignment(Qt.AlignVCenter)
+        action_layout.addWidget(self.btn_new)
+        action_layout.addWidget(self.btn_edit)
+        action_layout.addWidget(self.btn_delete)
+        action_layout.addWidget(self.btn_add_notes)
+        action_layout.setSizeConstraint(QHBoxLayout.SizeConstraint.SetFixedSize)
+        bottom.addWidget(action_row)
         right.addLayout(bottom)
-
-        # Use the same compact button style as the rest of the app.
-        for button in (
-            self.btn_search,
-            self.btn_clear,
-            self.btn_prev,
-            self.btn_next,
-            self.btn_new,
-            self.btn_edit,
-            self.btn_delete,
-            self.btn_add_notes,
-        ):
-            button.setObjectName("CompactButton")
-            button.setCursor(Qt.PointingHandCursor)
-        # Keep Delete compact but tinted red (DangerButton would force a large size).
-        self.btn_delete.setStyleSheet(
-            "QPushButton { color: #fca5a5; border: 1px solid #b91c1c; }"
-            "QPushButton:hover { background: #7f1d1d; color: #ffffff; }"
-        )
 
         # Footer signature (bottom-right)
         footer = QHBoxLayout()
@@ -440,18 +445,16 @@ class LeaksViewerDialog(QDialog):
         if dataset_id is None:
             self.lbl_page.setText("Select a specific dataset (not “All datasets”) to delete.")
             return
-        from PySide6.QtWidgets import QMessageBox
-
         item = self.list_datasets.currentItem()
         label = item.text() if item is not None else "this dataset"
-        confirm = QMessageBox.question(
+        if not confirm_dialog(
             self,
             "Delete dataset",
             f"Delete '{label}' and all of its records permanently?",
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No,
-        )
-        if confirm != QMessageBox.Yes:
+            ok_text="Delete",
+            destructive=True,
+            width=460,
+        ):
             return
         try:
             delete_dataset(int(dataset_id))
@@ -484,16 +487,14 @@ class LeaksViewerDialog(QDialog):
         if not row or not row.get("id"):
             self.lbl_page.setText("Select a row to delete.")
             return
-        from PySide6.QtWidgets import QMessageBox
-
-        confirm = QMessageBox.question(
+        if not confirm_dialog(
             self,
             "Delete record",
             "Delete the selected record permanently?",
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No,
-        )
-        if confirm != QMessageBox.Yes:
+            ok_text="Delete",
+            destructive=True,
+            width=420,
+        ):
             return
         try:
             delete_record(int(row["id"]))

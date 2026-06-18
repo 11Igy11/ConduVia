@@ -26,11 +26,18 @@ def style_action_button(
     button: QPushButton,
     *,
     object_name: str = "CompactButton",
+    toolbar: bool = False,
+    tight: bool = False,
 ) -> QPushButton:
     button.setObjectName(object_name)
     button.setFixedHeight(ACTION_BUTTON_HEIGHT)
     button.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
-    ensure_button_fits_text(button, padding=24, min_width=72)
+    if tight:
+        button.setMinimumWidth(button_min_width_for_text(button, padding=10))
+    else:
+        padding = 16 if toolbar else 24
+        min_width = 52 if toolbar else 72
+        ensure_button_fits_text(button, padding=padding, min_width=min_width)
     return button
 
 
@@ -38,11 +45,16 @@ def make_action_button(
     text: str,
     *,
     object_name: str = "CompactButton",
+    destructive: bool = False,
+    toolbar: bool = False,
+    tight: bool = False,
     tooltip: str = "",
     enabled: bool = True,
 ) -> QPushButton:
+    if destructive:
+        object_name = "CompactDangerButton"
     button = QPushButton(text)
-    style_action_button(button, object_name=object_name)
+    style_action_button(button, object_name=object_name, toolbar=toolbar, tight=tight)
     if tooltip:
         button.setToolTip(tooltip)
     button.setEnabled(enabled)
