@@ -321,6 +321,39 @@ QPushButton#CompactDangerButton:disabled {
     font-weight: 400;
 }
 
+QPushButton#RepositoryActionButton {
+    padding: 4px 8px;
+    min-width: 0;
+    min-height: 0;
+    max-height: 28px;
+    margin: 0;
+    font-size: 12px;
+}
+
+QPushButton#RepositoryDangerButton {
+    padding: 4px 8px;
+    min-width: 0;
+    min-height: 0;
+    max-height: 28px;
+    margin: 0;
+    font-size: 12px;
+    color: #fca5a5;
+    border: 1px solid #b91c1c;
+    background: #1f2937;
+    font-weight: 600;
+}
+
+QPushButton#RepositoryDangerButton:hover {
+    background: #7f1d1d;
+    color: #ffffff;
+}
+
+QPushButton#RepositoryDangerButton:pressed {
+    background: #991b1b;
+    border: 1px solid #991b1b;
+    color: #ffffff;
+}
+
 QPushButton#DialogButton,
 QPushButton#DialogInlineButton {
     padding: 6px 14px;
@@ -1034,6 +1067,14 @@ QDialog QPushButton#CompactDangerButton {
     min-height: 28px;
     max-height: 28px;
     padding: 4px 10px;
+}
+
+QDialog QPushButton#RepositoryActionButton,
+QDialog QPushButton#RepositoryDangerButton {
+    min-width: 0;
+    min-height: 0;
+    max-height: 28px;
+    padding: 4px 8px;
 }
 
 QDialogButtonBox {

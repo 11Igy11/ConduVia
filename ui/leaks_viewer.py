@@ -14,13 +14,15 @@ from PySide6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QMenu,
+    QPushButton,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
     QWidget,
+    QSizePolicy,
 )
 
-from ui.buttons import make_action_button
+from ui.buttons import button_min_width_for_text, make_action_button
 from ui.dialogs import confirm_dialog
 from core.leaks.db import (
     dataset_layout,
@@ -64,6 +66,19 @@ _DEFAULT_COLUMNS = [("dataset_name", "Dataset"), ("phone", "Phone"),
                     ("first_name", "First name"), ("last_name", "Last name")]
 
 
+def _repo_toolbar_button(text: str, *, delete: bool = False, tooltip: str = "") -> QPushButton:
+    """Compact Repository toolbar buttons that keep a fixed width (no overlap)."""
+    button = make_action_button(
+        text,
+        object_name="RepositoryDangerButton" if delete else "RepositoryActionButton",
+        toolbar=True,
+        tight=True,
+        tooltip=tooltip,
+    )
+    button.setFixedWidth(button_min_width_for_text(button, padding=16))
+    return button
+
+
 class LeaksViewerDialog(QDialog):
     def __init__(self, app=None):
         super().__init__(app)
@@ -94,19 +109,22 @@ class LeaksViewerDialog(QDialog):
         self.list_datasets.itemDoubleClicked.connect(lambda *_: self._on_dataset_changed())
         left.addWidget(self.list_datasets, 1)
 
-        ds_buttons = QHBoxLayout()
+        ds_button_row = QWidget()
+        ds_button_row.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        ds_buttons = QHBoxLayout(ds_button_row)
+        ds_buttons.setContentsMargins(0, 0, 0, 0)
         ds_buttons.setSpacing(6)
-        ds_buttons.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-        self.btn_new_dataset = make_action_button("New", toolbar=True)
-        self.btn_edit_dataset = make_action_button("Edit", toolbar=True)
-        self.btn_delete_dataset = make_action_button("Delete", destructive=True, toolbar=True)
+        self.btn_new_dataset = _repo_toolbar_button("New", tooltip="New dataset")
+        self.btn_edit_dataset = _repo_toolbar_button("Edit", tooltip="Edit dataset")
+        self.btn_delete_dataset = _repo_toolbar_button("Delete", delete=True, tooltip="Delete dataset")
         self.btn_new_dataset.clicked.connect(self._new_dataset)
         self.btn_edit_dataset.clicked.connect(self._edit_dataset)
         self.btn_delete_dataset.clicked.connect(self._delete_dataset)
         ds_buttons.addWidget(self.btn_new_dataset)
         ds_buttons.addWidget(self.btn_edit_dataset)
         ds_buttons.addWidget(self.btn_delete_dataset)
-        left.addLayout(ds_buttons)
+        ds_buttons.setSizeConstraint(QHBoxLayout.SizeConstraint.SetFixedSize)
+        left.addWidget(ds_button_row)
 
         left_box = QWidget()
         left_box.setLayout(left)
@@ -152,15 +170,17 @@ class LeaksViewerDialog(QDialog):
         self.btn_next = make_action_button("Next ▶", toolbar=True)
         self.lbl_page = QLabel("0 results")
         self.lbl_page.setAlignment(Qt.AlignVCenter | Qt.AlignLeft)
-        self.btn_new = make_action_button("New record", toolbar=True)
-        self.btn_edit = make_action_button("Edit", toolbar=True)
-        self.btn_delete = make_action_button("Delete", destructive=True, toolbar=True)
-        self.btn_add_notes = make_action_button("Add to Notes", toolbar=True)
+        self.lbl_page.setMinimumWidth(0)
+        self.lbl_page.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        self.btn_new = _repo_toolbar_button("New", tooltip="New record")
+        self.btn_edit = _repo_toolbar_button("Edit", tooltip="Edit selected record")
+        self.btn_delete = _repo_toolbar_button("Delete", delete=True, tooltip="Delete selected record")
+        self.btn_add_notes = _repo_toolbar_button("Notes", tooltip="Add to Notes")
         bottom.addWidget(self.btn_prev)
         bottom.addWidget(self.btn_next)
-        bottom.addWidget(self.lbl_page)
-        bottom.addStretch(1)
+        bottom.addWidget(self.lbl_page, 1)
         action_row = QWidget()
+        action_row.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
         action_layout = QHBoxLayout(action_row)
         action_layout.setContentsMargins(0, 0, 0, 0)
         action_layout.setSpacing(6)
@@ -169,6 +189,7 @@ class LeaksViewerDialog(QDialog):
         action_layout.addWidget(self.btn_edit)
         action_layout.addWidget(self.btn_delete)
         action_layout.addWidget(self.btn_add_notes)
+        action_layout.setSizeConstraint(QHBoxLayout.SizeConstraint.SetFixedSize)
         bottom.addWidget(action_row)
         right.addLayout(bottom)
 
