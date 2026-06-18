@@ -57,7 +57,14 @@ from core.period_gaps import (
     normalize_period_day,
     summarize_partial_months,
 )
-from core.period_groups import is_range_period_key, month_key, period_group_label, rollup_day_groups
+from core.period_groups import is_range_period_key, month_key, period_group_label
+from core.period_selector import (
+    PERIOD_MODE_OPTIONS,
+    PeriodSelectorState,
+    build_period_combo_entries,
+    month_view_available,
+    rebuild_period_selector,
+)
 from core.pcap_analyzer import (
     PcapSummary,
     analyze_pcap,
@@ -420,9 +427,8 @@ class PcapPage(QWidget):
         self.cmb_pcap_period_mode.setMinimumWidth(PERIOD_COMBO_MODE_MIN_WIDTH)
         self.cmb_pcap_period_mode.setObjectName("CompactControl")
         self.cmb_pcap_period_mode.setFixedHeight(PERIOD_CONTROL_HEIGHT)
-        self.cmb_pcap_period_mode.addItem("Day", "day")
-        self.cmb_pcap_period_mode.addItem("Month", "month")
-        self.cmb_pcap_period_mode.addItem("Selected period", "range")
+        for label, value in PERIOD_MODE_OPTIONS:
+            self.cmb_pcap_period_mode.addItem(label, value)
         self.cmb_pcap_period_mode.setVisible(False)
         self.btn_pcap_pick_range = make_action_button("Pick range…")
         self.btn_pcap_pick_range.hide()
@@ -1680,66 +1686,56 @@ class PcapPage(QWidget):
             self._reset_period_selector_ui(keep_raw=False)
             return []
 
-        rolled = rollup_day_groups(
-            self._pcap_day_groups_raw,
+        previous_day = str(self._pcap_active_day or self.cmb_pcap_day.currentData() or "")
+        previous_granularity = self._pcap_period_granularity
+        state = PeriodSelectorState(
             granularity=self._pcap_period_granularity,
             range_start=self._pcap_period_range_start,
             range_end=self._pcap_period_range_end,
+            day_groups_raw=self._pcap_day_groups_raw,
+            active_key=self._pcap_active_day,
         )
-        if self._pcap_period_granularity == "day":
-            self._pcap_day_groups = dict(
-                sorted(rolled.items(), key=lambda pair: (pair[0] == "undated", pair[0]), reverse=True)
-            )
-        else:
-            self._pcap_day_groups = rolled
-
-        if not self._pcap_day_groups and self._pcap_period_granularity == "month":
-            self._pcap_period_granularity = "day"
-            if hasattr(self, "cmb_pcap_period_mode"):
-                self.cmb_pcap_period_mode.blockSignals(True)
-                day_index = self.cmb_pcap_period_mode.findData("day")
-                if day_index >= 0:
-                    self.cmb_pcap_period_mode.setCurrentIndex(day_index)
-                self.cmb_pcap_period_mode.blockSignals(False)
-            rolled = rollup_day_groups(self._pcap_day_groups_raw, granularity="day")
-            self._pcap_day_groups = dict(
-                sorted(rolled.items(), key=lambda pair: (pair[0] == "undated", pair[0]), reverse=True)
-            )
-
-        if not self._pcap_day_groups:
-            self._pcap_day_groups = {
-                str(day): list(paths or [])
-                for day, paths in self._pcap_day_groups_raw.items()
-            }
-
-        if not self._pcap_day_groups:
+        paths = rebuild_period_selector(
+            state,
+            kind="PCAP",
+            sort_day_view=True,
+            previous_key=previous_day,
+        )
+        if not state.day_groups:
             self._reset_period_selector_ui(keep_raw=True)
             return []
 
-        previous_day = str(self._pcap_active_day or self.cmb_pcap_day.currentData() or "")
+        self._pcap_period_granularity = state.granularity
+        self._pcap_period_range_start = state.range_start
+        self._pcap_period_range_end = state.range_end
+        self._pcap_day_groups = state.day_groups
+        if state.granularity != previous_granularity:
+            self.cmb_pcap_period_mode.blockSignals(True)
+            mode_index = self.cmb_pcap_period_mode.findData(state.granularity or "day")
+            if mode_index >= 0:
+                self.cmb_pcap_period_mode.setCurrentIndex(mode_index)
+            self.cmb_pcap_period_mode.blockSignals(False)
+
         self.cmb_pcap_day.blockSignals(True)
         self.cmb_pcap_day.clear()
-        for day, paths in self._pcap_day_groups.items():
-            label = period_group_label(
-                day,
-                granularity=self._pcap_period_granularity,
-                file_count=len(paths) or 1,
-                kind="PCAP",
-            )
-            if not paths:
-                label = f"{format_period_day_label(day) or day} (saved)"
-            self.cmb_pcap_day.addItem(label, day)
+        for key, entry_label, _paths in build_period_combo_entries(
+            state.day_groups,
+            granularity=state.granularity,
+            kind="PCAP",
+            label_saved_empty=True,
+        ):
+            self.cmb_pcap_day.addItem(entry_label, key)
         if previous_day:
             index = self.cmb_pcap_day.findData(previous_day)
             if index >= 0:
                 self.cmb_pcap_day.setCurrentIndex(index)
         self.cmb_pcap_day.blockSignals(False)
-        self._pcap_active_day = self.cmb_pcap_day.currentData() or next(iter(self._pcap_day_groups))
+        self._pcap_active_day = state.active_key
         self._sync_period_selector_panel()
         self._update_reanalyze_button_state()
         self._update_period_gap_banner()
         self._sync_pcap_range_button()
-        return list(self._pcap_day_groups.get(self._pcap_active_day, []))
+        return paths
 
     def _apply_imported_period_as_default(self, start: str = "", end: str = "") -> None:
         from core.period_gaps import normalize_period_day
@@ -1829,9 +1825,7 @@ class PcapPage(QWidget):
         if mode == self._pcap_period_granularity:
             return
         if mode == "month":
-            from core.period_gaps import complete_calendar_month_keys
-
-            if not complete_calendar_month_keys(self._pcap_day_groups_raw.keys()):
+            if not month_view_available(self._pcap_day_groups_raw.keys()):
                 self.cmb_pcap_period_mode.blockSignals(True)
                 revert_index = self.cmb_pcap_period_mode.findData(self._pcap_period_granularity or "day")
                 if revert_index >= 0:

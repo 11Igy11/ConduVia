@@ -33,6 +33,7 @@ from core.analysis_limits import (
     SUMMARY_VALUE_COL_WIDTH,
 )
 from ui.buttons import make_action_button, style_action_button
+from core.period_selector import PERIOD_MODE_OPTIONS
 from ui.dataset_header_layout import (
     DATASET_HEADER_MARGINS,
     DATASET_HEADER_SPACING,
@@ -144,9 +145,8 @@ def build_explore_workspace(app: App) -> tuple[QWidget, QFrame]:
     app.cmb_json_period_mode.setMinimumWidth(PERIOD_COMBO_MODE_MIN_WIDTH)
     app.cmb_json_period_mode.setObjectName("CompactControl")
     app.cmb_json_period_mode.setFixedHeight(PERIOD_CONTROL_HEIGHT)
-    app.cmb_json_period_mode.addItem("Day", "day")
-    app.cmb_json_period_mode.addItem("Month", "month")
-    app.cmb_json_period_mode.addItem("Selected period", "range")
+    for label, value in PERIOD_MODE_OPTIONS:
+        app.cmb_json_period_mode.addItem(label, value)
     app.cmb_json_period_mode.setVisible(False)
 
     app.btn_json_pick_range = make_action_button("Pick range…")
