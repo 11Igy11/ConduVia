@@ -98,6 +98,7 @@ from ui.dict_table_model import DictTableModel
 from ui.explore_widgets import AITextWorker, CopyableTableView
 from ui.font_utils import apply_named_style, refresh_widget_style
 from ui.thread_utils import stop_qthread
+from ui.worker_runner import WorkerRunner
 
 
 class VisibilityIndicatorRow(QFrame):
@@ -354,8 +355,7 @@ class PcapPage(QWidget):
         self._worker: PcapWorker | None = None
         self._batch_thread: QThread | None = None
         self._batch_worker: PcapBatchWorker | None = None
-        self._ai_thread: QThread | None = None
-        self._ai_worker: AITextWorker | None = None
+        self._ai_runner = WorkerRunner(self._thread_parent())
         self._saved_source_id: int | None = None
         self._pcap_queue: list[str] = []
         self._pcap_queue_auto_save = False
@@ -3322,7 +3322,7 @@ class PcapPage(QWidget):
         if not hasattr(self.app, "ai_service"):
             self._error("PCAP AI", "AI service is not available.")
             return
-        if self._ai_thread is not None:
+        if self._ai_runner.is_running():
             self._info("PCAP AI", "PCAP AI summary is already running.")
             return
 
@@ -3335,24 +3335,19 @@ class PcapPage(QWidget):
         project_name = getattr(self.app, "current_project_name", "") or ""
         period_label = self._format_day_label(self._pcap_active_day) if self._pcap_active_day else ""
         period_mode = getattr(self, "_pcap_period_granularity", "day")
-        self._ai_thread = QThread(self._thread_parent())
-        self._ai_worker = AITextWorker(
+        worker = AITextWorker(
             self.app.ai_service.generate_pcap_summary,
             self.summary,
             project_name,
             period_label=period_label,
             period_mode=period_mode,
         )
-        self._ai_worker.moveToThread(self._ai_thread)
-        self._ai_thread.started.connect(self._ai_worker.run)
-        self._ai_worker.finished.connect(self._on_ai_summary_finished, Qt.QueuedConnection)
-        self._ai_worker.error.connect(self._on_ai_summary_error, Qt.QueuedConnection)
-        self._ai_worker.finished.connect(self._ai_thread.quit)
-        self._ai_worker.error.connect(self._ai_thread.quit)
-        self._ai_worker.finished.connect(self._ai_worker.deleteLater)
-        self._ai_worker.error.connect(self._ai_worker.deleteLater)
-        self._ai_thread.finished.connect(self._cleanup_ai_thread)
-        self._ai_thread.start()
+        self._ai_runner.start(
+            worker,
+            thread_parent=self._thread_parent(),
+            finished_slot=self._on_ai_summary_finished,
+            error_slot=self._on_ai_summary_error,
+        )
 
     def _on_ai_summary_finished(self, result: str):
         self.txt_pcap_ai_summary.setPlainText(result)
@@ -3373,10 +3368,6 @@ class PcapPage(QWidget):
         self.txt_pcap_ai_summary.setPlainText(f"AI error: {message}")
         self.btn_ai_summary.setEnabled(True)
         self.btn_ai_summary.setText("AI Summary")
-
-    def _cleanup_ai_thread(self):
-        self._ai_worker = None
-        self._ai_thread = None
 
     def export_summary(self):
         if not self.summary:
@@ -3792,10 +3783,10 @@ class PcapPage(QWidget):
         self._stop_batch_faulthandler_watch()
         if self._batch_worker is not None:
             self._batch_worker.request_stop()
-        for thread_name in ("_thread", "_batch_thread", "_ai_thread"):
+        self._ai_runner.stop(wait_ms=wait_ms)
+        for thread_name in ("_thread", "_batch_thread"):
             thread = getattr(self, thread_name, None)
             stop_qthread(thread, wait_ms=wait_ms)
             setattr(self, thread_name, None)
         self._worker = None
         self._batch_worker = None
-        self._ai_worker = None

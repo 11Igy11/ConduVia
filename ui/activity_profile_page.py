@@ -4,7 +4,7 @@ import webbrowser
 from pathlib import Path
 from typing import Any
 
-from PySide6.QtCore import QThread, Qt, QEvent
+from PySide6.QtCore import Qt, QEvent
 from PySide6.QtWidgets import (
     QFileDialog,
     QFrame,
@@ -32,7 +32,7 @@ from ui.bar_chart_widget import BarChartWidget
 from ui.buttons import make_action_button
 from ui.explore_widgets import AITextWorker
 from ui.project_rows_dialog import open_project_rows_dialog
-from ui.thread_utils import stop_qthread
+from ui.worker_runner import WorkerRunner
 
 
 def _compact_range(first_seen: str, last_seen: str) -> str:
@@ -103,8 +103,7 @@ class ActivityProfilePage(QWidget):
         self._behavior_cache_key = ""
         self._behavior_cache_flows: list[dict[str, Any]] = []
         self._project_dataset_info: dict[str, Any] = {}
-        self._ai_thread: QThread | None = None
-        self._ai_worker: AITextWorker | None = None
+        self._ai_runner = WorkerRunner(self)
         self._logged_repository_hit_key = ""
         self._last_ai_summary = ""
         self._build_ui()
@@ -521,29 +520,24 @@ class ActivityProfilePage(QWidget):
             if self.app and hasattr(self.app, "_message_dialog"):
                 self.app._message_dialog("Activity Profile", "AI service is not available.", width=440)
             return
-        if self._ai_thread is not None:
+        if self._ai_runner.is_running():
             return
 
         self.btn_ai_summary.setEnabled(False)
         self.btn_ai_summary.setText("Generating...")
         self._last_ai_summary = ""
 
-        self._ai_thread = QThread(self.app)
-        self._ai_worker = AITextWorker(
+        worker = AITextWorker(
             self.app.ai_service.generate_activity_profile_summary,
             dict(self.profile),
             self.project_name,
         )
-        self._ai_worker.moveToThread(self._ai_thread)
-        self._ai_thread.started.connect(self._ai_worker.run)
-        self._ai_worker.finished.connect(self._on_ai_finished, Qt.QueuedConnection)
-        self._ai_worker.error.connect(self._on_ai_error, Qt.QueuedConnection)
-        self._ai_worker.finished.connect(self._ai_thread.quit)
-        self._ai_worker.error.connect(self._ai_thread.quit)
-        self._ai_worker.finished.connect(self._ai_worker.deleteLater)
-        self._ai_worker.error.connect(self._ai_worker.deleteLater)
-        self._ai_thread.finished.connect(self._cleanup_ai_thread)
-        self._ai_thread.start()
+        self._ai_runner.start(
+            worker,
+            thread_parent=self.app,
+            finished_slot=self._on_ai_finished,
+            error_slot=self._on_ai_error,
+        )
 
     def export_profile(self):
         if not self.profile:
@@ -655,14 +649,8 @@ class ActivityProfilePage(QWidget):
         has_rhythm = bool((self.txt_routine.toPlainText() or "").strip())
         self.btn_add_ai_to_notes.setEnabled(has_summary or has_rhythm)
 
-    def _cleanup_ai_thread(self):
-        self._ai_worker = None
-        self._ai_thread = None
-
     def shutdown_background_tasks(self, wait_ms: int = 5000) -> None:
-        stop_qthread(self._ai_thread, wait_ms=wait_ms)
-        self._ai_worker = None
-        self._ai_thread = None
+        self._ai_runner.stop(wait_ms=wait_ms)
 
     def _set_metrics(self, metrics: list[dict[str, Any]]):
         defaults = [
