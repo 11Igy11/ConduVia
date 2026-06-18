@@ -43,7 +43,15 @@ from core.db import (
 from core.loader import list_json_files_recursive, load_folder_recursive, load_json_file
 from core.osint.imsi import format_intercept_imsi, is_imsi_target_type
 from core.period_gaps import format_missing_days_summary, format_period_gap_summary, missing_period_days, summarize_partial_months
-from core.period_groups import period_group_label, rollup_day_groups
+from core.period_groups import is_range_period_key, parse_range_period_key
+from core.period_selector import (
+    PeriodSelectorState,
+    build_period_combo_entries,
+    infer_default_range_bounds,
+    month_view_available,
+    rebuild_period_selector,
+    restore_range_from_raw_keys,
+)
 from core.parser import extract_dataset_meta
 from core.formatters import format_short_date, human_bytes
 from core.project_behavior_index import build_project_behavior_index
@@ -1482,9 +1490,7 @@ class DatasetController(QObject):
         if mode == self._json_period_granularity:
             return
         if mode == "month":
-            from core.period_gaps import complete_calendar_month_keys
-
-            if not complete_calendar_month_keys(self._json_day_groups_raw.keys()):
+            if not month_view_available(self._json_day_groups_raw.keys()):
                 combo.blockSignals(True)
                 day_index = combo.findData(self._json_period_granularity or "day")
                 if day_index >= 0:
@@ -1691,56 +1697,46 @@ class DatasetController(QObject):
             self._reset_json_period_ui(keep_raw=False)
             return []
 
-        self._json_day_groups = rollup_day_groups(
-            self._json_day_groups_raw,
+        previous_day = str(self._json_active_day or combo.currentData() or "")
+        previous_granularity = self._json_period_granularity
+        state = PeriodSelectorState(
             granularity=self._json_period_granularity,
             range_start=self._json_period_range_start,
             range_end=self._json_period_range_end,
+            day_groups_raw=self._json_day_groups_raw,
+            active_key=self._json_active_day,
         )
-        if not self._json_day_groups and self._json_period_granularity == "month":
-            self._json_period_granularity = "day"
+        paths = rebuild_period_selector(
+            state,
+            kind="JSON",
+            recover_empty_range=True,
+            previous_key=previous_day,
+        )
+        if not state.day_groups:
+            return []
+
+        self._json_period_granularity = state.granularity
+        self._json_period_range_start = state.range_start
+        self._json_period_range_end = state.range_end
+        self._json_day_groups = state.day_groups
+        if state.granularity != previous_granularity:
             mode_combo = getattr(self.app, "cmb_json_period_mode", None)
             if mode_combo is not None:
                 mode_combo.blockSignals(True)
-                day_index = mode_combo.findData("day")
-                if day_index >= 0:
-                    mode_combo.setCurrentIndex(day_index)
+                mode_index = mode_combo.findData(state.granularity or "day")
+                if mode_index >= 0:
+                    mode_combo.setCurrentIndex(mode_index)
                 mode_combo.blockSignals(False)
-            self._json_day_groups = rollup_day_groups(
-                self._json_day_groups_raw,
-                granularity="day",
-            )
 
-        if not self._json_day_groups:
-            self._json_day_groups = {
-                str(day): list(paths or [])
-                for day, paths in self._json_day_groups_raw.items()
-            }
-
-        if not self._json_day_groups:
-            self._reset_json_period_ui(keep_raw=True)
-            self._restore_json_period_range_from_days()
-            if self._json_period_granularity == "range" and self._json_period_range_start and self._json_period_range_end:
-                rolled = rollup_day_groups(
-                    self._json_day_groups_raw,
-                    granularity="range",
-                    range_start=self._json_period_range_start,
-                    range_end=self._json_period_range_end,
-                )
-                if rolled:
-                    self._json_day_groups = rolled
-            if not self._json_day_groups:
-                return []
-
-        previous_day = str(self._json_active_day or combo.currentData() or "")
         self._json_day_switching = True
         combo.blockSignals(True)
         combo.clear()
-        for day, paths in self._json_day_groups.items():
-            combo.addItem(
-                period_group_label(day, granularity=self._json_period_granularity, file_count=len(paths), kind="JSON"),
-                day,
-            )
+        for key, entry_label, _paths in build_period_combo_entries(
+            state.day_groups,
+            granularity=state.granularity,
+            kind="JSON",
+        ):
+            combo.addItem(entry_label, key)
         if previous_day:
             index = combo.findData(previous_day)
             if index >= 0:
@@ -1753,12 +1749,12 @@ class DatasetController(QObject):
         if mode_combo is not None:
             mode_combo.setVisible(True)
         self._json_day_switching = False
-        self._json_active_day = str(combo.currentData() or next(iter(self._json_day_groups)))
+        self._json_active_day = state.active_key
         self._json_active_file = ""
         self._rebuild_json_file_combo()
         self._update_json_gap_banner(list(self._json_day_groups_raw.keys()))
         self._sync_json_period_selector_panel()
-        return list(self._json_day_groups.get(self._json_active_day, []))
+        return paths
 
     def _sync_json_active_day_from_combo(self) -> None:
         combo = getattr(self.app, "cmb_json_day", None)
@@ -1822,38 +1818,35 @@ class DatasetController(QObject):
     def _restore_json_period_range_from_days(self) -> None:
         if not self._json_day_groups_raw:
             return
-        from core.period_gaps import normalize_period_day
-        from core.period_groups import is_range_period_key, parse_range_period_key
 
-        for key in self._json_day_groups_raw:
-            if is_range_period_key(key):
-                start, end = parse_range_period_key(key)
-                if start and end:
-                    self._json_period_range_start = start
-                    self._json_period_range_end = end
-                    self._json_period_granularity = "range"
-                    mode_combo = getattr(self.app, "cmb_json_period_mode", None)
-                    if mode_combo is not None:
-                        mode_combo.blockSignals(True)
-                        idx = mode_combo.findData("range")
-                        if idx >= 0:
-                            mode_combo.setCurrentIndex(idx)
-                        mode_combo.blockSignals(False)
-                    self._sync_json_range_button()
-                    return
+        state = PeriodSelectorState(
+            granularity=self._json_period_granularity,
+            range_start=self._json_period_range_start,
+            range_end=self._json_period_range_end,
+            day_groups_raw=self._json_day_groups_raw,
+        )
+        if restore_range_from_raw_keys(state):
+            self._json_period_range_start = state.range_start
+            self._json_period_range_end = state.range_end
+            self._json_period_granularity = state.granularity
+            mode_combo = getattr(self.app, "cmb_json_period_mode", None)
+            if mode_combo is not None:
+                mode_combo.blockSignals(True)
+                idx = mode_combo.findData("range")
+                if idx >= 0:
+                    mode_combo.setCurrentIndex(idx)
+                mode_combo.blockSignals(False)
+            self._sync_json_range_button()
+            return
 
         if self._json_period_granularity != "range":
             return
         if self._json_period_range_start and self._json_period_range_end:
             return
-        days = sorted(
-            normalize_period_day(day)
-            for day in self._json_day_groups_raw.keys()
-            if normalize_period_day(day)
-        )
-        if len(days) >= 2:
-            self._json_period_range_start = days[0]
-            self._json_period_range_end = days[-1]
+        start, end = infer_default_range_bounds(self._json_day_groups_raw)
+        if start and end:
+            self._json_period_range_start = start
+            self._json_period_range_end = end
 
     def _clear_json_day_groups(self) -> None:
         self._reset_json_period_ui(keep_raw=False)
