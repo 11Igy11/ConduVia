@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from core.db import Project
-from core.exporters.case_context import build_case_context, context_cards_html
+from core.exporters.case_context import build_case_context, case_context_table_html
 from core.exporters.template_utils import load_template, logo_data_uri, render_template
 
 
@@ -32,12 +32,12 @@ def export_activity_profile_html(
         "PROJECT_NAME": html.escape(project_name or text["project_fallback"]),
         "EXPORTED_LABEL": text["exported"],
         "EXPORTED_AT": generated_at,
-        "HERO_CARDS": "\n".join([
-            context_cards_html(case_context, card_class="card", include_dataset_target=False),
-            _metric_cards(profile, text),
-        ]),
-        "CASE_SNAPSHOT_LABEL": text["case_snapshot"],
-        "CASE_SNAPSHOT": html.escape(_lines(profile.get("summary_lines"))),
+        "CASE_INFORMATION_LABEL": text["case_information"],
+        "CASE_TABLE": case_context_table_html(case_context, include_dataset_target=False),
+        "EVIDENCE_METRICS_LABEL": text["evidence_metrics"],
+        "METRICS_TABLE": _metrics_table(profile, text),
+        "OPERATIONAL_SUMMARY_LABEL": text["operational_summary"],
+        "OPERATIONAL_SUMMARY": html.escape(_operational_summary(profile.get("summary_lines"))),
         "EVIDENCE_OVERVIEW_LABEL": text["evidence_overview"],
         "EVIDENCE_SOURCES_TABLE": _bar_table(text["evidence_sources"], profile.get("evidence_counts") or [], "count", text=text),
         "PCAP_DEVICE_IP_TABLE": _bar_table(text["pcap_device_ip_distribution"], profile.get("pcap_device_ip_rows") or [], "count", text=text),
@@ -58,23 +58,52 @@ def export_activity_profile_html(
     path.write_text(html_doc, encoding="utf-8")
 
 
-def _metric_cards(profile: dict[str, Any], text: dict[str, str]) -> str:
+def _metrics_table(profile: dict[str, Any], text: dict[str, str]) -> str:
     metrics = list(profile.get("metrics") or [])
     metrics.extend([
         {"label": text["pcap_volume"], "value": profile.get("total_pcap_bytes_label") or "-"},
         {"label": text["capture_range"], "value": (profile.get("capture_range") or {}).get("label") or "-"},
     ])
-    return "\n".join(
-        f'<div class="card"><div class="label">{html.escape(_metric_label(str(metric.get("label") or ""), text))}</div>'
-        f'<div class="value">{html.escape(str(metric.get("value") or "-"))}</div></div>'
-        for metric in metrics[:6]
+    rows = "".join(
+        "<tr>"
+        f"<td>{html.escape(_metric_label(str(metric.get('label') or ''), text))}</td>"
+        f"<td>{html.escape(str(metric.get('value') or '-'))}</td>"
+        "</tr>"
+        for metric in metrics
     )
+    return (
+        '<table class="data-table"><thead><tr><th>Metric</th><th>Value</th></tr></thead>'
+        f"<tbody>{rows}</tbody></table>"
+    )
+
+
+def _operational_summary(summary_lines: Any) -> str:
+    lines = []
+    for raw in summary_lines or []:
+        line = str(raw or "").strip()
+        if not line or line == "Project Activity Profile":
+            continue
+        lowered = line.casefold()
+        if lowered.startswith("- case subject:"):
+            continue
+        if lowered.startswith("- known identifiers:"):
+            continue
+        if lowered.startswith("- target fallback:"):
+            continue
+        if lowered.startswith("- klasa:"):
+            continue
+        if lowered.startswith("- urbroj:"):
+            continue
+        if lowered.startswith("- order validity"):
+            continue
+        lines.append(line)
+    return "\n".join(lines) or "-"
 
 
 def _bar_table(title: str, rows: list[dict[str, Any]], value_key: str, value_label_key: str = "", *, text: dict[str, str] | None = None) -> str:
     labels = text or _report_text()
     if not rows:
-        return f"<h2>{html.escape(title)}</h2><div class=\"plain\">{html.escape(labels['no_records'])}</div>"
+        return f"<h3>{html.escape(title)}</h3><div class=\"empty\">{html.escape(labels['no_records'])}</div>"
 
     max_value = max(_safe_float(row.get(value_key)) for row in rows) or 1.0
     body = []
@@ -91,9 +120,10 @@ def _bar_table(title: str, rows: list[dict[str, Any]], value_key: str, value_lab
             "</tr>"
         )
     return (
-        f"<h2>{html.escape(title)}</h2>"
-        f"<table><thead><tr><th>{html.escape(labels['item'])}</th><th>{html.escape(labels['chart'])}</th><th>{html.escape(labels['value'])}</th></tr></thead>"
-        f"<tbody>{''.join(body)}</tbody></table>"
+        f"<h3>{html.escape(title)}</h3>"
+        f"<div class=\"table-wrap\"><table class=\"data-table\">"
+        f"<thead><tr><th>{html.escape(labels['item'])}</th><th>{html.escape(labels['chart'])}</th><th>{html.escape(labels['value'])}</th></tr></thead>"
+        f"<tbody>{''.join(body)}</tbody></table></div>"
     )
 
 
@@ -129,7 +159,9 @@ def _report_text() -> dict[str, str]:
         "project": "Project",
         "project_fallback": "Project",
         "exported": "Exported",
-        "case_snapshot": "Case Snapshot",
+        "case_information": "Case Information",
+        "evidence_metrics": "Evidence Metrics",
+        "operational_summary": "Operational Summary",
         "evidence_overview": "Evidence Overview",
         "evidence_sources": "Evidence Sources",
         "pcap_device_ip_distribution": "PCAP Device IP Distribution",
@@ -142,9 +174,7 @@ def _report_text() -> dict[str, str]:
         "activity_by_hour": "Activity By Hour",
         "hourly_activity": "Hourly Activity",
         "activity_rhythm": "Activity Rhythm",
-        "next_review": "Next Review",
         "recent_project_timeline": "Recent Project Timeline",
-        "datasets": "JSON Datasets",
         "json_datasets": "JSON Datasets",
         "pcap_sources": "PCAP Sources",
         "pcap_days": "PCAP Days",
@@ -157,4 +187,3 @@ def _report_text() -> dict[str, str]:
         "value": "Value",
         "no_records": "No records.",
     }
-

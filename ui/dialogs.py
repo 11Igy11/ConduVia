@@ -8,6 +8,7 @@ from PySide6.QtWidgets import (
     QDialogButtonBox,
     QFormLayout,
     QFrame,
+    QGridLayout,
     QHBoxLayout,
     QHeaderView,
     QLineEdit,
@@ -518,16 +519,26 @@ def _dialog_panel(title: str) -> tuple[QFrame, QVBoxLayout]:
     return panel, layout
 
 
-def _dialog_form_row(label_text: str, field: QWidget) -> QHBoxLayout:
-    row = QHBoxLayout()
-    row.setSpacing(10)
+def _dialog_field_group(label_text: str, field: QWidget) -> QWidget:
+    host = QWidget()
+    layout = QVBoxLayout(host)
+    layout.setContentsMargins(0, 0, 0, 0)
+    layout.setSpacing(4)
     label = QLabel(label_text)
-    label.setMinimumWidth(132)
-    label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-    label.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Preferred)
-    row.addWidget(label)
-    row.addWidget(field, 1)
-    return row
+    label.setObjectName("DialogFieldLabel")
+    label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+    layout.addWidget(label)
+    layout.addWidget(field)
+    return host
+
+
+def _dialog_line_edit(value: str = "", *, placeholder: str = "") -> QLineEdit:
+    edit = QLineEdit()
+    edit.setText(value)
+    edit.setPlaceholderText(placeholder)
+    edit.setFixedHeight(DIALOG_FIELD_HEIGHT)
+    edit.setMaximumHeight(DIALOG_FIELD_HEIGHT)
+    return edit
 
 
 def project_details_dialog(
@@ -564,70 +575,53 @@ def project_details_dialog(
     fields: dict[str, QLineEdit | QPlainTextEdit] = {}
 
     project_panel, project_layout = _dialog_panel("Project")
-    edit_name = QLineEdit()
-    edit_name.setText(getattr(project, "name", "") or "")
-    edit_name.setFixedHeight(DIALOG_FIELD_HEIGHT)
-    project_layout.addLayout(_dialog_form_row("Project name:", edit_name))
+    edit_name = _dialog_line_edit(getattr(project, "name", "") or "")
+    project_layout.addWidget(_dialog_field_group("Project name", edit_name))
 
     edit_desc = QPlainTextEdit()
     edit_desc.setPlainText(getattr(project, "description", "") or "")
-    edit_desc.setFixedHeight(56)
-    project_layout.addLayout(_dialog_form_row("Description:", edit_desc))
+    edit_desc.setFixedHeight(48)
+    project_layout.addWidget(_dialog_field_group("Description", edit_desc))
 
     workspace_row = QHBoxLayout()
     workspace_row.setSpacing(8)
     workspace_row.setContentsMargins(0, 0, 0, 0)
-    edit_parent = QLineEdit()
-    edit_parent.setText(parent_folder or "")
-    edit_parent.setPlaceholderText("Required parent folder for ViaNyquist workspace")
-    edit_parent.setFixedHeight(DIALOG_FIELD_HEIGHT)
+    edit_parent = _dialog_line_edit(parent_folder or "", placeholder="Required parent folder for ViaNyquist workspace")
     btn_browse = make_dialog_button("Browse...")
+    btn_browse.setFixedHeight(DIALOG_FIELD_HEIGHT)
     workspace_row.addWidget(edit_parent, 1)
     workspace_row.addWidget(btn_browse, 0, Qt.AlignVCenter)
     workspace_host = QWidget()
     workspace_host.setLayout(workspace_row)
-    project_layout.addLayout(_dialog_form_row("Workspace parent:", workspace_host))
+    project_layout.addWidget(_dialog_field_group("Workspace parent", workspace_host))
     content_layout.addWidget(project_panel)
 
     subject_panel, subject_layout = _dialog_panel("Case subject / identifiers")
     identifier_specs = [
-        ("first_name", "First name:", "subject_first_name"),
-        ("last_name", "Last name:", "subject_last_name"),
-        ("oib", "OIB:", "subject_oib"),
-        ("msisdn", "Mobile / MSISDN:", "subject_msisdn"),
-        ("imsi", "IMSI:", "subject_imsi"),
-        ("imei", "IMEI:", "subject_imei"),
-        ("ip", "Known IP:", "subject_ip"),
+        ("first_name", "First name", "subject_first_name"),
+        ("last_name", "Last name", "subject_last_name"),
+        ("oib", "OIB", "subject_oib"),
+        ("msisdn", "Mobile / MSISDN", "subject_msisdn"),
+        ("imsi", "IMSI", "subject_imsi"),
+        ("imei", "IMEI", "subject_imei"),
+        ("ip", "Known IP", "subject_ip"),
     ]
-    columns = QHBoxLayout()
-    columns.setSpacing(16)
-    left_col = QFormLayout()
-    right_col = QFormLayout()
+    grid = QGridLayout()
+    grid.setHorizontalSpacing(14)
+    grid.setVerticalSpacing(10)
     for index, (key, label, attr) in enumerate(identifier_specs):
-        edit = QLineEdit()
-        edit.setText(getattr(project, attr or key, "") or "")
-        edit.setFixedHeight(DIALOG_FIELD_HEIGHT)
+        edit = _dialog_line_edit(getattr(project, attr or key, "") or "")
         fields[key] = edit
-        target = left_col if index % 2 == 0 else right_col
-        target.setLabelAlignment(Qt.AlignRight)
-        target.setFormAlignment(Qt.AlignTop)
-        target.setHorizontalSpacing(10)
-        target.setVerticalSpacing(8)
-        target.addRow(label, edit)
-    left_host = QWidget()
-    left_host.setLayout(left_col)
-    right_host = QWidget()
-    right_host.setLayout(right_col)
-    columns.addWidget(left_host, 1)
-    columns.addWidget(right_host, 1)
-    subject_layout.addLayout(columns)
+        row, col = divmod(index, 2)
+        grid.addWidget(_dialog_field_group(label, edit), row, col)
+    subject_layout.addLayout(grid)
 
     extra = QPlainTextEdit()
     extra.setPlainText(getattr(project, "subject_extra_identifiers", "") or "")
     extra.setPlaceholderText("Other identifiers or notes, one per line.")
-    extra.setFixedHeight(60)
+    extra.setFixedHeight(48)
     fields["extra_identifiers"] = extra
-    subject_layout.addLayout(_dialog_form_row("Other:", extra))
+    subject_layout.addWidget(_dialog_field_group("Other identifiers", extra))
     content_layout.addWidget(subject_panel)
 
     metadata_panel, metadata_layout = _dialog_panel("Case order metadata")
@@ -682,7 +676,7 @@ def project_details_dialog(
         btn_pick.clicked.connect(show_picker)
         row.addWidget(edit, 1)
         row.addWidget(btn_pick)
-        metadata_layout.addLayout(_dialog_form_row(label, _wrap_layout(row)))
+        metadata_layout.addWidget(_dialog_field_group(label.rstrip(":"), _wrap_layout(row)))
 
     add_metadata_field(
         "klasa",
@@ -743,7 +737,7 @@ def project_details_dialog(
 
     btn_periods.clicked.connect(show_validity_periods)
     validity_row.addWidget(btn_periods)
-    metadata_layout.addLayout(_dialog_form_row("Order validity:", _wrap_layout(validity_row)))
+    metadata_layout.addWidget(_dialog_field_group("Order validity", _wrap_layout(validity_row)))
     content_layout.addWidget(metadata_panel)
 
     scroll.setWidget(content)

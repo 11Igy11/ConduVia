@@ -55,7 +55,7 @@ from core.formatters import (
     human_bytes,
     safe_int,
 )
-from core.exporters.listing_exporter import export_listing_csv, export_listing_html
+from core.exporters.listing_exporter import export_listing_csv, export_listing_excel, export_listing_html
 from core.exporters.notes_exporter import export_notes_docx
 from core.exporters.profile_exporter import export_activity_profile_html
 from core.exporters.pcap_exporter import export_pcap_summary_html
@@ -970,8 +970,8 @@ class BehaviorProfileTests(unittest.TestCase):
 
         self.assertIn("ViaNyquist Activity Profile", content)
         self.assertIn("Case A", content)
-        self.assertIn("Behavior Insights", content)
-        self.assertIn("WhatsApp", content)
+        self.assertIn("Case Information", content)
+        self.assertIn("Evidence Metrics", content)
         self.assertIn("JSON Activity By Day", content)
         self.assertIn("PCAP Volume By Day", content)
         self.assertIn("Most active hour", content)
@@ -1127,7 +1127,7 @@ class TableExportTests(unittest.TestCase):
 
 
 class TabularExportMetadataTests(unittest.TestCase):
-    def test_listing_csv_includes_case_metadata_comments(self):
+    def test_listing_csv_includes_case_metadata_table(self):
         with temporary_directory() as tmp:
             root = Path(tmp)
             db_path = root / "tabular-export.db"
@@ -1152,10 +1152,38 @@ class TabularExportMetadataTests(unittest.TestCase):
             )
             content = output.read_text(encoding="utf-8-sig")
 
-        self.assertIn("# Project: Case A", content)
-        self.assertIn("# Case Subject: Ana Horvat", content)
+        self.assertIn("Field,Value", content)
+        self.assertIn("Case A", content)
+        self.assertIn("Ana Horvat", content)
         self.assertIn("Source,Volume", content)
         self.assertIn("10.0.0.5", content)
+
+    def test_listing_excel_uses_case_and_data_sheets_with_frozen_headers(self):
+        with temporary_directory() as tmp:
+            root = Path(tmp)
+            db_path = root / "tabular-export.db"
+            output = root / "flows.xlsx"
+            init_db(db_path)
+
+            project_id = create_project("Case A", db_path=db_path)
+            set_project_subject(project_id, first_name="Ana", last_name="Horvat", db_path=db_path)
+            project = get_project(project_id, db_path=db_path)
+
+            export_listing_excel(
+                str(output),
+                ["Source", "Volume"],
+                [["10.0.0.5", "1.25 MB"]],
+                project=project,
+                sheet_title="Flows",
+            )
+
+            from openpyxl import load_workbook
+
+            wb = load_workbook(output)
+            self.assertEqual(wb.sheetnames, ["Case", "Flows"])
+            self.assertEqual(wb["Case"]["A1"].value, "Field")
+            self.assertEqual(wb["Flows"]["A1"].value, "Source")
+            self.assertEqual(wb["Flows"].freeze_panes, "A2")
 
 
 class CompareTests(unittest.TestCase):

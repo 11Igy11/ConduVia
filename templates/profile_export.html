@@ -22,68 +22,94 @@ body{
     padding:28px;
     font-family:"Segoe UI", Arial, sans-serif;
     color:var(--text);
-    background:
-        radial-gradient(circle at 10% 0%, rgba(53,168,255,.14), transparent 30%),
-        radial-gradient(circle at 100% 0%, rgba(125,245,111,.06), transparent 24%),
-        linear-gradient(180deg,var(--bg),var(--bg2));
+    background:linear-gradient(180deg,var(--bg),var(--bg2));
 }
-.report{max-width:1500px;margin:0 auto;}
+.report{max-width:1280px;margin:0 auto;}
 .hero{
     position:relative;
-    overflow:hidden;
     border:1px solid var(--line);
-    border-radius:24px;
+    border-radius:18px;
     background:linear-gradient(135deg,var(--panel),var(--panel2));
-    box-shadow:0 28px 70px rgba(0,0,0,.34);
-    padding:28px 30px 22px;
-    margin-bottom:18px;
+    padding:24px 28px;
+    margin-bottom:16px;
 }
 .watermark{
     position:absolute;
-    right:26px;
-    top:18px;
-    width:180px;
-    opacity:.14;
+    right:24px;
+    top:16px;
+    width:96px;
+    opacity:.12;
 }
-h1{margin:0;font-size:34px;line-height:1.1;font-weight:800;}
-h2{margin:0 0 12px;font-size:18px;}
-.muted{color:var(--muted);font-size:14px;margin-top:10px;}
-.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-top:18px;}
-.card{background:rgba(255,255,255,.04);border:1px solid var(--line);border-radius:12px;padding:14px;}
-.label{font-size:11px;text-transform:uppercase;color:var(--muted);font-weight:700;letter-spacing:.08em;margin-bottom:5px;}
-.value{font-size:16px;font-weight:700;word-break:break-word;color:var(--text);}
+h1{margin:0;font-size:28px;font-weight:800;}
+h2{margin:0 0 12px;font-size:17px;font-weight:700;}
+h3{margin:0 0 10px;font-size:14px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;}
+.meta{color:var(--muted);font-size:13px;margin-top:8px;}
 .section{
     border:1px solid var(--line);
-    border-radius:18px;
-    background:linear-gradient(180deg,rgba(255,255,255,.03),rgba(255,255,255,.015));
-    padding:18px 20px 22px;
-    margin-bottom:16px;
+    border-radius:16px;
+    background:rgba(255,255,255,.02);
+    padding:18px 20px;
+    margin-bottom:14px;
 }
+.table-wrap{overflow:auto;border-radius:12px;border:1px solid rgba(255,255,255,.08);background:var(--paper);}
+.data-table{width:100%;border-collapse:collapse;font-size:13px;}
+.data-table thead th{
+    position:sticky;
+    top:0;
+    background:#1f2937;
+    color:#fff;
+    text-align:left;
+    padding:10px 12px;
+    white-space:nowrap;
+}
+.data-table tbody td{
+    padding:9px 12px;
+    color:var(--ink);
+    border-top:1px solid #e5e7eb;
+    vertical-align:top;
+}
+.data-table tbody tr:nth-child(even) td{background:#f9fafb;}
+.case-table{width:100%;border-collapse:collapse;font-size:13px;}
+.case-table th,.case-table td{
+    padding:8px 12px;
+    border-bottom:1px solid var(--line);
+    text-align:left;
+    vertical-align:top;
+}
+.case-table thead th{
+    width:220px;
+    color:var(--muted);
+    font-size:11px;
+    text-transform:uppercase;
+    letter-spacing:.06em;
+    font-weight:700;
+}
+.case-table tbody th{color:#cbd5e1;font-weight:600;background:rgba(255,255,255,.02);}
+.case-table tbody td{color:var(--text);word-break:break-word;}
+.two{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;}
 .plain{
     background:rgba(255,255,255,.03);
     border:1px solid var(--line);
     border-radius:12px;
-    padding:18px 20px;
-    font-size:14px;
+    padding:14px 16px;
+    font-size:13px;
     line-height:1.55;
     white-space:pre-wrap;
 }
 .note{
-    border-left:4px solid #35a8ff;
+    border-left:3px solid #35a8ff;
     padding:10px 12px;
     background:rgba(53,168,255,.08);
-    margin:8px 0 14px;
+    margin:0 0 14px;
     border-radius:8px;
+    font-size:13px;
+    line-height:1.5;
 }
-.two{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;}
-.barcell{min-width:220px;}
-.bar{height:12px;background:rgba(255,255,255,.08);border-radius:999px;overflow:hidden;}
-.bar span{display:block;height:100%;background:#35a8ff;}
-table{width:100%;border-collapse:collapse;background:var(--paper);border:1px solid rgba(255,255,255,.08);border-radius:12px;overflow:hidden;}
-th{text-align:left;background:#1f2937;color:white;font-size:12px;padding:9px;}
-td{border-top:1px solid #e5e7eb;padding:8px 9px;font-size:12px;vertical-align:top;color:var(--ink);}
-tr:nth-child(even) td{background:#f9fafb;}
-@media(max-width:900px){.two{grid-template-columns:1fr;} h1{font-size:28px;}}
+.empty{color:var(--muted);font-size:13px;padding:8px 0;}
+.barcell{min-width:180px;}
+.bar{height:10px;background:#e5e7eb;border-radius:999px;overflow:hidden;}
+.bar span{display:block;height:100%;background:#2563eb;}
+@media(max-width:900px){.two{grid-template-columns:1fr;}}
 </style>
 </head>
 <body>
@@ -91,15 +117,22 @@ tr:nth-child(even) td{background:#f9fafb;}
   <div class="hero">
     <img class="watermark" src="{{LOGO}}" alt="">
     <h1>{{TITLE}}</h1>
-    <div class="muted">{{PROJECT_LABEL}}: {{PROJECT_NAME}} | {{EXPORTED_LABEL}}: {{EXPORTED_AT}}</div>
-    <div class="grid">
-      {{HERO_CARDS}}
-    </div>
+    <div class="meta">{{PROJECT_LABEL}}: {{PROJECT_NAME}} · {{EXPORTED_LABEL}}: {{EXPORTED_AT}}</div>
   </div>
 
   <div class="section">
-    <h2>{{CASE_SNAPSHOT_LABEL}}</h2>
-    <div class="plain">{{CASE_SNAPSHOT}}</div>
+    <h2>{{CASE_INFORMATION_LABEL}}</h2>
+    {{CASE_TABLE}}
+  </div>
+
+  <div class="section">
+    <h2>{{EVIDENCE_METRICS_LABEL}}</h2>
+    <div class="table-wrap">{{METRICS_TABLE}}</div>
+  </div>
+
+  <div class="section">
+    <h2>{{OPERATIONAL_SUMMARY_LABEL}}</h2>
+    <div class="plain">{{OPERATIONAL_SUMMARY}}</div>
   </div>
 
   <div class="section">

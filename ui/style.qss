@@ -525,9 +525,17 @@ QComboBox:focus {
 
 QLineEdit#SettingsField,
 QComboBox#SettingsField {
-    min-height: 32px;
-    max-height: 32px;
-    padding: 5px 10px;
+    min-height: 28px;
+    max-height: 28px;
+    padding: 4px 8px;
+    border-radius: 8px;
+}
+
+QLabel#SettingsFieldLabel,
+QLabel#DialogFieldLabel {
+    font-size: 12px;
+    font-weight: 600;
+    color: #94a3b8;
 }
 
 /* ComboBox dropdown */

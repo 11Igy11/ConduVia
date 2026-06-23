@@ -118,3 +118,27 @@ def context_cards_html(
         "</div>"
         for label, value in fields
     )
+
+
+def case_context_table_html(
+    context: dict[str, str],
+    *,
+    table_class: str = "case-table",
+    include_dataset_target: bool = True,
+) -> str:
+    rows = case_export_metadata_rows(context)
+    if include_dataset_target:
+        has_target = any(label == "Dataset Target" for label, _ in rows)
+        if not has_target:
+            rows.append(("Dataset Target", context.get("dataset_target") or "-"))
+    elif rows:
+        rows = [(label, value) for label, value in rows if label != "Dataset Target"]
+
+    body = "".join(
+        "<tr>"
+        f"<th scope=\"row\">{html.escape(label)}</th>"
+        f"<td>{html.escape(str(value))}</td>"
+        "</tr>"
+        for label, value in rows
+    )
+    return f'<table class="{html.escape(table_class)}"><tbody>{body}</tbody></table>'
