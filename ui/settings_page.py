@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QListWidget,
     QListWidgetItem,
+    QPushButton,
     QScrollArea,
     QSizePolicy,
     QVBoxLayout,
@@ -19,20 +20,28 @@ from PySide6.QtWidgets import (
 from core.ai.assistant_service import AISettings
 from core.db import get_app_settings, set_app_setting
 from core.osint.settings import OsintSettings
-from ui.buttons import make_action_button, make_dialog_button
+from ui.buttons import make_action_button
+from ui.ui_metrics import DIALOG_FIELD_HEIGHT
 
-SETTINGS_FIELD_HEIGHT = 28
-SETTINGS_FIELD_MAX_WIDTH = 360
-SETTINGS_PANEL_MAX_WIDTH = 520
+SETTINGS_COLUMNS_GAP = 14
+
+
+def _settings_button(text: str, *, destructive: bool = False) -> QPushButton:
+    button = make_action_button(text, destructive=destructive, toolbar=True, tight=True)
+    button.setFixedHeight(DIALOG_FIELD_HEIGHT)
+    return button
 
 
 def _settings_line_edit(*, placeholder: str = "", password: bool = False, narrow: bool = False) -> QLineEdit:
     edit = QLineEdit()
     edit.setObjectName("SettingsField")
     edit.setPlaceholderText(placeholder)
-    edit.setFixedHeight(SETTINGS_FIELD_HEIGHT)
-    edit.setMaximumWidth(SETTINGS_FIELD_MAX_WIDTH if not narrow else 120)
-    edit.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+    edit.setFixedHeight(DIALOG_FIELD_HEIGHT)
+    if narrow:
+        edit.setMaximumWidth(120)
+        edit.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+    else:
+        edit.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
     if password:
         edit.setEchoMode(QLineEdit.Password)
     return edit
@@ -41,19 +50,23 @@ def _settings_line_edit(*, placeholder: str = "", password: bool = False, narrow
 def _settings_combo_box(*, narrow: bool = False) -> QComboBox:
     combo = QComboBox()
     combo.setObjectName("SettingsField")
-    combo.setFixedHeight(SETTINGS_FIELD_HEIGHT)
-    combo.setMaximumWidth(120 if narrow else SETTINGS_FIELD_MAX_WIDTH)
-    combo.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+    combo.setFixedHeight(DIALOG_FIELD_HEIGHT)
+    if narrow:
+        combo.setMaximumWidth(120)
+        combo.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+    else:
+        combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
     return combo
 
 
 def _field_group(label_text: str, field: QWidget) -> QWidget:
     host = QWidget()
+    host.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
     layout = QVBoxLayout(host)
     layout.setContentsMargins(0, 0, 0, 0)
     layout.setSpacing(4)
     label = QLabel(label_text)
-    label.setObjectName("SettingsFieldLabel")
+    label.setObjectName("DialogFieldLabel")
     label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
     layout.addWidget(label)
     layout.addWidget(field)
@@ -63,55 +76,77 @@ def _field_group(label_text: str, field: QWidget) -> QWidget:
 def _settings_panel(title: str) -> tuple[QFrame, QVBoxLayout]:
     panel = QFrame()
     panel.setObjectName("ProfilePanel")
-    panel.setMaximumWidth(SETTINGS_PANEL_MAX_WIDTH)
+    panel.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
     layout = QVBoxLayout(panel)
     layout.setContentsMargins(16, 14, 16, 14)
-    layout.setSpacing(12)
+    layout.setSpacing(10)
     panel_title = QLabel(title)
     panel_title.setObjectName("ProfilePanelTitle")
     layout.addWidget(panel_title)
     return panel, layout
 
 
+def _settings_divider() -> QFrame:
+    line = QFrame()
+    line.setObjectName("SettingsSectionRule")
+    line.setFrameShape(QFrame.HLine)
+    line.setFrameShadow(QFrame.Plain)
+    line.setFixedHeight(1)
+    line.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+    return line
+
+
 class SettingsPage(QWidget):
     def __init__(self, app):
         super().__init__()
+        self.setObjectName("SettingsPage")
         self.app = app
 
         outer = QVBoxLayout(self)
-        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setContentsMargins(10, 10, 10, 10)
         outer.setSpacing(0)
 
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         outer.addWidget(scroll)
 
-        content = QWidget()
-        root = QVBoxLayout(content)
-        root.setContentsMargins(24, 0, 24, 16)
-        root.setSpacing(16)
-        scroll.setWidget(content)
+        page = QWidget()
+        root = QVBoxLayout(page)
+        root.setContentsMargins(0, 0, 0, 12)
+        root.setSpacing(12)
+        scroll.setWidget(page)
 
         header = QFrame()
-        header.setObjectName("ProfileHero")
+        header.setObjectName("ExploreHeaderCard")
+        header.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         header_layout = QVBoxLayout(header)
-        header_layout.setContentsMargins(22, 18, 22, 18)
+        header_layout.setContentsMargins(10, 8, 10, 8)
+        header_layout.setSpacing(4)
+
+        title_row = QHBoxLayout()
+        title_row.setSpacing(8)
         title = QLabel("Settings")
-        title.setObjectName("ProfileTitle")
+        title.setObjectName("HeaderProjectLabel")
+        self.btn_save_ai = _settings_button("Save")
+        self.btn_reload = _settings_button("Reload")
+        title_row.addWidget(title)
+        title_row.addStretch(1)
+        title_row.addWidget(self.btn_save_ai)
+        title_row.addWidget(self.btn_reload)
+        header_layout.addLayout(title_row)
+
         subtitle = QLabel("Application-wide configuration for AI, OSINT and appearance.")
         subtitle.setObjectName("ProfileSubtitle")
-        header_layout.addWidget(title)
+        subtitle.setWordWrap(True)
         header_layout.addWidget(subtitle)
+
+        self.lbl_status = QLabel("")
+        self.lbl_status.setWordWrap(True)
+        self.lbl_status.setObjectName("ProfileSubtitle")
+        header_layout.addWidget(self.lbl_status)
         root.addWidget(header)
-
-        body_row = QHBoxLayout()
-        body_row.setSpacing(20)
-        body_row.setAlignment(Qt.AlignTop)
-
-        left_col = QVBoxLayout()
-        left_col.setSpacing(14)
-        left_col.setAlignment(Qt.AlignTop)
 
         ai_panel, ai_layout = _settings_panel("AI")
         self.edit_ai_url = _settings_line_edit(placeholder="http://localhost:11434")
@@ -120,43 +155,55 @@ class SettingsPage(QWidget):
         ai_layout.addWidget(_field_group("Base URL", self.edit_ai_url))
         ai_layout.addWidget(_field_group("Model", self.edit_ai_model))
         ai_layout.addWidget(_field_group("Timeout (seconds)", self.edit_ai_timeout))
-        left_col.addWidget(ai_panel)
 
         theme_panel, theme_layout = _settings_panel("Appearance")
         self.cmb_theme = _settings_combo_box(narrow=True)
         self.cmb_theme.addItem("Dark", "dark")
         self.cmb_theme.addItem("Light", "light")
         theme_layout.addWidget(_field_group("Theme", self.cmb_theme))
-        left_col.addWidget(theme_panel)
-        left_col.addStretch(1)
-
-        right_col = QVBoxLayout()
-        right_col.setSpacing(14)
-        right_col.setAlignment(Qt.AlignTop)
 
         osint_panel, osint_layout = _settings_panel("OSINT")
         self.edit_vt_key = _settings_line_edit(placeholder="VirusTotal API key", password=True)
         self.edit_shodan_key = _settings_line_edit(placeholder="Shodan API key", password=True)
         osint_layout.addWidget(_field_group("VirusTotal API key", self.edit_vt_key))
         osint_layout.addWidget(_field_group("Shodan API key", self.edit_shodan_key))
-        self.btn_import_tac = make_action_button("Import TAC CSV…")
-        self.btn_import_tac.setFixedHeight(SETTINGS_FIELD_HEIGHT)
-        osint_layout.addWidget(_field_group("IMEI TAC database", self.btn_import_tac))
+
+        tac_panel, tac_layout = _settings_panel("IMEI TAC database")
+        self.btn_import_tac = _settings_button("Import TAC CSV…")
+        tac_layout.addWidget(self.btn_import_tac)
         self.lbl_tac_status = QLabel("")
         self.lbl_tac_status.setObjectName("ProfileSubtitle")
         self.lbl_tac_status.setWordWrap(True)
-        osint_layout.addWidget(self.lbl_tac_status)
+        tac_layout.addWidget(self.lbl_tac_status)
         self.btn_import_tac.clicked.connect(self.import_tac_csv)
-        right_col.addWidget(osint_panel)
 
-        repository_panel = QFrame()
-        repository_panel.setObjectName("ProfilePanel")
-        repository_layout = QVBoxLayout(repository_panel)
-        repository_layout.setContentsMargins(16, 14, 16, 14)
-        repository_layout.setSpacing(12)
-        repository_title = QLabel("Repository")
-        repository_title.setObjectName("ProfilePanelTitle")
-        repository_layout.addWidget(repository_title)
+        left_column = QWidget()
+        left_column.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        left_layout = QVBoxLayout(left_column)
+        left_layout.setContentsMargins(0, 0, 0, 0)
+        left_layout.setSpacing(12)
+        left_layout.addWidget(ai_panel)
+        left_layout.addWidget(tac_panel)
+        left_layout.addStretch(1)
+
+        right_column = QWidget()
+        right_column.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        right_layout = QVBoxLayout(right_column)
+        right_layout.setContentsMargins(0, 0, 0, 0)
+        right_layout.setSpacing(12)
+        right_layout.addWidget(theme_panel)
+        right_layout.addWidget(osint_panel)
+        right_layout.addStretch(1)
+
+        columns_row = QHBoxLayout()
+        columns_row.setSpacing(SETTINGS_COLUMNS_GAP)
+        columns_row.addWidget(left_column, 1, Qt.AlignTop)
+        columns_row.addWidget(right_column, 1, Qt.AlignTop)
+        root.addLayout(columns_row)
+        root.addWidget(_settings_divider())
+
+        repository_panel, repository_layout = _settings_panel("Repository")
+        repository_panel.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         leaks_hint = QLabel(
             "Import datasets (.txt / .csv / .tsv / .docx) and search them from OSINT → Repository."
         )
@@ -165,17 +212,15 @@ class SettingsPage(QWidget):
         repository_layout.addWidget(leaks_hint)
 
         self.list_leak_datasets = QListWidget()
-        self.list_leak_datasets.setMinimumHeight(150)
-        self.list_leak_datasets.setMaximumHeight(220)
+        self.list_leak_datasets.setMinimumHeight(140)
+        self.list_leak_datasets.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         repository_layout.addWidget(self.list_leak_datasets)
 
         leaks_buttons = QHBoxLayout()
         leaks_buttons.setSpacing(8)
-        self.btn_import_leak = make_action_button("Import dataset…")
-        self.btn_delete_leak = make_action_button("Delete selected", destructive=True, toolbar=True)
-        self.btn_open_leaks_viewer = make_action_button("Open Repository")
-        for button in (self.btn_import_leak, self.btn_delete_leak, self.btn_open_leaks_viewer):
-            button.setFixedHeight(SETTINGS_FIELD_HEIGHT)
+        self.btn_import_leak = _settings_button("Import dataset…")
+        self.btn_delete_leak = _settings_button("Delete selected", destructive=True)
+        self.btn_open_leaks_viewer = _settings_button("Open Repository")
         leaks_buttons.addWidget(self.btn_import_leak)
         leaks_buttons.addWidget(self.btn_delete_leak)
         leaks_buttons.addStretch(1)
@@ -190,26 +235,7 @@ class SettingsPage(QWidget):
         self.btn_import_leak.clicked.connect(self.import_leak_dataset)
         self.btn_delete_leak.clicked.connect(self.delete_leak_dataset)
         self.btn_open_leaks_viewer.clicked.connect(self.open_leaks_viewer)
-        right_col.addWidget(repository_panel, 1)
-
-        body_row.addLayout(left_col, 0)
-        body_row.addLayout(right_col, 1)
-        root.addLayout(body_row)
-
-        button_row = QHBoxLayout()
-        button_row.addStretch(1)
-        self.btn_save_ai = make_dialog_button("Save settings")
-        self.btn_reload = make_dialog_button("Reload settings")
-        self.btn_save_ai.setFixedHeight(SETTINGS_FIELD_HEIGHT)
-        self.btn_reload.setFixedHeight(SETTINGS_FIELD_HEIGHT)
-        button_row.addWidget(self.btn_save_ai)
-        button_row.addWidget(self.btn_reload)
-        root.addLayout(button_row)
-
-        self.lbl_status = QLabel("")
-        self.lbl_status.setWordWrap(True)
-        self.lbl_status.setObjectName("ProfileSubtitle")
-        root.addWidget(self.lbl_status)
+        root.addWidget(repository_panel)
 
         self.btn_save_ai.clicked.connect(self.save_ai_settings)
         self.btn_reload.clicked.connect(self.refresh)

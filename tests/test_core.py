@@ -1127,7 +1127,7 @@ class TableExportTests(unittest.TestCase):
 
 
 class TabularExportMetadataTests(unittest.TestCase):
-    def test_listing_csv_includes_case_metadata_table(self):
+    def test_listing_csv_puts_data_headers_first(self):
         with temporary_directory() as tmp:
             root = Path(tmp)
             db_path = root / "tabular-export.db"
@@ -1150,15 +1150,15 @@ class TabularExportMetadataTests(unittest.TestCase):
                 [["10.0.0.5", "1.25 MB"]],
                 project=project,
             )
-            content = output.read_text(encoding="utf-8-sig")
+            lines = output.read_text(encoding="utf-8-sig").splitlines()
 
-        self.assertIn("Field,Value", content)
-        self.assertIn("Case A", content)
-        self.assertIn("Ana Horvat", content)
-        self.assertIn("Source,Volume", content)
-        self.assertIn("10.0.0.5", content)
+        self.assertEqual(lines[0], "Source,Volume")
+        self.assertEqual(lines[1], "10.0.0.5,1.25 MB")
+        self.assertIn("Field,Value", lines)
+        self.assertIn("Case A", "\n".join(lines))
+        self.assertIn("Ana Horvat", "\n".join(lines))
 
-    def test_listing_excel_uses_case_and_data_sheets_with_frozen_headers(self):
+    def test_listing_excel_single_sheet_with_frozen_headers_and_case_footer(self):
         with temporary_directory() as tmp:
             root = Path(tmp)
             db_path = root / "tabular-export.db"
@@ -1180,10 +1180,12 @@ class TabularExportMetadataTests(unittest.TestCase):
             from openpyxl import load_workbook
 
             wb = load_workbook(output)
-            self.assertEqual(wb.sheetnames, ["Case", "Flows"])
-            self.assertEqual(wb["Case"]["A1"].value, "Field")
-            self.assertEqual(wb["Flows"]["A1"].value, "Source")
-            self.assertEqual(wb["Flows"].freeze_panes, "A2")
+            self.assertEqual(wb.sheetnames, ["Flows"])
+            ws = wb["Flows"]
+            self.assertEqual(ws["A1"].value, "Source")
+            self.assertEqual(ws["A2"].value, "10.0.0.5")
+            self.assertEqual(ws.freeze_panes, "A2")
+            self.assertIn("Case information", [ws.cell(row=row, column=1).value for row in range(1, ws.max_row + 1)])
 
 
 class CompareTests(unittest.TestCase):

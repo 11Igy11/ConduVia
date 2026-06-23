@@ -8,207 +8,55 @@
     --bg:#0c1520;
     --bg2:#132031;
     --panel:#162334;
-    --panel2:#1b2a3d;
     --line:rgba(255,255,255,.10);
     --text:#eaf1fb;
     --muted:#9bb0c9;
-    --blue:#35a8ff;
     --paper:#ffffff;
-    --paper2:#f8fafc;
     --ink:#111827;
 }
-
-*{
-    box-sizing:border-box;
-}
-
-body{
-    margin:0;
-    padding:28px;
-    font-family:"Segoe UI", Arial, sans-serif;
-    color:var(--text);
-    background:
-        radial-gradient(circle at 10% 0%, rgba(53,168,255,.14), transparent 30%),
-        radial-gradient(circle at 100% 0%, rgba(125,245,111,.06), transparent 24%),
-        linear-gradient(180deg,var(--bg),var(--bg2));
-}
-
-.report{
-    max-width:1780px;
-    margin:0 auto;
-}
-
-.hero{
-    position:relative;
-    overflow:hidden;
-    border:1px solid var(--line);
-    border-radius:24px;
-    background:linear-gradient(135deg,var(--panel),var(--panel2));
-    box-shadow:0 28px 70px rgba(0,0,0,.34);
-    padding:28px 30px 22px;
-    margin-bottom:18px;
-}
-
-.watermark{
-    position:absolute;
-    right:26px;
-    top:18px;
-    width:180px;
-    opacity:.14;
-    filter:drop-shadow(0 0 18px rgba(78,161,255,.18));
-}
-
-h1{
-    margin:0;
-    font-size:34px;
-    line-height:1.1;
-    font-weight:800;
-}
-
-.meta-lines{
-    margin-top:14px;
-    display:flex;
-    flex-wrap:wrap;
-    gap:10px 18px;
-    color:var(--muted);
-    font-size:14px;
-}
-
-.meta-lines strong{
-    color:#d5dce5;
-}
-
-.info-strip{
-    margin-top:18px;
-    display:grid;
-    grid-template-columns:repeat(auto-fit,minmax(180px,1fr));
-    gap:12px;
-}
-
-.info{
-    background:rgba(255,255,255,.02);
-    border:1px solid var(--line);
-    border-radius:12px;
-    padding:12px 14px;
-}
-
-.info .label{
-    font-size:11px;
-    text-transform:uppercase;
-    letter-spacing:.08em;
-    color:var(--muted);
-}
-
-.info .value{
-    margin-top:4px;
-    font-size:15px;
-    font-weight:700;
-}
-
-.panel{
-    border:1px solid var(--line);
-    border-radius:18px;
-    background:linear-gradient(180deg,rgba(255,255,255,.03),rgba(255,255,255,.015));
-    padding:18px 20px 22px;
-}
-
-.panel h2{
-    margin:0 0 14px;
-    font-size:18px;
-}
-
-.table-wrap{
-    overflow:auto;
-    border-radius:14px;
-    border:1px solid rgba(255,255,255,.08);
-    background:var(--paper);
-}
-
-table{
-    width:100%;
-    border-collapse:collapse;
-    font-size:13px;
-}
-
-thead th{
-    position:sticky;
-    top:0;
-    z-index:1;
-    background:#1f2937;
-    color:#fff;
-    text-align:left;
-    padding:10px 13px;
-    white-space:nowrap;
-}
-
-tbody td{
-    padding:9px 13px;
-    color:var(--ink);
-    border-bottom:1px solid #edf1f6;
-    border-right:1px solid #edf1f6;
-    vertical-align:top;
-}
-
-tbody td:last-child{
-    border-right:none;
-}
-
-tbody tr:nth-child(odd){
-    background:#fff;
-}
-
-tbody tr:nth-child(even){
-    background:var(--paper2);
-}
-
-tbody tr:hover{
-    background:#e8f4ff;
-}
-
-.footer{
-    margin-top:12px;
-    text-align:right;
-    color:var(--muted);
-    font-size:12px;
-}
-
-@media(max-width:900px){
-    h1{font-size:28px;}
-    .watermark{width:120px;opacity:.10;}
-}
+*{box-sizing:border-box;}
+body{margin:0;padding:24px;font-family:"Segoe UI",Arial,sans-serif;color:var(--text);background:linear-gradient(180deg,var(--bg),var(--bg2));}
+.report{max-width:1400px;margin:0 auto;}
+.hero{position:relative;border:1px solid var(--line);border-radius:16px;background:var(--panel);padding:22px 24px;margin-bottom:14px;}
+.watermark{position:absolute;right:20px;top:14px;width:88px;opacity:.12;}
+h1{margin:0;font-size:26px;font-weight:800;}
+.meta{margin-top:8px;font-size:13px;color:var(--muted);line-height:1.5;}
+.case-table{width:100%;border-collapse:collapse;margin-top:16px;font-size:13px;}
+.case-table th,.case-table td{padding:8px 10px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top;}
+.case-table th{width:200px;color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.05em;font-weight:700;}
+.case-table td{color:var(--text);word-break:break-word;}
+.table-shell{border:1px solid var(--line);border-radius:16px;overflow:hidden;background:var(--panel);margin-bottom:12px;}
+.table-head{padding:14px 18px;border-bottom:1px solid var(--line);}
+.table-head h2{margin:0;font-size:16px;font-weight:700;}
+.table-wrap{background:var(--paper);max-height:78vh;overflow:auto;}
+table.data{width:100%;border-collapse:separate;border-spacing:0;font-size:13px;}
+table.data thead th{position:sticky;top:0;z-index:2;background:#1f2937;color:#fff;padding:10px 12px;text-align:left;white-space:nowrap;border-bottom:2px solid #35a8ff;}
+table.data tbody td{padding:8px 12px;color:var(--ink);border-bottom:1px solid #e5e7eb;white-space:nowrap;}
+table.data tbody tr:nth-child(even) td{background:#f9fafb;}
+.footer{margin-top:8px;text-align:right;color:var(--muted);font-size:12px;}
 </style>
 </head>
 <body>
 <div class="report">
-
-<section class="hero">
-<img class="watermark" src="{{LOGO}}" alt="ViaNyquist">
-<h1>{{REPORT_TITLE}}</h1>
-<div class="meta-lines">
-<div><strong>{{EXPORTED_LABEL}}:</strong> {{EXPORTED_AT}}</div>
-<div><strong>{{SOURCE_LABEL}}:</strong> {{SOURCE}}</div>
-<div><strong>{{ROWS_LABEL}}:</strong> {{ROWS_COUNT}}</div>
-<div><strong>{{COLUMNS_LABEL}}:</strong> {{COLUMNS_COUNT}}</div>
-</div>
-<div class="info-strip">
-{{CASE_CONTEXT_CARDS}}
-</div>
-</section>
-
-<section class="panel">
-<h2>{{TABLE_TITLE}}</h2>
-<div class="table-wrap">
-<table>
-<thead><tr>{{TABLE_HEADERS}}</tr></thead>
-<tbody>
-{{TABLE_ROWS}}
-</tbody>
-</table>
-</div>
-</section>
-
-<div class="footer">{{GENERATED_BY_LABEL}} ViaNyquist</div>
-
+  <section class="hero">
+    <img class="watermark" src="{{LOGO}}" alt="">
+    <h1>{{REPORT_TITLE}}</h1>
+    <div class="meta">
+      <div><strong>{{EXPORTED_LABEL}}:</strong> {{EXPORTED_AT}} · <strong>{{SOURCE_LABEL}}:</strong> {{SOURCE}}</div>
+      <div><strong>{{ROWS_LABEL}}:</strong> {{ROWS_COUNT}} · <strong>{{COLUMNS_LABEL}}:</strong> {{COLUMNS_COUNT}}</div>
+    </div>
+    {{CASE_TABLE}}
+  </section>
+  <section class="table-shell">
+    <div class="table-head"><h2>{{TABLE_TITLE}}</h2></div>
+    <div class="table-wrap">
+      <table class="data">
+        <thead><tr>{{TABLE_HEADERS}}</tr></thead>
+        <tbody>{{TABLE_ROWS}}</tbody>
+      </table>
+    </div>
+  </section>
+  <div class="footer">{{GENERATED_BY_LABEL}} ViaNyquist</div>
 </div>
 </body>
 </html>

@@ -6,9 +6,12 @@ from datetime import datetime
 from pathlib import Path
 
 from core.db import Project
-from core.exporters.case_context import build_case_context, case_export_metadata_rows, context_cards_html
+from core.exporters.case_context import (
+    build_case_context,
+    case_context_table_html,
+    case_export_metadata_rows,
+)
 from core.exporters.tabular_export import export_tabular_csv, export_tabular_excel
-from core.formatters import format_short_date
 
 
 def export_listing_csv(
@@ -70,20 +73,7 @@ def export_listing_html(
     text = _report_text()
 
     meta = meta or {}
-
-    klasa = str(meta.get("OrigRegNo") or "-")
-    urbroj = str(meta.get("RegNo") or "-")
-    target = str(meta.get("target") or "-")
-    target_display = target
     case_context = build_case_context(project, project_name=project_name, dataset_meta=meta)
-
-    bt = format_short_date(meta.get("bt"), missing="-")
-    et = format_short_date(meta.get("et"), missing="-")
-
-    period = "-"
-    if bt != "-" or et != "-":
-        period = f"{bt} – {et}"
-
     dataset_name = Path(dataset).name if dataset else "(no dataset)"
     project_root = Path(__file__).resolve().parents[2]
     logo_path = project_root / "assets" / "ViaNyquist.png"
@@ -122,13 +112,7 @@ def export_listing_html(
         .replace("{{EXPORTED_LABEL}}", html.escape(text["exported"]))
         .replace("{{VIEW_MODE}}", html.escape(view_mode or "Unknown"))
         .replace("{{VIEW_LABEL}}", html.escape(text["view"]))
-        .replace("{{CASE_CONTEXT_CARDS}}", context_cards_html(case_context, card_class="info"))
-        .replace("{{KLASA}}", html.escape(klasa))
-        .replace("{{URBROJ}}", html.escape(urbroj))
-        .replace("{{TARGET_LABEL}}", html.escape(text["target"]))
-        .replace("{{TARGET}}", html.escape(target_display))
-        .replace("{{ORDER_VALIDITY_LABEL}}", html.escape(text["order_validity"]))
-        .replace("{{PERIOD}}", html.escape(period))
+        .replace("{{CASE_TABLE}}", case_context_table_html(case_context))
         .replace("{{ROWS_COUNT}}", str(len(rows)))
         .replace("{{ROWS_LABEL}}", html.escape(text["rows"]))
         .replace("{{COLUMNS_COUNT}}", str(len(headers)))
@@ -152,7 +136,5 @@ def _report_text() -> dict[str, str]:
         "rows": "Rows",
         "columns": "Columns",
         "json_files": "JSON files",
-        "target": "Target",
-        "order_validity": "Order validity",
         "table_title": "Listing Data",
     }

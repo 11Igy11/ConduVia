@@ -178,6 +178,13 @@ QLabel#DialogFieldLabel {
     color: #94a3b8;
 }
 
+QFrame#SettingsSectionRule {
+    color: #cbd5e1;
+    background: #cbd5e1;
+    border: none;
+    margin: 4px 0 2px;
+}
+
 QComboBox QAbstractItemView {
     background: #ffffff;
     color: #111827;
