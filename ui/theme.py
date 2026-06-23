@@ -165,9 +165,24 @@ QComboBox:focus {
 
 QLineEdit#SettingsField,
 QComboBox#SettingsField {
-    min-height: 36px;
-    max-height: 36px;
-    padding: 6px 10px;
+    min-height: 28px;
+    max-height: 28px;
+    padding: 4px 8px;
+    border-radius: 8px;
+}
+
+QLabel#SettingsFieldLabel,
+QLabel#DialogFieldLabel {
+    font-size: 12px;
+    font-weight: 600;
+    color: #94a3b8;
+}
+
+QFrame#SettingsSectionRule {
+    color: #cbd5e1;
+    background: #cbd5e1;
+    border: none;
+    margin: 4px 0 2px;
 }
 
 QComboBox QAbstractItemView {

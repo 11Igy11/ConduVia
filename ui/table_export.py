@@ -86,10 +86,23 @@ def export_table_file(
     project = get_project(project_id) if project_id is not None else None
 
     if export_format == "csv":
-        export_listing_csv(file_path, headers, rows)
+        export_listing_csv(
+            file_path,
+            headers,
+            rows,
+            project=project,
+            project_name=project_name,
+        )
         return
     if export_format == "xlsx":
-        export_listing_excel(file_path, headers, rows, sheet_title=title)
+        export_listing_excel(
+            file_path,
+            headers,
+            rows,
+            sheet_title=title,
+            project=project,
+            project_name=project_name,
+        )
         return
     if export_format == "html":
         export_table_html(

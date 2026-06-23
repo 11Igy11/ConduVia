@@ -8,6 +8,7 @@ from PySide6.QtWidgets import (
     QDialogButtonBox,
     QFormLayout,
     QFrame,
+    QGridLayout,
     QHBoxLayout,
     QHeaderView,
     QLineEdit,
@@ -38,6 +39,8 @@ from ui.ui_metrics import (
     DIALOG_FORM_WIDTH,
     DIALOG_MARGINS,
     DIALOG_SPACING,
+    PROJECT_DIALOG_HEIGHT,
+    PROJECT_DIALOG_WIDTH,
 )
 
 
@@ -504,13 +507,47 @@ def item_choice_dialog(
     return combo.currentText(), ok
 
 
+def _dialog_panel(title: str) -> tuple[QFrame, QVBoxLayout]:
+    panel = QFrame()
+    panel.setObjectName("ProfilePanel")
+    layout = QVBoxLayout(panel)
+    layout.setContentsMargins(16, 14, 16, 14)
+    layout.setSpacing(10)
+    title_label = QLabel(title)
+    title_label.setObjectName("ProfilePanelTitle")
+    layout.addWidget(title_label)
+    return panel, layout
+
+
+def _dialog_field_group(label_text: str, field: QWidget) -> QWidget:
+    host = QWidget()
+    layout = QVBoxLayout(host)
+    layout.setContentsMargins(0, 0, 0, 0)
+    layout.setSpacing(4)
+    label = QLabel(label_text)
+    label.setObjectName("DialogFieldLabel")
+    label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+    layout.addWidget(label)
+    layout.addWidget(field)
+    return host
+
+
+def _dialog_line_edit(value: str = "", *, placeholder: str = "") -> QLineEdit:
+    edit = QLineEdit()
+    edit.setText(value)
+    edit.setPlaceholderText(placeholder)
+    edit.setFixedHeight(DIALOG_FIELD_HEIGHT)
+    edit.setMaximumHeight(DIALOG_FIELD_HEIGHT)
+    return edit
+
+
 def project_details_dialog(
     parent,
     *,
     title: str,
     project=None,
     parent_folder: str = "",
-    width: int = DIALOG_FORM_WIDTH,
+    width: int = PROJECT_DIALOG_WIDTH,
 ):
     dlg = QDialog(parent)
     dlg.setWindowTitle(title)
@@ -522,6 +559,7 @@ def project_details_dialog(
     intro = QLabel("Project details and known subject/device identifiers.")
     intro.setWordWrap(True)
     intro.setTextFormat(Qt.PlainText)
+    intro.setObjectName("DialogDetailsLabel")
     layout.addWidget(intro)
 
     scroll = QScrollArea()
@@ -529,63 +567,64 @@ def project_details_dialog(
     scroll.setFrameShape(QScrollArea.NoFrame)
     scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
 
-    form_host = QWidget()
-    form = QFormLayout(form_host)
-    form.setLabelAlignment(Qt.AlignRight)
-    form.setFormAlignment(Qt.AlignTop)
-    form.setHorizontalSpacing(12)
-    form.setVerticalSpacing(8)
-    form.setContentsMargins(0, 0, 4, 6)
+    content = QWidget()
+    content_layout = QVBoxLayout(content)
+    content_layout.setContentsMargins(0, 0, 4, 0)
+    content_layout.setSpacing(14)
 
-    edit_name = QLineEdit()
-    edit_name.setText(getattr(project, "name", "") or "")
-    edit_name.setFixedHeight(DIALOG_FIELD_HEIGHT)
-    form.addRow("Project name:", edit_name)
+    fields: dict[str, QLineEdit | QPlainTextEdit] = {}
+
+    project_panel, project_layout = _dialog_panel("Project")
+    edit_name = _dialog_line_edit(getattr(project, "name", "") or "")
+    project_layout.addWidget(_dialog_field_group("Project name", edit_name))
 
     edit_desc = QPlainTextEdit()
     edit_desc.setPlainText(getattr(project, "description", "") or "")
-    edit_desc.setFixedHeight(56)
-    form.addRow("Description:", edit_desc)
+    edit_desc.setFixedHeight(48)
+    project_layout.addWidget(_dialog_field_group("Description", edit_desc))
 
     workspace_row = QHBoxLayout()
     workspace_row.setSpacing(8)
     workspace_row.setContentsMargins(0, 0, 0, 0)
-    edit_parent = QLineEdit()
-    edit_parent.setText(parent_folder or "")
-    edit_parent.setPlaceholderText("Required parent folder for ViaNyquist workspace")
-    edit_parent.setFixedHeight(DIALOG_FIELD_HEIGHT)
+    edit_parent = _dialog_line_edit(parent_folder or "", placeholder="Required parent folder for ViaNyquist workspace")
     btn_browse = make_dialog_button("Browse...")
+    btn_browse.setFixedHeight(DIALOG_FIELD_HEIGHT)
     workspace_row.addWidget(edit_parent, 1)
     workspace_row.addWidget(btn_browse, 0, Qt.AlignVCenter)
     workspace_host = QWidget()
     workspace_host.setLayout(workspace_row)
-    form.addRow("Workspace parent:", workspace_host)
+    project_layout.addWidget(_dialog_field_group("Workspace parent", workspace_host))
+    content_layout.addWidget(project_panel)
 
-    section = QLabel("Case subject / identifiers")
-    section.setObjectName("DialogSectionLabel")
-    form.addRow("", section)
-
-    fields: dict[str, QLineEdit | QPlainTextEdit] = {}
-
-    def add_line(key: str, label: str, attr: str = "", placeholder: str = "") -> None:
-        edit = QLineEdit()
-        edit.setText(getattr(project, attr or key, "") or "")
-        edit.setPlaceholderText(placeholder)
-        edit.setFixedHeight(DIALOG_FIELD_HEIGHT)
+    subject_panel, subject_layout = _dialog_panel("Case subject / identifiers")
+    identifier_specs = [
+        ("first_name", "First name", "subject_first_name"),
+        ("last_name", "Last name", "subject_last_name"),
+        ("oib", "OIB", "subject_oib"),
+        ("msisdn", "Mobile / MSISDN", "subject_msisdn"),
+        ("imsi", "IMSI", "subject_imsi"),
+        ("imei", "IMEI", "subject_imei"),
+        ("ip", "Known IP", "subject_ip"),
+    ]
+    grid = QGridLayout()
+    grid.setHorizontalSpacing(14)
+    grid.setVerticalSpacing(10)
+    for index, (key, label, attr) in enumerate(identifier_specs):
+        edit = _dialog_line_edit(getattr(project, attr or key, "") or "")
         fields[key] = edit
-        form.addRow(label, edit)
+        row, col = divmod(index, 2)
+        grid.addWidget(_dialog_field_group(label, edit), row, col)
+    subject_layout.addLayout(grid)
 
-    add_line("first_name", "First name:", "subject_first_name")
-    add_line("last_name", "Last name:", "subject_last_name")
-    add_line("oib", "OIB:", "subject_oib")
-    add_line("msisdn", "Mobile / MSISDN:", "subject_msisdn")
-    add_line("imsi", "IMSI:", "subject_imsi")
-    add_line("imei", "IMEI:", "subject_imei")
-    add_line("ip", "Known IP:", "subject_ip")
+    extra = QPlainTextEdit()
+    extra.setPlainText(getattr(project, "subject_extra_identifiers", "") or "")
+    extra.setPlaceholderText("Other identifiers or notes, one per line.")
+    extra.setFixedHeight(48)
+    fields["extra_identifiers"] = extra
+    subject_layout.addWidget(_dialog_field_group("Other identifiers", extra))
+    content_layout.addWidget(subject_panel)
 
-    section_order = QLabel("Case order metadata")
-    section_order.setObjectName("DialogSectionLabel")
-    form.addRow("", section_order)
+    metadata_panel, metadata_layout = _dialog_panel("Case order metadata")
 
     from core.case_metadata import (
         active_klasa_value,
@@ -614,6 +653,7 @@ def project_details_dialog(
         placeholder: str,
     ) -> None:
         row = QHBoxLayout()
+        row.setSpacing(8)
         edit = QLineEdit()
         edit.setText(initial)
         edit.setPlaceholderText(placeholder)
@@ -636,7 +676,7 @@ def project_details_dialog(
         btn_pick.clicked.connect(show_picker)
         row.addWidget(edit, 1)
         row.addWidget(btn_pick)
-        form.addRow(label, row)
+        metadata_layout.addWidget(_dialog_field_group(label.rstrip(":"), _wrap_layout(row)))
 
     add_metadata_field(
         "klasa",
@@ -666,6 +706,7 @@ def project_details_dialog(
     fields["order_validity_et"] = edit_valid_to
 
     validity_row = QHBoxLayout()
+    validity_row.setSpacing(8)
     validity_row.addWidget(edit_valid_from, 1)
     arrow = QLabel("→")
     arrow.setObjectName("Muted")
@@ -696,19 +737,11 @@ def project_details_dialog(
 
     btn_periods.clicked.connect(show_validity_periods)
     validity_row.addWidget(btn_periods)
-    validity_host = QWidget()
-    validity_host.setLayout(validity_row)
-    form.addRow("Order validity:", validity_host)
+    metadata_layout.addWidget(_dialog_field_group("Order validity", _wrap_layout(validity_row)))
+    content_layout.addWidget(metadata_panel)
 
-    extra = QPlainTextEdit()
-    extra.setPlainText(getattr(project, "subject_extra_identifiers", "") or "")
-    extra.setPlaceholderText("Other identifiers or notes, one per line.")
-    extra.setFixedHeight(60)
-    fields["extra_identifiers"] = extra
-    form.addRow("Other:", extra)
-
-    scroll.setWidget(form_host)
-    layout.addWidget(scroll)
+    scroll.setWidget(content)
+    layout.addWidget(scroll, 1)
 
     def browse_parent() -> None:
         selected = QFileDialog.getExistingDirectory(
@@ -748,20 +781,9 @@ def project_details_dialog(
     buttons.rejected.connect(dlg.reject)
     _add_dialog_buttons(layout, buttons)
 
-    form_host.adjustSize()
-    dlg.adjustSize()
     screen = dlg.screen().availableGeometry() if dlg.screen() else None
     dialog_width = min(width, screen.width() - 64) if screen else width
-    chrome_height = max(96, dlg.sizeHint().height() - scroll.sizeHint().height())
-    content_height = form_host.sizeHint().height()
-    max_content = int(screen.height() * 0.72) - chrome_height if screen else 420
-    if content_height <= max(max_content, 200):
-        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        scroll.setFixedHeight(content_height + 4)
-    else:
-        scroll.setFixedHeight(max(280, max_content))
-    dlg.adjustSize()
-    dialog_height = min(dlg.sizeHint().height(), screen.height() - 48 if screen else dlg.sizeHint().height())
+    dialog_height = min(PROJECT_DIALOG_HEIGHT, screen.height() - 48) if screen else PROJECT_DIALOG_HEIGHT
     dlg.resize(dialog_width, dialog_height)
 
     if dlg.exec() != QDialog.Accepted:
@@ -780,6 +802,12 @@ def project_details_dialog(
         "parent_folder": edit_parent.text().strip(),
         **subject,
     }, True
+
+
+def _wrap_layout(inner: QHBoxLayout) -> QWidget:
+    host = QWidget()
+    host.setLayout(inner)
+    return host
 
 
 def confirm_dialog(

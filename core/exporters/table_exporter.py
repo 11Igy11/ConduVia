@@ -5,7 +5,7 @@ from datetime import datetime
 from pathlib import Path
 
 from core.db import Project
-from core.exporters.case_context import build_case_context, context_cards_html
+from core.exporters.case_context import build_case_context, case_context_table_html
 from core.exporters.template_utils import load_template, logo_data_uri, render_template
 
 
@@ -45,7 +45,7 @@ def export_table_html(
             "ROWS_COUNT": len(rows),
             "COLUMNS_LABEL": text["columns"],
             "COLUMNS_COUNT": len(headers),
-            "CASE_CONTEXT_CARDS": context_cards_html(case_context, card_class="info"),
+            "CASE_TABLE": case_context_table_html(case_context),
             "TABLE_TITLE": text["table_title"],
             "TABLE_HEADERS": table_headers,
             "TABLE_ROWS": table_rows,
