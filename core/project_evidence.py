@@ -397,10 +397,16 @@ def _build_capture_range(sources: list[Any]) -> dict[str, str]:
     capture_ends = [str(source.last_seen or "") for source in sources if source.last_seen]
     capture_start = min(capture_starts) if capture_starts else ""
     capture_end = max(capture_ends) if capture_ends else ""
+    start_label = format_pcap_datetime(capture_start) if capture_start else ""
+    end_label = format_pcap_datetime(capture_end) if capture_end else ""
+    if start_label and end_label:
+        label = f"{start_label} to {end_label}"
+    else:
+        label = "-"
     return {
         "first_seen": capture_start,
         "last_seen": capture_end,
-        "label": f"{capture_start} to {capture_end}" if capture_start and capture_end else "-",
+        "label": label,
     }
 
 

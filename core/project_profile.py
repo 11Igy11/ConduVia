@@ -74,8 +74,8 @@ def build_project_activity_profile(
     json_day_rows = list(behavior_index.get("day_rows") or [])
     total_packets = int(pcap_evidence["total_packets"] or 0)
     total_pcap_bytes = int(pcap_evidence["total_bytes"] or 0)
-    capture_start = str(pcap_evidence["capture_range"].get("first_seen") or "")
-    capture_end = str(pcap_evidence["capture_range"].get("last_seen") or "")
+    capture_range = dict(pcap_evidence.get("capture_range") or {})
+    capture_label = str(capture_range.get("label") or "-")
     activity_types = Counter(str(row["event_type"] or "event") for row in activity)
     pcap_day_count = int(pcap_evidence["day_count"] or 0)
     pcap_file_count = int(pcap_evidence["source_count"] or 0)
@@ -119,7 +119,7 @@ def build_project_activity_profile(
     if pcaps:
         summary_lines.extend([
             f"- PCAP packet volume: {total_packets:,} packets / {human_bytes(total_pcap_bytes, precision=2)}",
-            f"- PCAP capture range: {capture_start or '-'} to {capture_end or '-'}",
+            f"- PCAP capture range: {capture_label}",
             f"- PCAP device IPs: {len(pcap_device_ip_rows):,} unique",
         ])
     else:
@@ -191,11 +191,7 @@ def build_project_activity_profile(
         "period_comparison_rows": period_comparison_rows,
         "json_day_rows": json_day_rows,
         "readiness": readiness,
-        "capture_range": {
-            "first_seen": capture_start,
-            "last_seen": capture_end,
-            "label": f"{capture_start} to {capture_end}" if capture_start and capture_end else "-",
-        },
+        "capture_range": capture_range,
         "total_pcap_packets": total_packets,
         "total_pcap_bytes": total_pcap_bytes,
         "total_pcap_bytes_label": pcap_evidence["total_bytes_label"],
