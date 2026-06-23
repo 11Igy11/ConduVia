@@ -21,6 +21,22 @@ def build_case_context(
     else:
         dataset_target_label = dataset_target or dataset_target_type or "-"
 
+    klasa = "-"
+    urbroj = "-"
+    order_validity = "-"
+    if project and getattr(project, "id", None):
+        from core.case_metadata import (
+            format_active_order_validity,
+            format_klasa_summary,
+            format_urbroj_summary,
+            load_case_metadata,
+        )
+
+        case_metadata = load_case_metadata(int(project.id))
+        klasa = format_klasa_summary(case_metadata)
+        urbroj = format_urbroj_summary(case_metadata)
+        order_validity = format_active_order_validity(case_metadata)
+
     if project:
         return {
             "project": project.name or project_name or "-",
@@ -29,6 +45,9 @@ def build_case_context(
             "oib": project.subject_oib or "-",
             "known_ip": project.subject_ip or "-",
             "dataset_target": dataset_target_label,
+            "klasa": klasa,
+            "urbroj": urbroj,
+            "order_validity": order_validity,
         }
 
     return {
@@ -38,7 +57,30 @@ def build_case_context(
         "oib": "-",
         "known_ip": "-",
         "dataset_target": dataset_target_label,
+        "klasa": klasa,
+        "urbroj": urbroj,
+        "order_validity": order_validity,
     }
+
+
+def case_export_metadata_rows(context: dict[str, str]) -> list[tuple[str, str]]:
+    rows = [
+        ("Project", context.get("project") or "-"),
+        ("Case Subject", context.get("subject") or "-"),
+        ("Known Identifiers", context.get("identifiers") or "-"),
+    ]
+    for label, key in (
+        ("OIB", "oib"),
+        ("Known IP", "known_ip"),
+        ("Klasa", "klasa"),
+        ("Urbroj", "urbroj"),
+        ("Order Validity", "order_validity"),
+        ("Dataset Target", "dataset_target"),
+    ):
+        value = str(context.get(key) or "").strip()
+        if value and value != "-":
+            rows.append((label, value))
+    return rows
 
 
 def context_cards_html(
@@ -60,6 +102,11 @@ def context_cards_html(
 
     if context.get("known_ip") and context.get("known_ip") != "-":
         fields.append(("Known IP", context.get("known_ip") or "-"))
+
+    for label, key in (("Klasa", "klasa"), ("Urbroj", "urbroj"), ("Order Validity", "order_validity")):
+        value = str(context.get(key) or "").strip()
+        if value and value != "-":
+            fields.append((label, value))
 
     if include_dataset_target:
         fields.append(("Dataset Target", context.get("dataset_target") or "-"))

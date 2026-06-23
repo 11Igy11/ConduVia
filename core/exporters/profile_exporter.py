@@ -7,7 +7,7 @@ from typing import Any
 
 from core.db import Project
 from core.exporters.case_context import build_case_context, context_cards_html
-from core.exporters.template_utils import load_template, render_template
+from core.exporters.template_utils import load_template, logo_data_uri, render_template
 
 
 def export_activity_profile_html(
@@ -26,6 +26,7 @@ def export_activity_profile_html(
     template = load_template("profile_export.html")
     html_doc = render_template(template, {
         "LANG": "en",
+        "LOGO": logo_data_uri(),
         "TITLE": text["title"],
         "PROJECT_LABEL": text["project"],
         "PROJECT_NAME": html.escape(project_name or text["project_fallback"]),

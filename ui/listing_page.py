@@ -770,6 +770,16 @@ class ListingPage(QWidget):
 
         return headers, rows
     
+    def _export_dataset_meta(self) -> dict:
+        try:
+            if self.files:
+                return extract_dataset_meta(self.files[0])
+            if self.dataset_path:
+                return extract_dataset_meta(self.dataset_path)
+        except Exception:
+            pass
+        return {}
+
     def _export_csv(self, headers, rows):
         default_path = self._default_export_path("listing_export.csv")
         file_path, _ = QFileDialog.getSaveFileName(
@@ -783,7 +793,14 @@ class ListingPage(QWidget):
             return
 
         try:
-            export_listing_csv(file_path, headers, rows)
+            export_listing_csv(
+                file_path,
+                headers,
+                rows,
+                project=self._current_project(),
+                project_name=getattr(self.app, "current_project_name", "") or "",
+                dataset_meta=self._export_dataset_meta(),
+            )
 
             message_dialog(
                 self,
@@ -814,7 +831,14 @@ class ListingPage(QWidget):
             return
 
         try:
-            export_listing_excel(file_path, headers, rows)
+            export_listing_excel(
+                file_path,
+                headers,
+                rows,
+                project=self._current_project(),
+                project_name=getattr(self.app, "current_project_name", "") or "",
+                dataset_meta=self._export_dataset_meta(),
+            )
 
             message_dialog(
                 self,
@@ -845,15 +869,7 @@ class ListingPage(QWidget):
             return
 
         try:
-            meta = {}
-
-            try:
-                if self.files:
-                    meta = extract_dataset_meta(self.files[0])
-                elif self.dataset_path:
-                    meta = extract_dataset_meta(self.dataset_path)
-            except Exception:
-                meta = {}
+            meta = self._export_dataset_meta()
 
             export_listing_html(
                 file_path=file_path,

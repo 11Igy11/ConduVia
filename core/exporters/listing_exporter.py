@@ -8,7 +8,7 @@ from datetime import datetime
 from pathlib import Path
 
 from core.db import Project
-from core.exporters.case_context import build_case_context, context_cards_html
+from core.exporters.case_context import build_case_context, case_export_metadata_rows, context_cards_html
 from core.formatters import format_short_date
 
 from openpyxl import Workbook
@@ -45,11 +45,25 @@ def _sanitize_excel_cell(value: object) -> str:
     return text
 
 
-def export_listing_csv(file_path: str, headers: list[str], rows: list[list[str]]) -> None:
+def export_listing_csv(
+    file_path: str,
+    headers: list[str],
+    rows: list[list[str]],
+    *,
+    project: Project | None = None,
+    project_name: str = "",
+    dataset_meta: dict | None = None,
+) -> None:
     path = Path(file_path)
+    case_context = build_case_context(project, project_name=project_name, dataset_meta=dataset_meta)
+    metadata_rows = case_export_metadata_rows(case_context)
 
     with path.open("w", newline="", encoding="utf-8-sig") as f:
         writer = csv.writer(f)
+        for label, value in metadata_rows:
+            writer.writerow([f"# {label}: {value}"])
+        if metadata_rows:
+            writer.writerow([])
         writer.writerow(headers)
         writer.writerows(rows)
 
@@ -59,29 +73,42 @@ def export_listing_excel(
     rows: list[list[str]],
     *,
     sheet_title: str = "Listing",
+    project: Project | None = None,
+    project_name: str = "",
+    dataset_meta: dict | None = None,
 ) -> None:
     path = Path(file_path)
+    case_context = build_case_context(project, project_name=project_name, dataset_meta=dataset_meta)
+    metadata_rows = case_export_metadata_rows(case_context)
 
     wb = Workbook()
     ws = wb.active
     ws.title = _sanitize_excel_sheet_title(sheet_title)
 
+    meta_font = Font(bold=True, color="374151")
+    for label, value in metadata_rows:
+        ws.append([_sanitize_excel_cell(label), _sanitize_excel_cell(value)])
+        label_cell = ws.cell(row=ws.max_row, column=1)
+        label_cell.font = meta_font
+    if metadata_rows:
+        ws.append([])
+
     safe_headers = [_sanitize_excel_cell(header) for header in headers]
+    header_row = ws.max_row + 1
     ws.append(safe_headers)
 
     header_fill = PatternFill(fill_type="solid", fgColor="1F2937")
     header_font = Font(bold=True, color="FFFFFF")
 
     for col_idx, header in enumerate(safe_headers, start=1):
-        cell = ws.cell(row=1, column=col_idx)
+        cell = ws.cell(row=header_row, column=col_idx)
         cell.fill = header_fill
         cell.font = header_font
 
     for row in rows:
         ws.append([_sanitize_excel_cell(cell) for cell in row])
 
-    # Freeze header
-    ws.freeze_panes = "A2"
+    ws.freeze_panes = ws.cell(row=header_row + 1, column=1)
 
     # Autofilter
     ws.auto_filter.ref = ws.dimensions
