@@ -1,4 +1,4 @@
-from core.output_language import ai_language_instruction
+AI_LANGUAGE_INSTRUCTION = "Write the response in English."
 
 
 SYSTEM_PROMPT = """You are a network behavior analyst for ViaNyquist.
@@ -23,7 +23,7 @@ Safety and accuracy rules:
 """
 
 
-def build_dataset_summary_prompt(context: str, *, language: str = "hr") -> str:
+def build_dataset_summary_prompt(context: str) -> str:
     return f"""
 You are analyzing a summarized network flow dataset.
 
@@ -74,11 +74,11 @@ STYLE:
 - Practical, analytical, and readable.
 - No filler.
 - Do not repeat the full raw context.
-- {ai_language_instruction(language)}
+- {AI_LANGUAGE_INSTRUCTION}
 """.strip()
 
 
-def build_flow_explanation_prompt(flow_context: str, *, language: str = "hr") -> str:
+def build_flow_explanation_prompt(flow_context: str) -> str:
     return f"""
 You are analyzing one network flow record.
 
@@ -113,11 +113,11 @@ Forbidden unless explicitly supported:
 - Malware, C2, exfiltration, compromise, attack, victim, malicious, suspicious.
 
 Language:
-- {ai_language_instruction(language)}
+- {AI_LANGUAGE_INSTRUCTION}
 """.strip()
 
 
-def build_finding_explanation_prompt(finding_context: str, *, language: str = "hr") -> str:
+def build_finding_explanation_prompt(finding_context: str) -> str:
     return f"""
 You are explaining a saved analyst finding from network flow review.
 
@@ -154,11 +154,11 @@ Forbidden unless explicitly supported:
 - Malware, C2, exfiltration, compromise, attack, victim, malicious, suspicious.
 
 Language:
-- {ai_language_instruction(language)}
+- {AI_LANGUAGE_INSTRUCTION}
 """.strip()
 
 
-def build_pcap_summary_prompt(context: str, *, language: str = "hr") -> str:
+def build_pcap_summary_prompt(context: str) -> str:
     return f"""
 You are analyzing a packet capture summary for an investigator.
 
@@ -207,14 +207,14 @@ Recommended Next Steps
 - Give practical checks tied to this capture and ViaNyquist workflow: compare with project datasets, save to project, add notes, review artifacts/evidence/connections, enrich hostnames/IPs externally if needed.
 
 STYLE:
-- {ai_language_instruction(language)}
+- {AI_LANGUAGE_INSTRUCTION}
 - Practical, concise, investigator-friendly.
 - No generic cybersecurity lecture.
 - Do not repeat the full raw context.
 """.strip()
 
 
-def build_activity_profile_summary_prompt(context: str, *, language: str = "hr") -> str:
+def build_activity_profile_summary_prompt(context: str) -> str:
     return f"""
 You are analyzing a ViaNyquist Activity Profile for an investigator.
 
@@ -253,7 +253,7 @@ Limits Of Interpretation
 - State what cannot be concluded from this project profile alone.
 
 STYLE:
-- {ai_language_instruction(language)}
+- {AI_LANGUAGE_INSTRUCTION}
 - Practical, concise, investigator-friendly.
 - No generic cybersecurity lecture.
 - Do not repeat the full raw context.

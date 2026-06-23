@@ -5,7 +5,7 @@ from typing import Any
 from PySide6.QtCore import QObject, QThread, Qt, Signal, Slot
 from PySide6.QtWidgets import QFileDialog, QMessageBox, QProgressDialog, QTableView, QWidget
 
-from core.db import get_app_settings, get_project
+from core.db import get_project
 from core.exporters.listing_exporter import export_listing_csv, export_listing_excel
 from core.exporters.table_exporter import export_table_html
 from core.protocols import format_ip_proto
@@ -82,9 +82,7 @@ def export_table_file(
     project_id: int | None = None,
     project_name: str = "",
     source_label: str = "",
-    report_language: str | None = None,
 ) -> None:
-    lang = report_language or get_app_settings().get("output_language", "hr")
     project = get_project(project_id) if project_id is not None else None
 
     if export_format == "csv":
@@ -99,7 +97,6 @@ def export_table_file(
             title,
             headers,
             rows,
-            lang=lang,
             project=project,
             project_name=project_name,
             source_label=source_label,
@@ -124,7 +121,6 @@ class TableExportWorker(QObject):
         project_id: int | None = None,
         project_name: str = "",
         source_label: str = "",
-        report_language: str | None = None,
     ):
         super().__init__()
         self.file_path = file_path
@@ -136,7 +132,6 @@ class TableExportWorker(QObject):
         self.project_id = project_id
         self.project_name = project_name
         self.source_label = source_label
-        self.report_language = report_language
 
     @Slot()
     def run(self) -> None:
@@ -154,7 +149,6 @@ class TableExportWorker(QObject):
                 project_id=self.project_id,
                 project_name=self.project_name,
                 source_label=self.source_label,
-                report_language=self.report_language,
             )
             self.finished.emit(self.file_path)
         except Exception as exc:
@@ -170,7 +164,6 @@ def _run_export_in_background(
     project_id: int | None,
     project_name: str,
     source_label: str,
-    report_language: str | None,
     headers: list[str] | None = None,
     rows: list[list[str]] | None = None,
     flows: list[dict[str, Any]] | None = None,
@@ -194,7 +187,6 @@ def _run_export_in_background(
         project_id=project_id,
         project_name=project_name,
         source_label=source_label,
-        report_language=report_language,
     )
     worker.moveToThread(thread)
     thread.started.connect(worker.run)
@@ -261,7 +253,6 @@ def export_table_dialog(
     project_id: int | None = None,
     category: str = "json",
     source_label: str = "",
-    report_language: str | None = None,
     flows_override: list[dict[str, Any]] | None = None,
 ) -> None:
     if flows_override is not None:
@@ -310,7 +301,6 @@ def export_table_dialog(
             project_id=project_id,
             project_name=project_name,
             source_label=source_label,
-            report_language=report_language,
         )
         return
 
@@ -324,7 +314,6 @@ def export_table_dialog(
             project_id=project_id,
             project_name=project_name,
             source_label=source_label,
-            report_language=report_language,
         )
     except Exception as exc:
         QMessageBox.critical(parent, "Export table failed", str(exc))

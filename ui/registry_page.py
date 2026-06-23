@@ -1306,7 +1306,6 @@ class RegistryPage(QWidget):
                 include_full=bool(self.chk_full.isChecked()),
                 project=project,
                 project_name=getattr(self.app, "current_project_name", "") or "",
-                report_language=get_app_settings().get("output_language", "hr"),
                 period_context=self._export_period_context(),
             )
 

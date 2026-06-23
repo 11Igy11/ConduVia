@@ -8,7 +8,6 @@ from typing import Any
 from core.db import Project
 from core.exporters.case_context import build_case_context, context_cards_html
 from core.exporters.template_utils import load_template, render_template
-from core.output_language import normalize_output_language
 
 
 def export_activity_profile_html(
@@ -17,18 +16,16 @@ def export_activity_profile_html(
     profile: dict[str, Any],
     project_name: str = "",
     project: Project | None = None,
-    report_language: str = "en",
 ) -> None:
     path = Path(file_path)
-    lang = normalize_output_language(report_language, default="en")
-    text = _report_text(lang)
+    text = _report_text()
     generated_at = datetime.now().strftime("%d.%m.%Y %H:%M:%S")
     behavior = dict(profile.get("behavior_profile") or {})
     case_context = build_case_context(project, project_name=project_name)
 
     template = load_template("profile_export.html")
     html_doc = render_template(template, {
-        "LANG": lang,
+        "LANG": "en",
         "TITLE": text["title"],
         "PROJECT_LABEL": text["project"],
         "PROJECT_NAME": html.escape(project_name or text["project_fallback"]),
@@ -74,7 +71,7 @@ def _metric_cards(profile: dict[str, Any], text: dict[str, str]) -> str:
 
 
 def _bar_table(title: str, rows: list[dict[str, Any]], value_key: str, value_label_key: str = "", *, text: dict[str, str] | None = None) -> str:
-    labels = text or _report_text("en")
+    labels = text or _report_text()
     if not rows:
         return f"<h2>{html.escape(title)}</h2><div class=\"plain\">{html.escape(labels['no_records'])}</div>"
 
@@ -125,41 +122,7 @@ def _metric_label(label: str, text: dict[str, str]) -> str:
     }.get(label, label)
 
 
-def _report_text(language: str) -> dict[str, str]:
-    if normalize_output_language(language, default="en") == "hr":
-        return {
-            "title": "ViaNyquist profil aktivnosti",
-            "project": "Projekt",
-            "project_fallback": "Projekt",
-            "exported": "Izvezeno",
-            "case_snapshot": "Snimka predmeta",
-            "evidence_overview": "Pregled dokaza",
-            "evidence_sources": "Izvori dokaza",
-            "pcap_device_ip_distribution": "Distribucija IP adresa uredaja iz PCAP-a",
-            "behavior_insights": "Uvidi u ponasanje iz spremljenih JSON datasetova",
-            "behavior_note": "Ovi indikatori opisuju uocene obrasce aktivnosti uredaja. To su istrazni indikatori, a ne dokaz tocne budnosti/spavanja osobe ili sadrzaja poruka.",
-            "service_groups_by_volume": "Grupe usluga po volumenu",
-            "observed_domains_by_volume": "Uocene domene po volumenu",
-            "json_activity_by_day": "JSON aktivnost po danu",
-            "pcap_activity_by_day": "PCAP volumen po danu",
-            "activity_by_hour": "Aktivnost po satu",
-            "hourly_activity": "Satna aktivnost",
-            "activity_rhythm": "Ritam aktivnosti",
-            "next_review": "Sljedeca provjera",
-            "recent_project_timeline": "Nedavna vremenska crta projekta",
-            "datasets": "JSON datasetovi",
-            "json_datasets": "JSON datasetovi",
-            "pcap_sources": "PCAP izvori",
-            "pcap_days": "PCAP dani",
-            "findings": "Nalazi",
-            "device_ips": "IP adrese uredaja",
-            "pcap_volume": "PCAP volumen",
-            "capture_range": "Raspon snimke",
-            "item": "Stavka",
-            "chart": "Graf",
-            "value": "Vrijednost",
-            "no_records": "Nema zapisa.",
-        }
+def _report_text() -> dict[str, str]:
     return {
         "title": "ViaNyquist Activity Profile",
         "project": "Project",

@@ -10,7 +10,6 @@ from pathlib import Path
 from core.db import Project
 from core.exporters.case_context import build_case_context, context_cards_html
 from core.formatters import format_short_date
-from core.output_language import normalize_output_language
 
 from openpyxl import Workbook
 from openpyxl.cell.cell import ILLEGAL_CHARACTERS_RE
@@ -115,11 +114,9 @@ def export_listing_html(
     meta: dict | None = None,
     project: Project | None = None,
     project_name: str = "",
-    report_language: str = "en",
 ) -> None:
     path = Path(file_path)
-    lang = normalize_output_language(report_language, default="en")
-    text = _report_text(lang)
+    text = _report_text()
 
     meta = meta or {}
 
@@ -166,7 +163,7 @@ def export_listing_html(
 
     rendered = (
         template
-        .replace("{{LANG}}", html.escape(lang))
+        .replace("{{LANG}}", "en")
         .replace("{{TITLE}}", html.escape(text["title"]))
         .replace("{{REPORT_TITLE}}", html.escape(text["title"]))
         .replace("{{LOGO}}", html.escape(logo_data_uri))
@@ -197,20 +194,7 @@ def export_listing_html(
     path.write_text(rendered, encoding="utf-8")
 
 
-def _report_text(language: str) -> dict[str, str]:
-    if normalize_output_language(language, default="en") == "hr":
-        return {
-            "title": "ViaNyquist listing izvjestaj",
-            "dataset": "Dataset",
-            "exported": "Izvezeno",
-            "view": "Prikaz",
-            "rows": "Redovi",
-            "columns": "Stupci",
-            "json_files": "JSON datoteke",
-            "target": "Target",
-            "order_validity": "Valjanost naloga",
-            "table_title": "Listing podaci",
-        }
+def _report_text() -> dict[str, str]:
     return {
         "title": "ViaNyquist Listing Report",
         "dataset": "Dataset",

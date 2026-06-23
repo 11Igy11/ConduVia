@@ -865,7 +865,6 @@ class ListingPage(QWidget):
                 meta=meta,
                 project=self._current_project(),
                 project_name=getattr(self.app, "current_project_name", "") or "",
-                report_language=get_app_settings().get("output_language", "hr"),
             )
 
             message_dialog(

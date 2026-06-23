@@ -489,7 +489,7 @@ class PcapPage(QWidget):
             max_rows=PROFILE_CHART_PREVIEW_ROWS,
         )
         self.chart_activity = BarChartWidget(
-            "Busiest activity buckets",
+            "Hourly activity (peak hours)",
             value_key="count",
             value_label_key="value",
             label_width=175,
@@ -2007,7 +2007,7 @@ class PcapPage(QWidget):
         self._period_load_progress = bar
         self._sync_period_gap_visibility()
 
-    def _update_period_load_progress(self, current: int, total: int, label: str = "") -> None:
+    def _update_period_load_progress(self, current: int, total: int, label: str = "", *, current_file: str = "") -> None:
         bar = getattr(self, "load_progress", None)
         if bar is None or bar.isHidden():
             return
@@ -2015,6 +2015,9 @@ class PcapPage(QWidget):
             bar.setRange(0, max(1, total))
             bar.setValue(max(0, min(current, total)))
             progress_text = f"{current} / {total}"
+            file_name = Path(str(current_file or "")).name if current_file else ""
+            if file_name:
+                progress_text = f"{progress_text} — {file_name}"
         elif label:
             progress_text = str(label)
         else:
@@ -2051,7 +2054,11 @@ class PcapPage(QWidget):
         else:
             current_text = label or f"{len(paths):,} PCAP files"
             self.lbl_file.setText(self._active_period_title(file_count=len(paths)))
-        self.lbl_stats.setText("Analyzing capture..." if len(paths) == 1 else f"Analyzing {len(paths):,} PCAP files for selected day...")
+        self.lbl_stats.setText(
+            "Analyzing capture..."
+            if len(paths) == 1
+            else f"Analyzing {len(paths):,} PCAP files for selected period..."
+        )
         self._set_stats_style("PcapLoadingStatus")
         self._update_batch_status(current_text)
         show_bar = len(paths) > 1 or self._pcap_period_granularity in {"month", "range"}
@@ -2176,7 +2183,70 @@ class PcapPage(QWidget):
             label = f"{self._format_day_label(day)} ({len(paths):,} PCAP files)"
         elif len(paths) > 1:
             label = f"{len(paths):,} PCAP files"
-        self._load_pcap_files(paths, label=label)
+        if len(paths) == 1:
+            self._load_pcap_files(paths, label=label)
+        else:
+            self._start_period_reanalyze(paths, day=day, label=label)
+
+    def _start_period_reanalyze(self, paths: list[str], *, day: str = "", label: str = "") -> None:
+        if self._thread is not None or self._batch_thread is not None:
+            QMessageBox.information(self, "PCAP", "PCAP analysis is already running.")
+            return
+
+        clean_paths = [str(path) for path in paths if str(path or "").strip()]
+        if not clean_paths:
+            return
+
+        self._pcap_queue = []
+        self._pcap_queue_auto_save = False
+        self._pcap_queue_auto_process = False
+        self._pcap_batch_total = len(clean_paths)
+        self._pcap_batch_processed = 0
+        self._pcap_batch_failed = 0
+        self._pcap_batch_current_label = ""
+
+        self.btn_open.setEnabled(False)
+        self.btn_open.setText("Loading...")
+        self.btn_export.setEnabled(False)
+        self.btn_ai_summary.setEnabled(False)
+        if hasattr(self, "btn_export_full_dns"):
+            self.btn_export_full_dns.setEnabled(False)
+        if hasattr(self, "btn_export_full_tls"):
+            self.btn_export_full_tls.setEnabled(False)
+        if hasattr(self, "btn_reanalyze_period"):
+            self.btn_reanalyze_period.setEnabled(False)
+        self.btn_save_project.setEnabled(False)
+        self.btn_add_notes.setEnabled(False)
+        self.txt_pcap_ai_summary.clear()
+
+        period_label = label or f"{len(clean_paths):,} PCAP files"
+        self.lbl_file.setText(self._active_period_title(file_count=len(clean_paths)))
+        self.lbl_stats.setText(f"Analyzing {len(clean_paths):,} PCAP files for selected period...")
+        self._set_stats_style("PcapLoadingStatus")
+        self._update_batch_status()
+        self._show_period_load_progress(
+            clean_paths,
+            label=period_label,
+            total=len(clean_paths),
+        )
+        self._start_batch_faulthandler_watch()
+
+        day_groups = {day: clean_paths} if day else None
+        self._batch_thread = QThread(self._thread_parent())
+        self._batch_worker = PcapBatchWorker(
+            clean_paths,
+            project_id=None,
+            auto_save=False,
+            day_groups=day_groups,
+        )
+        self._batch_worker.moveToThread(self._batch_thread)
+        self._batch_thread.started.connect(self._batch_worker.run)
+        self._batch_worker.progress.connect(self._on_batch_progress, Qt.QueuedConnection)
+        self._batch_worker.finished.connect(self._on_batch_finished, Qt.QueuedConnection)
+        self._batch_worker.finished.connect(self._batch_thread.quit)
+        self._batch_worker.finished.connect(self._batch_worker.deleteLater)
+        self._batch_thread.finished.connect(self._cleanup_batch_thread)
+        self._batch_thread.start()
 
     def _export_full_metadata(self, kind: str) -> None:
         if not getattr(self, "summary", None):
@@ -2269,7 +2339,7 @@ class PcapPage(QWidget):
         )
         self.chart_activity.set_rows(
             activity_rows,
-            empty_text="No activity buckets are available.",
+            empty_text="No hourly activity is available.",
         )
         preview = PROFILE_CHART_PREVIEW_ROWS
         service_total = len(service_rows)
@@ -2311,8 +2381,8 @@ class PcapPage(QWidget):
             for row in self._activity_chart_full_rows
         ]
         self._open_rows_dialog(
-            "Busiest activity buckets",
-            [("label", "Bucket"), ("count", "Packets"), ("value", "Share")],
+            "Hourly activity (peak hours)",
+            [("label", "Hour"), ("count", "Packets"), ("value", "Share")],
             rows,
         )
 
@@ -2755,7 +2825,7 @@ class PcapPage(QWidget):
             or now - self._pcap_batch_last_ui_ts >= interval
         ):
             self._pcap_batch_last_ui_ts = now
-            self._update_period_load_progress(processed, total)
+            self._update_period_load_progress(processed, total, current_file=current_file)
             self._update_batch_status()
 
     def _on_batch_finished(self, last_summary: object, processed: int, failed: int) -> None:
@@ -3179,7 +3249,6 @@ class PcapPage(QWidget):
                 self.summary,
                 project=project,
                 project_name=getattr(self.app, "current_project_name", "") or "",
-                report_language=get_app_settings().get("output_language", "hr"),
             )
             webbrowser.open(Path(file_path).resolve().as_uri())
         except Exception as exc:

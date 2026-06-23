@@ -17,7 +17,6 @@ from core.formatters import (
     human_bytes,
     safe_int,
 )
-from core.output_language import normalize_output_language
 from core.protocols import format_ip_proto
 
 
@@ -249,11 +248,9 @@ def export_registry_html(
     include_full: bool = False,
     project: Project | None = None,
     project_name: str = "",
-    report_language: str = "en",
     period_context: str = "",
 ) -> None:
-    lang = normalize_output_language(report_language, default="en")
-    text = _report_text(lang)
+    text = _report_text()
     meta = meta or {}
     summary = summary or {}
     analyst = analyst or {}
@@ -409,14 +406,14 @@ def export_registry_html(
         .replace("{{FULL_DATASET}}", full_table_html)
     )
 
-    rendered = _apply_registry_labels(rendered, text, lang)
+    rendered = _apply_registry_labels(rendered, text)
 
     Path(file_path).write_text(rendered, encoding="utf-8")
 
 
-def _apply_registry_labels(rendered: str, text: dict[str, str], lang: str) -> str:
+def _apply_registry_labels(rendered: str, text: dict[str, str]) -> str:
     labels = {
-        "LANG": lang,
+        "LANG": "en",
         "TITLE": text["title"],
         "REPORT_TITLE": text["title"],
         "EXPORTED_LABEL": text["exported"],
@@ -455,48 +452,7 @@ def _apply_registry_labels(rendered: str, text: dict[str, str], lang: str) -> st
     return rendered
 
 
-def _report_text(language: str) -> dict[str, str]:
-    if normalize_output_language(language, default="en") == "hr":
-        return {
-            "title": "ViaNyquist registry izvjestaj",
-            "exported": "Izvezeno",
-            "rows": "Redovi",
-            "apps": "Aplikacije",
-            "files": "Datoteke",
-            "target": "Target",
-            "order_validity": "Valjanost naloga",
-            "total_flows": "Ukupno flowova",
-            "unique_src_ip": "Jedinstveni izvorni IP",
-            "unique_dst_ip": "Jedinstveni odredisni IP",
-            "unique_apps": "Jedinstvene aplikacije",
-            "total_bytes": "Ukupno bajtova",
-            "analyst_summary": "Analiticki sazetak",
-            "traffic_pattern_flags": "Oznake prometnog uzorka",
-            "period_context": "Kontekst perioda",
-            "daily_activity": "Dnevna aktivnost (top po volumenu)",
-            "no_pattern_flags": "Nema neuobicajenih oznaka prometnog uzorka za ucitani period.",
-            "observed_activity": "Uocena aktivnost",
-            "outbound_share": "Udio odlaznog prometa",
-            "dominant_application": "Dominantna aplikacija",
-            "by_count": "Po broju",
-            "top_outbound_relations": "Najvaznije odlazne relacije",
-            "internal": "Interno",
-            "destination": "Odrediste",
-            "activity_by_bytes": "Aktivnost po bajtovima",
-            "activity_by_flows": "Aktivnost po flowovima",
-            "peak": "Vrsni sat",
-            "quiet": "Tihi sat",
-            "night": "Noc",
-            "business": "Radno vrijeme",
-            "insights": "Rang-liste",
-            "generated_by": "Generirano pomocu",
-            "dataset_compare": "Usporedba datasetova",
-            "current_unique": "Trenutno jedinstveno",
-            "previous_unique": "Prethodno jedinstveno",
-            "new": "Novo",
-            "known": "Poznato",
-            "full_dataset": "Puni dataset",
-        }
+def _report_text() -> dict[str, str]:
     return {
         "title": "ViaNyquist Registry Report",
         "exported": "Exported",

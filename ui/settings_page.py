@@ -19,7 +19,6 @@ from PySide6.QtWidgets import (
 from core.ai.assistant_service import AISettings
 from core.db import get_app_settings, set_app_setting
 from core.osint.settings import OsintSettings
-from core.output_language import normalize_output_language
 from ui.buttons import make_action_button, make_dialog_button
 
 SETTINGS_LABEL_WIDTH = 170
@@ -118,23 +117,6 @@ class SettingsPage(QWidget):
             ai_layout.addLayout(_settings_form_row(label, field))
 
         root.addWidget(ai_panel)
-
-        language_panel = QFrame()
-        language_panel.setObjectName("ProfilePanel")
-        language_layout = QVBoxLayout(language_panel)
-        language_layout.setContentsMargins(22, 18, 22, 18)
-        language_layout.setSpacing(12)
-
-        language_title = QLabel("Language")
-        language_title.setObjectName("ProfilePanelTitle")
-        language_layout.addWidget(language_title)
-
-        self.cmb_output_language = _settings_combo_box(compact=True)
-        self.cmb_output_language.addItem("Croatian", "hr")
-        self.cmb_output_language.addItem("English", "en")
-        language_layout.addLayout(_settings_form_row("Report / AI language", self.cmb_output_language))
-
-        root.addWidget(language_panel)
 
         theme_panel = QFrame()
         theme_panel.setObjectName("ProfilePanel")
@@ -251,9 +233,6 @@ class SettingsPage(QWidget):
         self.edit_ai_url.setText(settings.base_url or "")
         self.edit_ai_model.setText(settings.model or "")
         self.edit_ai_timeout.setText(str(settings.timeout_seconds or 600))
-        language = normalize_output_language(getattr(settings, "output_language", "hr"))
-        idx = self.cmb_output_language.findData(language)
-        self.cmb_output_language.setCurrentIndex(idx if idx >= 0 else 0)
         theme = (get_app_settings().get("ui.theme", "dark") or "dark").strip().lower()
         theme_idx = self.cmb_theme.findData(theme if theme in {"dark", "light"} else "dark")
         self.cmb_theme.setCurrentIndex(theme_idx if theme_idx >= 0 else 0)
@@ -357,7 +336,6 @@ class SettingsPage(QWidget):
             "base_url": (self.edit_ai_url.text() or "").strip() or "http://localhost:11434",
             "model": (self.edit_ai_model.text() or "").strip() or "llama3",
             "timeout_seconds": max(1, timeout),
-            "output_language": normalize_output_language(str(self.cmb_output_language.currentData() or "hr")),
         }
 
         self.app.ai_service.update_settings(AISettings(**values))
@@ -376,7 +354,7 @@ class SettingsPage(QWidget):
 
         self.lbl_status.setText(
             f"Saved. Base URL: {values['base_url']} | Model: {values['model']} | "
-            f"Timeout: {values['timeout_seconds']} seconds | Language: {self.cmb_output_language.currentText()} | "
+            f"Timeout: {values['timeout_seconds']} seconds | "
             f"Theme: {self.cmb_theme.currentText()} | OSINT keys: "
             f"VT={'set' if osint.virustotal_api_key else 'empty'}, "
             f"Shodan={'set' if osint.shodan_api_key else 'empty'}"

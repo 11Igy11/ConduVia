@@ -1123,13 +1123,56 @@ def _is_messaging_endpoint(host: str, service: str) -> bool:
     return False
 
 
+def _device_side_ips(summary: PcapSummary) -> list[str]:
+    ips: set[str] = set()
+    for flow in summary.flows or []:
+        ip = str(flow.get("src_ip") or "").strip()
+        if ip:
+            ips.add(ip)
+    likely = str(summary.likely_device_ip or "").strip()
+    if likely:
+        ips.add(likely)
+    return sorted(ips)
+
+
+def _device_side_summary_text(summary: PcapSummary) -> str:
+    ips = _device_side_ips(summary)
+    source_count = len(getattr(summary, "source_paths", None) or [])
+    if not ips:
+        return "Device-side addresses were not clearly identified in this view."
+    if len(ips) == 1 and source_count <= 1:
+        return f"Traffic in this view is mainly associated with {ips[0]}."
+    if len(ips) == 1:
+        return (
+            f"Traffic in this merged view is mainly associated with {ips[0]}. "
+            "Mobile or CGNAT networks may use different addresses on other days."
+        )
+    examples = ", ".join(ips[:3])
+    return (
+        f"Traffic spans {len(ips):,} device-side addresses in this period"
+        f"{f', including {examples}' if examples else ''}. "
+        "A single IP should not be treated as a stable device identifier across days."
+    )
+
+
+def _device_side_key_points(summary: PcapSummary) -> list[str]:
+    ips = _device_side_ips(summary)
+    if not ips:
+        return ["Device-side IPs (this view): not identified"]
+    if len(ips) == 1:
+        return [f"Device-side IP (this view): {ips[0]}"]
+    points = [f"Device-side IPs (this period): {len(ips):,} distinct"]
+    points.append(f"Examples: {', '.join(ips[:3])}")
+    return points
+
+
 def _plain_summary(
     summary: PcapSummary,
     service_rows: list[dict[str, Any]],
     visibility_rows: list[dict[str, Any]],
 ) -> str:
     duration = _duration_words(summary.duration_seconds)
-    device = summary.likely_device_ip or "one main device"
+    device_text = _device_side_summary_text(summary)
     top_services = ", ".join(row["service"] for row in service_rows[:5]) or "no clear service groups"
     encrypted = next((row for row in visibility_rows if row["label"].startswith("Encrypted")), None)
     encrypted_text = ""
@@ -1141,21 +1184,21 @@ def _plain_summary(
         credential_text = "Potential credential-like plaintext was observed and should be reviewed carefully."
 
     return (
-        f"The capture covers {duration}. The most active observed device appears to be {device}. "
+        f"The capture covers {duration}. {device_text} "
         f"Visible metadata points mainly to {top_services}.{encrypted_text} "
         f"{credential_text} Review the Evidence tab for the exact visible records."
     )
 
 
 def _key_points(summary: PcapSummary, service_rows: list[dict[str, Any]]) -> list[str]:
-    points = [
-        f"Device IP: {summary.likely_device_ip or '-'}",
+    points = list(_device_side_key_points(summary))
+    points.extend([
         f"Capture period: {_fmt_pcap_dt(summary.first_seen)} to {_fmt_pcap_dt(summary.last_seen)}",
         f"Packets: {summary.packet_count:,}; volume: {human_bytes(summary.wire_bytes, precision=2)}",
         f"Visible DNS names: {_visible_count(summary.total_dns_names, len(summary.dns_queries))}; "
         f"TLS SNI hosts: {_visible_count(summary.total_tls_sni_hosts, len(summary.tls_sni))}; "
         f"HTTP hosts: {_visible_count(summary.total_http_hosts, len(summary.http_hosts))}",
-    ]
+    ])
     if service_rows:
         points.append("Most visible service groups: " + ", ".join(row["service"] for row in service_rows[:5]))
     return points

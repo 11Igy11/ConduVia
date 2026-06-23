@@ -9,7 +9,6 @@ from core.db import Project
 from core.exporters.case_context import build_case_context, context_cards_html
 from core.exporters.template_utils import load_template, render_template
 from core.formatters import format_export_datetime, format_flow_datetime, human_bytes
-from core.output_language import normalize_output_language
 from core.pcap_analyzer import PcapSummary, build_investigator_view
 
 
@@ -19,11 +18,9 @@ def export_pcap_summary_html(
     *,
     project: Project | None = None,
     project_name: str = "",
-    report_language: str = "en",
 ) -> None:
     path = Path(file_path)
-    lang = normalize_output_language(report_language, default="en")
-    text = _report_text(lang)
+    text = _report_text()
 
     def rows(items: list[dict[str, Any]], columns: list[tuple[str, str]]) -> str:
         if not items:
@@ -95,7 +92,7 @@ def export_pcap_summary_html(
 
     template = load_template("pcap_export.html")
     html_doc = render_template(template, {
-        "LANG": lang,
+        "LANG": "en",
         "TITLE": text["title"],
         "FILE_NAME": html.escape(summary.file_name),
         "EXPORTED_LABEL": text["exported"],
@@ -218,7 +215,7 @@ def _communication_rows(items: list[dict[str, Any]], *, text: dict[str, str] | N
         empty = (text or {}).get("no_communication_indicators", "No communication indicators.")
         return f"<tr><td colspan=\"99\">{html.escape(empty)}</td></tr>"
 
-    labels = text or _report_text("en")
+    labels = text or _report_text()
     columns = [
         ("service", labels["service"]),
         ("activity_type", labels["indicator"]),
@@ -248,7 +245,7 @@ def _communication_evidence_cards(items: list[dict[str, Any]], *, text: dict[str
         empty = (text or {}).get("no_communication_evidence", "No communication evidence details.")
         return f"<div class=\"evidence-card\">{html.escape(empty)}</div>"
 
-    labels = text or _report_text("en")
+    labels = text or _report_text()
     cards = []
     for item in items:
         title = f"{item.get('service') or '-'} - {item.get('activity_type') or '-'}"
@@ -291,75 +288,7 @@ def _duration_compact(value: Any) -> str:
     return f"{secs}s"
 
 
-def _report_text(language: str) -> dict[str, str]:
-    if normalize_output_language(language, default="en") == "hr":
-        return {
-            "title": "ViaNyquist PCAP izvjestaj",
-            "exported": "Izvezeno",
-            "summary": "Sazetak",
-            "investigator": "Pregled za istrazitelja",
-            "communication_highlights": "Komunikacijski indikatori",
-            "evidence": "Dokazi",
-            "artifacts": "Artefakti",
-            "connections": "Poveznice",
-            "format": "Format",
-            "packets": "Paketi",
-            "traffic_volume": "Volumen prometa",
-            "likely_device_ip": "IP adresa uredaja",
-            "capture_period": "Razdoblje snimke",
-            "dns_queries": "DNS upiti",
-            "tls_sni_hosts": "TLS SNI hostovi",
-            "readable_samples": "Citljivi uzorci",
-            "structure_note": "Izvjestaj prati strukturu PCAP ekrana u ViaNyquistu: Sazetak objasnjava sto snimka pokazuje, a Dokazi navode vidljive zapise na kojima se zakljucci temelje.",
-            "visible_service_groups": "Vidljive grupe usluga",
-            "visible_vs_encrypted": "Vidljivo nasuprot kriptiranom",
-            "activity_timeline": "Aktivnost po satu",
-            "service_group": "Grupa usluge",
-            "signals": "Signali",
-            "share": "Udio",
-            "chart": "Graf",
-            "example": "Primjer",
-            "visibility": "Vidljivost",
-            "hour": "Sat",
-            "communication_note": "Ovi redovi su istrazni indikatori temeljeni na metapodacima kao sto su hostovi, portovi, protokol, trajanje i volumen prometa. Sami po sebi ne dokazuju sadrzaj poruke niti potvrdu poziva.",
-            "classified_indicators": "Klasificirani indikatori",
-            "messaging_push": "Poruke / push",
-            "call_media_candidates": "Moguci poziv / medij",
-            "visible_services": "Vidljive usluge",
-            "service": "Usluga",
-            "indicator": "Indikator",
-            "confidence": "Pouzdanost",
-            "host_signal": "Host / signal",
-            "protocol": "Protokol",
-            "volume": "Volumen",
-            "duration": "Trajanje",
-            "first_seen": "Prvi put vidjeno",
-            "last_seen": "Zadnji put vidjeno",
-            "communication_evidence_details": "Detalji komunikacijskih indikatora",
-            "interpretation_notes": "Napomene o interpretaciji",
-            "evidence_note": "Ovi zapisi su vidljivi metapodaci i citljive vrijednosti izdvojene iz snimke. Kriptirani sadrzaj prometa nije dekodiran.",
-            "top_dns_queries": "Najcesci DNS upiti",
-            "top_tls_sni_hosts": "Najcesci TLS SNI hostovi",
-            "dns_query": "DNS upit",
-            "count": "Broj",
-            "host": "Host",
-            "readable_evidence": "Citljivi dokazi",
-            "time": "Vrijeme",
-            "type": "Tip",
-            "source": "Izvor",
-            "destination": "Odrediste",
-            "visible_value": "Vidljiva vrijednost",
-            "category": "Kategorija",
-            "value": "Vrijednost",
-            "explanation": "Objasnjenje",
-            "application": "Aplikacija",
-            "host_query": "Host/upit",
-            "bytes": "Bajtovi",
-            "visible_preview": "Vidljivi isjecak",
-            "no_records": "Nema zapisa.",
-            "no_communication_indicators": "Nema komunikacijskih indikatora.",
-            "no_communication_evidence": "Nema detalja komunikacijskih indikatora.",
-        }
+def _report_text() -> dict[str, str]:
     return {
         "title": "ViaNyquist PCAP Report",
         "exported": "Exported",

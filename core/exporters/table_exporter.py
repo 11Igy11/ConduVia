@@ -7,7 +7,6 @@ from pathlib import Path
 from core.db import Project
 from core.exporters.case_context import build_case_context, context_cards_html
 from core.exporters.template_utils import load_template, logo_data_uri, render_template
-from core.output_language import normalize_output_language
 
 
 def export_table_html(
@@ -16,13 +15,11 @@ def export_table_html(
     headers: list[str],
     rows: list[list[str]],
     *,
-    lang: str = "en",
     project: Project | None = None,
     project_name: str = "",
     source_label: str = "",
 ) -> None:
-    language = normalize_output_language(lang, default="en")
-    text = _report_text(language)
+    text = _report_text()
     case_context = build_case_context(project, project_name=project_name)
 
     table_headers = "".join(f"<th>{html.escape(str(header))}</th>" for header in headers)
@@ -36,7 +33,7 @@ def export_table_html(
     rendered = render_template(
         load_template("table_export.html"),
         {
-            "LANG": language,
+            "LANG": "en",
             "TITLE": text["title"],
             "REPORT_TITLE": title or text["table_title"],
             "LOGO": logo_data_uri(),
@@ -59,17 +56,7 @@ def export_table_html(
     Path(file_path).write_text(rendered, encoding="utf-8")
 
 
-def _report_text(language: str) -> dict[str, str]:
-    if normalize_output_language(language, default="en") == "hr":
-        return {
-            "title": "ViaNyquist tablicni izvoz",
-            "exported": "Izvezeno",
-            "source": "Izvor",
-            "rows": "Redovi",
-            "columns": "Stupci",
-            "table_title": "Podaci tablice",
-            "generated_by": "Generirano pomocu",
-        }
+def _report_text() -> dict[str, str]:
     return {
         "title": "ViaNyquist Table Export",
         "exported": "Exported",
