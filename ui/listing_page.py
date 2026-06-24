@@ -1,5 +1,4 @@
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QFrame, QTableView, QHeaderView, QHBoxLayout, QComboBox, QDialog, QDialogButtonBox, QListWidget, QListWidgetItem, QFileDialog, QInputDialog, QMenu
-from ui.font_utils import label_font
 from ui.buttons import make_action_button, make_dialog_button
 from ui.dialogs import choice_dialog, message_dialog
 from PySide6.QtCore import Qt, QAbstractTableModel, QModelIndex
@@ -423,11 +422,6 @@ class ListingPage(QWidget):
         layout.setContentsMargins(20, 20, 20, 20)
         layout.setSpacing(12)
 
-        # ---------- Header ----------
-        self.lbl_title = QLabel("Listing")
-        font = label_font(point_size=20, bold=True)
-        self.lbl_title.setFont(font)
-
         self.lbl_dataset = QLabel("Loaded JSON summary")
         self.lbl_files = QLabel("Files: 0")
         self.lbl_flows = QLabel("Flows: 0")
@@ -443,9 +437,6 @@ class ListingPage(QWidget):
         card_layout.addWidget(self.lbl_dataset)
         card_layout.addWidget(self.lbl_files)
         card_layout.addWidget(self.lbl_flows)
-
-        # layout
-        layout.addWidget(self.lbl_title)
 
         # ---------- VIEW TOOLBAR ----------
         self.view_bar = QHBoxLayout()

@@ -1051,7 +1051,7 @@ QDialog QComboBox {
     border-radius: 8px;
     padding: 4px 10px;
     color: #e5e7eb;
-    min-height: 32px;
+    min-height: 40px;
 }
 
 QDialog QPlainTextEdit {
@@ -1060,7 +1060,16 @@ QDialog QPlainTextEdit {
     border-radius: 8px;
     padding: 6px 10px;
     color: #e5e7eb;
-    min-height: 48px;
+    min-height: 56px;
+}
+
+QTextEdit#ProjectDetailsText {
+    min-height: 120px;
+    padding: 10px 12px;
+}
+
+QTextEdit#NotesEditor {
+    padding: 10px 12px;
 }
 
 QDialog QPushButton {

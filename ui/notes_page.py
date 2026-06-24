@@ -96,8 +96,10 @@ class NotesPage(QWidget):
         self.btn_export_pdf = self._tool_button("PDF", "Export notes to PDF document")
 
         self.editor = QTextEdit()
+        self.editor.setObjectName("NotesEditor")
         self.editor.setAcceptRichText(True)
         self.editor.setPlaceholderText("Write case notes here... (autosave)")
+        self.editor.document().setDocumentMargin(10)
 
         tools = QFrame()
         tools.setObjectName("NotesEditorPanel")

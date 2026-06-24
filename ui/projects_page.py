@@ -78,6 +78,7 @@ def project_launcher_card(
 ) -> QFrame:
     card = QFrame()
     card.setObjectName("Card")
+    card.setMinimumHeight(168)
     layout = QVBoxLayout(card)
     layout.setContentsMargins(12, 12, 12, 16)
     layout.setSpacing(8)
@@ -87,15 +88,15 @@ def project_launcher_card(
     lbl_title.setTextInteractionFlags(Qt.TextSelectableByMouse)
     lbl_description = QLabel(description)
     lbl_description.setObjectName("Muted")
-    lbl_description.setWordWrap(False)
-    lbl_description.setMaximumHeight(24)
+    lbl_description.setWordWrap(True)
     lbl_description.setTextInteractionFlags(Qt.TextSelectableByMouse)
+    lbl_description.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Minimum)
 
     layout.addWidget(lbl_title)
     layout.addWidget(lbl_description)
     layout.addWidget(count_label)
-    detail_label.setWordWrap(False)
-    detail_label.setMaximumHeight(24)
+    detail_label.setWordWrap(True)
+    detail_label.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Minimum)
     layout.addWidget(detail_label)
     layout.addStretch(1)
 
@@ -116,7 +117,7 @@ def build_projects_page(app: App) -> QWidget:
 
     app.case_dashboard = QFrame()
     app.case_dashboard.setObjectName("CaseDashboardCompact")
-    app.case_dashboard.setMaximumHeight(72)
+    app.case_dashboard.setMaximumHeight(78)
     dashboard_layout = QVBoxLayout(app.case_dashboard)
     dashboard_layout.setContentsMargins(10, 6, 10, 6)
     dashboard_layout.setSpacing(2)
@@ -199,8 +200,12 @@ def build_projects_page(app: App) -> QWidget:
     app.btn_open_project.setEnabled(False)
 
     app.projects_info = QTextEdit()
+    app.projects_info.setObjectName("ProjectDetailsText")
     app.projects_info.setReadOnly(True)
     app.projects_info.setPlaceholderText("Select a project to see details.")
+    app.projects_info.setLineWrapMode(QTextEdit.WidgetWidth)
+    app.projects_info.setMinimumHeight(140)
+    app.projects_info.document().setDocumentMargin(10)
 
     selection_title_row = QHBoxLayout()
     selection_title_row.setSpacing(8)
@@ -227,7 +232,7 @@ def build_projects_page(app: App) -> QWidget:
     middle_row.setSpacing(10)
     middle_row.addLayout(left_col, 2)
     middle_row.addLayout(right_col, 3)
-    projects_layout.addLayout(middle_row, 1)
+    projects_layout.addLayout(middle_row, 4)
 
     app.project_recent_json_rows: list[dict[str, Any]] = []
     app.project_recent_pcap_rows: list[dict[str, Any]] = []
@@ -329,7 +334,7 @@ def build_projects_page(app: App) -> QWidget:
     bottom_grid.addWidget(
         project_launcher_card(
             "Recent activity",
-            "Central project activity log for datasets, PCAP sources, findings and notes.",
+            "Central project activity log",
             app.lbl_recent_activity_count,
             app.lbl_recent_activity_detail,
             [app.btn_expand_project_activity],
@@ -341,5 +346,5 @@ def build_projects_page(app: App) -> QWidget:
     bottom_grid.setColumnStretch(1, 1)
     bottom_grid.setColumnStretch(2, 1)
 
-    projects_layout.addLayout(bottom_grid, 1)
+    projects_layout.addLayout(bottom_grid, 2)
     return projects_page

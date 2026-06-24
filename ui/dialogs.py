@@ -1,4 +1,4 @@
-from PySide6.QtCore import Qt, QDate
+from PySide6.QtCore import QEvent, QObject, Qt, QDate
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QAbstractScrollArea,
@@ -26,10 +26,12 @@ from PySide6.QtWidgets import (
 )
 from typing import Any, Callable
 
-from core.project_identity import is_valid_oib
+from core.project_identity import identifier_values_for_editor, is_valid_oib
 from core.evidence_policy import format_period_day_label
 from core.period_gaps import missing_days_in_range, normalize_period_day
-from ui.font_utils import ensure_widget_point_font
+from shiboken6 import isValid
+
+from ui.font_utils import ensure_dialog_fonts, ensure_widget_point_font
 from ui.buttons import make_dialog_button, style_action_button, style_dialog_button, style_inline_picker_button
 from ui.ui_metrics import (
     DIALOG_BUTTON_HEIGHT,
@@ -39,6 +41,7 @@ from ui.ui_metrics import (
     DIALOG_FORM_WIDTH,
     DIALOG_MARGINS,
     DIALOG_SPACING,
+    FINDING_DIALOG_HEIGHT,
     PROJECT_DIALOG_HEIGHT,
     PROJECT_DIALOG_WIDTH,
 )
@@ -101,6 +104,8 @@ def period_date_edit(value: QDate, minimum: QDate, maximum: QDate) -> QDateEdit:
     calendar.setHorizontalHeaderFormat(QCalendarWidget.ShortDayNames)
     ensure_widget_point_font(edit)
     ensure_widget_point_font(calendar)
+    for child in calendar.findChildren(QWidget):
+        ensure_widget_point_font(child)
     edit.setCalendarWidget(calendar)
     return edit
 
@@ -510,6 +515,7 @@ def item_choice_dialog(
 def _dialog_panel(title: str) -> tuple[QFrame, QVBoxLayout]:
     panel = QFrame()
     panel.setObjectName("ProfilePanel")
+    panel.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Minimum)
     layout = QVBoxLayout(panel)
     layout.setContentsMargins(16, 14, 16, 14)
     layout.setSpacing(10)
@@ -521,9 +527,10 @@ def _dialog_panel(title: str) -> tuple[QFrame, QVBoxLayout]:
 
 def _dialog_field_group(label_text: str, field: QWidget) -> QWidget:
     host = QWidget()
+    host.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Minimum)
     layout = QVBoxLayout(host)
     layout.setContentsMargins(0, 0, 0, 0)
-    layout.setSpacing(4)
+    layout.setSpacing(6)
     label = QLabel(label_text)
     label.setObjectName("DialogFieldLabel")
     label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
@@ -537,8 +544,177 @@ def _dialog_line_edit(value: str = "", *, placeholder: str = "") -> QLineEdit:
     edit.setText(value)
     edit.setPlaceholderText(placeholder)
     edit.setFixedHeight(DIALOG_FIELD_HEIGHT)
-    edit.setMaximumHeight(DIALOG_FIELD_HEIGHT)
+    edit.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+    ensure_widget_point_font(edit)
     return edit
+
+
+def _dialog_multiline_edit(value: str = "", *, placeholder: str = "", height: int = 72) -> QPlainTextEdit:
+    edit = QPlainTextEdit()
+    edit.setPlainText(value)
+    edit.setPlaceholderText(placeholder)
+    edit.setFixedHeight(height)
+    ensure_widget_point_font(edit)
+    return edit
+
+
+class _DialogMultiValueEditor(QWidget):
+    """Single-line rows with + / − controls for repeated identifier values."""
+
+    def __init__(
+        self,
+        parent=None,
+        *,
+        initial_values: list[str] | None = None,
+        placeholder: str = "",
+    ) -> None:
+        super().__init__(parent)
+        self.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Minimum)
+        self._placeholder = placeholder
+        self._layout = QVBoxLayout(self)
+        self._layout.setContentsMargins(0, 0, 0, 0)
+        self._layout.setSpacing(6)
+        self._values = list(initial_values or [""])
+        if not self._values:
+            self._values = [""]
+        self._render()
+
+    def _current_values(self) -> list[str]:
+        values: list[str] = []
+        for index in range(self._layout.count()):
+            host = self._layout.itemAt(index).widget()
+            if host is None:
+                continue
+            edit = host.findChild(QLineEdit)
+            values.append(edit.text() if edit is not None else "")
+        return values or [""]
+
+    def _clear_rows(self) -> None:
+        while self._layout.count():
+            item = self._layout.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+
+    def _render(self, *, focus_last: bool = False) -> None:
+        self._clear_rows()
+        for index, value in enumerate(self._values):
+            host = QWidget()
+            row = QHBoxLayout(host)
+            row.setContentsMargins(0, 0, 0, 0)
+            row.setSpacing(8)
+            edit = _dialog_line_edit(value, placeholder=self._placeholder)
+            row.addWidget(edit, 1)
+
+            if len(self._values) > 1:
+                btn_remove = QPushButton("−")
+                style_inline_picker_button(btn_remove)
+                btn_remove.setToolTip("Remove value")
+                btn_remove.clicked.connect(lambda _checked=False, row_index=index: self._remove_at(row_index))
+                row.addWidget(btn_remove)
+
+            if index == len(self._values) - 1:
+                btn_add = QPushButton("+")
+                style_inline_picker_button(btn_add)
+                btn_add.setToolTip("Add value")
+                btn_add.clicked.connect(self._add_row)
+                row.addWidget(btn_add)
+
+            self._layout.addWidget(host)
+
+        if focus_last and self._layout.count():
+            host = self._layout.itemAt(self._layout.count() - 1).widget()
+            if host is not None:
+                edit = host.findChild(QLineEdit)
+                if edit is not None:
+                    edit.setFocus()
+
+        self.updateGeometry()
+
+    def _add_row(self) -> None:
+        self._values = self._current_values()
+        self._values.append("")
+        self._render(focus_last=True)
+
+    def _remove_at(self, index: int) -> None:
+        self._values = self._current_values()
+        if len(self._values) <= 1:
+            self._values = [""]
+        else:
+            self._values.pop(index)
+        self._render()
+
+    def text(self) -> str:
+        rows: list[str] = []
+        seen: set[str] = set()
+        for value in self._current_values():
+            item = value.strip()
+            if not item:
+                continue
+            key = item.casefold()
+            if key in seen:
+                continue
+            seen.add(key)
+            rows.append(item)
+        return "\n".join(rows)
+
+
+def _prepare_dialog_scroll_content(content: QWidget) -> None:
+    content.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+
+
+class _DialogScrollSync(QObject):
+    """Keep scroll content width in sync with the dialog without touching deleted C++ objects."""
+
+    def __init__(self, dlg: QDialog, scroll: QScrollArea, content: QWidget) -> None:
+        super().__init__(dlg)
+        self._scroll = scroll
+        self._content = content
+        dlg.installEventFilter(self)
+
+    def eventFilter(self, obj, event) -> bool:
+        if not _dialog_scroll_targets_alive(self._scroll, self._content):
+            return False
+        if obj is self.parent() and event.type() == QEvent.Type.Resize:
+            self.sync()
+        return False
+
+    def sync(self) -> None:
+        if not _dialog_scroll_targets_alive(self._scroll, self._content):
+            return
+        try:
+            viewport = self._scroll.viewport()
+        except RuntimeError:
+            return
+        if viewport is None or not isValid(viewport):
+            return
+        self._content.adjustSize()
+        width = max(viewport.width(), self._content.sizeHint().width())
+        height = max(self._content.sizeHint().height(), self._content.minimumSizeHint().height())
+        if width > 0 and height > 0:
+            self._content.resize(width, height)
+
+
+def _dialog_scroll_targets_alive(scroll: QScrollArea | None, content: QWidget | None) -> bool:
+    return isValid(scroll) and isValid(content)
+
+
+def _install_dialog_scroll(
+    scroll: QScrollArea,
+    content: QWidget,
+    dlg: QDialog,
+    *,
+    bottom_margin: int = 32,
+) -> _DialogScrollSync:
+    scroll.setWidgetResizable(False)
+    scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+    _prepare_dialog_scroll_content(content)
+    layout = content.layout()
+    if isinstance(layout, QVBoxLayout):
+        left, top, right, _bottom = layout.getContentsMargins()
+        layout.setContentsMargins(left, top, right, bottom_margin)
+    scroll.setWidget(content)
+    return _DialogScrollSync(dlg, scroll, content)
 
 
 def project_details_dialog(
@@ -556,23 +732,21 @@ def project_details_dialog(
     layout = QVBoxLayout(dlg)
     _apply_dialog_layout(layout)
 
-    intro = QLabel("Project details and known subject/device identifiers.")
+    intro = QLabel("Project workspace, case subject and order metadata.")
     intro.setWordWrap(True)
     intro.setTextFormat(Qt.PlainText)
     intro.setObjectName("DialogDetailsLabel")
     layout.addWidget(intro)
 
     scroll = QScrollArea()
-    scroll.setWidgetResizable(True)
     scroll.setFrameShape(QScrollArea.NoFrame)
-    scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
 
     content = QWidget()
     content_layout = QVBoxLayout(content)
     content_layout.setContentsMargins(0, 0, 4, 0)
     content_layout.setSpacing(14)
 
-    fields: dict[str, QLineEdit | QPlainTextEdit] = {}
+    fields: dict[str, QLineEdit | QPlainTextEdit | _DialogMultiValueEditor] = {}
 
     project_panel, project_layout = _dialog_panel("Project")
     edit_name = _dialog_line_edit(getattr(project, "name", "") or "")
@@ -580,7 +754,9 @@ def project_details_dialog(
 
     edit_desc = QPlainTextEdit()
     edit_desc.setPlainText(getattr(project, "description", "") or "")
-    edit_desc.setFixedHeight(48)
+    edit_desc.setFixedHeight(96)
+    edit_desc.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+    ensure_widget_point_font(edit_desc)
     project_layout.addWidget(_dialog_field_group("Description", edit_desc))
 
     workspace_row = QHBoxLayout()
@@ -601,10 +777,6 @@ def project_details_dialog(
         ("first_name", "First name", "subject_first_name"),
         ("last_name", "Last name", "subject_last_name"),
         ("oib", "OIB", "subject_oib"),
-        ("msisdn", "Mobile / MSISDN", "subject_msisdn"),
-        ("imsi", "IMSI", "subject_imsi"),
-        ("imei", "IMEI", "subject_imei"),
-        ("ip", "Known IP", "subject_ip"),
     ]
     grid = QGridLayout()
     grid.setHorizontalSpacing(14)
@@ -616,10 +788,22 @@ def project_details_dialog(
         grid.addWidget(_dialog_field_group(label, edit), row, col)
     subject_layout.addLayout(grid)
 
-    extra = QPlainTextEdit()
-    extra.setPlainText(getattr(project, "subject_extra_identifiers", "") or "")
-    extra.setPlaceholderText("Other identifiers or notes, one per line.")
-    extra.setFixedHeight(48)
+    multi_identifier_specs = [
+        ("msisdn", "Mobile / MSISDN", "subject_msisdn", "MSISDN"),
+        ("imsi", "IMSI", "subject_imsi", "IMSI"),
+        ("imei", "IMEI", "subject_imei", "IMEI"),
+    ]
+    for key, label, attr, kind in multi_identifier_specs:
+        initial = identifier_values_for_editor(getattr(project, attr or key, "") or "", kind=kind)
+        editor = _DialogMultiValueEditor(initial_values=initial, placeholder=f"Enter {kind}")
+        fields[key] = editor
+        subject_layout.addWidget(_dialog_field_group(label, editor))
+
+    extra = _dialog_multiline_edit(
+        getattr(project, "subject_extra_identifiers", "") or "",
+        placeholder="Other identifiers or notes, one per line.",
+        height=72,
+    )
     fields["extra_identifiers"] = extra
     subject_layout.addWidget(_dialog_field_group("Other identifiers", extra))
     content_layout.addWidget(subject_panel)
@@ -740,7 +924,8 @@ def project_details_dialog(
     metadata_layout.addWidget(_dialog_field_group("Order validity", _wrap_layout(validity_row)))
     content_layout.addWidget(metadata_panel)
 
-    scroll.setWidget(content)
+    scroll_sync = _install_dialog_scroll(scroll, content, dlg)
+    scroll.setMinimumHeight(480)
     layout.addWidget(scroll, 1)
 
     def browse_parent() -> None:
@@ -785,13 +970,17 @@ def project_details_dialog(
     dialog_width = min(width, screen.width() - 64) if screen else width
     dialog_height = min(PROJECT_DIALOG_HEIGHT, screen.height() - 48) if screen else PROJECT_DIALOG_HEIGHT
     dlg.resize(dialog_width, dialog_height)
+    scroll_sync.sync()
+    ensure_dialog_fonts(dlg)
 
     if dlg.exec() != QDialog.Accepted:
         return None, False
 
     subject = {}
     for key, widget in fields.items():
-        if isinstance(widget, QPlainTextEdit):
+        if isinstance(widget, _DialogMultiValueEditor):
+            subject[key] = widget.text()
+        elif isinstance(widget, QPlainTextEdit):
             subject[key] = widget.toPlainText().strip()
         else:
             subject[key] = widget.text().strip()
@@ -801,6 +990,75 @@ def project_details_dialog(
         "description": edit_desc.toPlainText().strip(),
         "parent_folder": edit_parent.text().strip(),
         **subject,
+    }, True
+
+
+def finding_details_dialog(
+    parent,
+    *,
+    title: str,
+    finding: dict[str, Any],
+    width: int = DIALOG_FORM_WIDTH,
+):
+    dlg = QDialog(parent)
+    dlg.setWindowTitle(title)
+    dlg.setModal(True)
+
+    layout = QVBoxLayout(dlg)
+    _apply_dialog_layout(layout)
+
+    intro = QLabel("Edit the finding summary, analyst note, status and tags in one place.")
+    intro.setWordWrap(True)
+    intro.setTextFormat(Qt.PlainText)
+    intro.setObjectName("DialogDetailsLabel")
+    layout.addWidget(intro)
+
+    summary_panel, summary_layout = _dialog_panel("Finding")
+    edit_title = _dialog_line_edit(str(finding.get("title") or ""))
+    summary_layout.addWidget(_dialog_field_group("Title", edit_title))
+
+    edit_status = QComboBox()
+    edit_status.addItems(["New", "Investigating", "Confirmed", "False Positive"])
+    current_status = str(finding.get("status") or "New")
+    status_index = max(0, edit_status.findText(current_status))
+    edit_status.setCurrentIndex(status_index)
+    edit_status.setFixedHeight(DIALOG_FIELD_HEIGHT)
+    summary_layout.addWidget(_dialog_field_group("Status", edit_status))
+    layout.addWidget(summary_panel)
+
+    details_panel, details_layout = _dialog_panel("Details")
+    edit_tags = _dialog_line_edit(str(finding.get("tags") or ""), placeholder="Comma-separated tags")
+    details_layout.addWidget(_dialog_field_group("Tags", edit_tags))
+    edit_note = _dialog_multiline_edit(
+        str(finding.get("note") or ""),
+        placeholder="Analyst note",
+        height=160,
+    )
+    details_layout.addWidget(_dialog_field_group("Note", edit_note))
+    layout.addWidget(details_panel, 1)
+
+    buttons = QDialogButtonBox()
+    buttons.addButton("Save", QDialogButtonBox.AcceptRole)
+    buttons.addButton("Cancel", QDialogButtonBox.RejectRole)
+    _style_dialog_buttons(buttons)
+    buttons.accepted.connect(dlg.accept)
+    buttons.rejected.connect(dlg.reject)
+    _add_dialog_buttons(layout, buttons)
+
+    screen = dlg.screen().availableGeometry() if dlg.screen() else None
+    dialog_width = min(width, screen.width() - 64) if screen else width
+    dialog_height = min(FINDING_DIALOG_HEIGHT, screen.height() - 48) if screen else FINDING_DIALOG_HEIGHT
+    dlg.resize(dialog_width, dialog_height)
+    ensure_dialog_fonts(dlg)
+
+    if dlg.exec() != QDialog.Accepted:
+        return None, False
+
+    return {
+        "title": edit_title.text().strip(),
+        "status": edit_status.currentText().strip(),
+        "tags": edit_tags.text().strip(),
+        "note": edit_note.toPlainText().strip(),
     }, True
 
 
