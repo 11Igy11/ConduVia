@@ -1,0 +1,689 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ViaNyquist User Guide</title>
+  <style>
+:root {
+  --bg: #0f172a;
+  --bg-soft: #111827;
+  --panel: #1f2937;
+  --panel-2: #273549;
+  --line: rgba(148, 163, 184, 0.22);
+  --text: #e5e7eb;
+  --muted: #94a3b8;
+  --accent: #3b82f6;
+  --accent-soft: rgba(59, 130, 246, 0.14);
+  --paper: #f8fafc;
+  --ink: #1e293b;
+  --shadow: 0 18px 40px rgba(15, 23, 42, 0.28);
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: "Segoe UI", "Inter", Arial, sans-serif;
+  color: var(--ink);
+  background: linear-gradient(180deg, #e2e8f0 0%, #f1f5f9 220px, #f8fafc 420px);
+  line-height: 1.6;
+}
+
+a { color: #2563eb; text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+.site-header {
+  background: linear-gradient(135deg, #0f172a 0%, #1e3a5f 52%, #1f2937 100%);
+  color: var(--text);
+  border-bottom: 1px solid rgba(96, 165, 250, 0.25);
+  box-shadow: var(--shadow);
+}
+
+.header-inner {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 28px 32px 24px;
+  display: flex;
+  align-items: center;
+  gap: 22px;
+}
+
+.header-logo {
+  width: 72px;
+  height: 72px;
+  object-fit: contain;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.06);
+  padding: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.header-text h1 {
+  margin: 0;
+  font-size: 2rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+
+.header-meta {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 0.95rem;
+}
+
+.page-layout {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 28px 24px 48px;
+  display: grid;
+  grid-template-columns: 250px minmax(0, 1fr);
+  gap: 24px;
+  align-items: start;
+}
+
+.toc {
+  position: sticky;
+  top: 20px;
+  background: #ffffff;
+  border: 1px solid #dbe3ee;
+  border-radius: 16px;
+  padding: 18px 16px;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.06);
+}
+
+.toc h2 {
+  margin: 0 0 12px;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #64748b;
+}
+
+.toc ol {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 0.92rem;
+}
+
+.toc li { margin: 7px 0; }
+
+.content {
+  background: #ffffff;
+  border: 1px solid #dbe3ee;
+  border-radius: 18px;
+  padding: 32px 36px 40px;
+  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.07);
+}
+
+.content h2 {
+  font-size: 1.45rem;
+  margin: 2.2rem 0 0.8rem;
+  padding-top: 0.4rem;
+  color: #0f172a;
+  border-bottom: 2px solid #e2e8f0;
+  padding-bottom: 8px;
+  scroll-margin-top: 24px;
+}
+
+.content h2:first-child { margin-top: 0; }
+
+.content h3 {
+  font-size: 1.08rem;
+  margin: 1.5rem 0 0.55rem;
+  color: #1e3a5f;
+}
+
+.content p { margin: 0.65rem 0; color: #334155; }
+
+.content ul, .content ol {
+  margin: 0.55rem 0 0.85rem 1.2rem;
+  color: #334155;
+}
+
+.content li { margin: 0.3rem 0; }
+
+.content table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0.9rem 0 1.2rem;
+  font-size: 0.94rem;
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid #dbe3ee;
+}
+
+.content th, .content td {
+  padding: 10px 12px;
+  text-align: left;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.content th {
+  background: #1f2937;
+  color: #f8fafc;
+  font-weight: 700;
+}
+
+.content tr:nth-child(even) td { background: #f8fafc; }
+
+.content code {
+  background: #eef2ff;
+  color: #312e81;
+  padding: 2px 6px;
+  border-radius: 6px;
+  font-size: 0.9em;
+}
+
+.content pre {
+  background: #0f172a;
+  color: #e2e8f0;
+  padding: 14px 16px;
+  border-radius: 12px;
+  overflow-x: auto;
+  font-size: 0.88rem;
+  border: 1px solid #334155;
+}
+
+.content hr {
+  border: none;
+  border-top: 1px solid #e2e8f0;
+  margin: 1.8rem 0;
+}
+
+.content strong { color: #0f172a; }
+
+.content .footer-note {
+  margin-top: 2rem;
+  padding-top: 1rem;
+  border-top: 1px solid #e2e8f0;
+  font-style: italic;
+  color: #64748b;
+  font-size: 0.95rem;
+}
+
+.site-footer {
+  max-width: 1180px;
+  margin: 0 auto 36px;
+  padding: 0 24px;
+  text-align: center;
+  color: #64748b;
+  font-size: 0.88rem;
+}
+
+@media (max-width: 920px) {
+  .page-layout { grid-template-columns: 1fr; }
+  .toc { position: static; }
+  .header-inner { padding: 22px 20px; }
+  .content { padding: 24px 20px 30px; }
+}
+
+@media print {
+  body { background: #fff; }
+  .toc { display: none; }
+  .site-header { box-shadow: none; }
+  .content, .toc { box-shadow: none; }
+  .page-layout { display: block; padding-top: 0; }
+}
+</style>
+</head>
+<body>
+  <header class="site-header">
+    <div class="header-inner">
+      <img class="header-logo" src="manual-assets/logo.png" alt="ViaNyquist logo">
+      <div class="header-text">
+        <h1>ViaNyquist User Guide</h1>
+        <p class="header-meta">Beta · June 2026</p>
+      </div>
+    </div>
+  </header>
+  <div class="page-layout">
+    <nav class="toc"><h2>Contents</h2><ol><li><a href="#1-what-is-vianyquist">What is ViaNyquist?</a></li>
+<li><a href="#2-recommended-workflow">Recommended workflow</a></li>
+<li><a href="#3-navigation">Navigation</a></li>
+<li><a href="#4-projects">Projects</a></li>
+<li><a href="#5-loading-evidence">Loading evidence</a></li>
+<li><a href="#6-json-explore">JSON — Explore</a></li>
+<li><a href="#7-json-registry">JSON — Registry</a></li>
+<li><a href="#8-json-listing">JSON — Listing</a></li>
+<li><a href="#9-pcap">PCAP</a></li>
+<li><a href="#10-osint">OSINT</a></li>
+<li><a href="#11-findings">Findings</a></li>
+<li><a href="#12-ai-output">AI output</a></li>
+<li><a href="#13-notes">Notes</a></li>
+<li><a href="#14-profile-activity-profile">Profile (Activity Profile)</a></li>
+<li><a href="#15-settings">Settings</a></li>
+<li><a href="#16-refresh">Refresh</a></li>
+<li><a href="#17-exports">Exports</a></li>
+<li><a href="#18-workspace-folder">Workspace folder</a></li>
+<li><a href="#19-limitations-and-good-practice">Limitations and good practice</a></li>
+<li><a href="#20-glossary">Glossary</a></li>
+<li><a href="#21-help">Help</a></li></ol></nav>
+    <main class="content">
+
+<h2 id="1-what-is-vianyquist">1. What is ViaNyquist?</h2>
+
+<p>ViaNyquist is a desktop application for reviewing and analysing network traffic in a case or project. You load JSON flow datasets and PCAP captures, explore communications, mark important items as <strong>Findings</strong>, write <strong>Notes</strong>, and build an <strong>Activity Profile</strong> from everything saved in the project.</p>
+
+<p>The name honours <strong>Harry Nyquist</strong> (1889–1976), the Swedish-born engineer whose work at Bell Labs shaped how we understand signals in communication systems. In 1928 he showed that a continuous signal can be reconstructed from discrete samples — but only if those samples are taken often enough to capture what is really happening. That idea, later known as the <strong>Nyquist sampling theorem</strong>, is one of the foundations of digital telephony, radio, and every modern network.</p>
+
+<p>Investigators face a similar problem. You rarely see an entire communication live and in full; you work from <strong>captured</strong> flows and packets — samples of activity taken at a point in time. ViaNyquist is built around that reality: helping you reconstruct a clear picture of behaviour from the evidence you have, without pretending the capture is more complete than it is.</p>
+
+<p>ViaNyquist does <strong>not</strong> decrypt traffic. For encrypted sessions it shows metadata only: IP addresses, ports, protocols, DNS queries, TLS server names (SNI), timing, and volume. These are investigative indicators, not proof of message content, identity, or intent.</p>
+
+<hr>
+
+<h2 id="2-recommended-workflow">2. Recommended workflow</h2>
+
+<ol>
+<li>Create or open a <strong>project</strong> and set it as the <strong>active case</strong>.</li>
+<li>Enter known <strong>subject identifiers</strong> (name, OIB, MSISDN, IMSI, IMEI, etc.).</li>
+<li>Choose a <strong>workspace parent folder</strong> so exports and notes have a clear location.</li>
+<li><strong>Load</strong> a JSON dataset or PCAP file.</li>
+<li>Review flows, registry summaries, PCAP evidence, and OSINT pivots.</li>
+<li>Mark important items as <strong>Findings</strong>.</li>
+<li>Record conclusions in <strong>Notes</strong>.</li>
+<li>Review <strong>Profile</strong> for a wider picture of activity across the case.</li>
+<li><strong>Export</strong> reports to the project workspace when needed.</li>
+</ol>
+
+<hr>
+
+<h2 id="3-navigation">3. Navigation</h2>
+
+<p>The left sidebar contains:</p>
+
+<table>
+<tr><th>Button</th><th>Purpose</th></tr>
+<tr><td><strong>Projects</strong></td><td>Case list, project details, recent JSON/PCAP/activity cards</td></tr>
+<tr><td><strong>JSON</strong></td><td>Explore, Registry, and Listing for flow datasets</td></tr>
+<tr><td><strong>PCAP</strong></td><td>Packet capture analysis</td></tr>
+<tr><td><strong>OSINT</strong></td><td>Pivots on identifiers, IPs, and domains from saved evidence</td></tr>
+<tr><td><strong>AI output</strong></td><td>Latest AI-generated summaries and explanations</td></tr>
+<tr><td><strong>Notes</strong></td><td>Project notes editor (autosave)</td></tr>
+<tr><td><strong>Profile</strong></td><td>Activity profile across saved evidence</td></tr>
+<tr><td><strong>Refresh</strong></td><td>Reload projects, PCAP, findings, notes, profile, and settings</td></tr>
+<tr><td><strong>Settings</strong></td><td>AI, theme, OSINT API keys, Repository</td></tr>
+<tr><td><strong>Help</strong></td><td>Opens the user manual (PDF or HTML in <code>docs/</code>)</td></tr>
+</table>
+
+<p>The JSON section has three top tabs: <strong>Explore</strong>, <strong>Registry</strong>, <strong>Listing</strong>.</p>
+
+<hr>
+
+<h2 id="4-projects">4. Projects</h2>
+
+<h3>4.1 Active case dashboard</h3>
+
+<p>At the top of the Projects page you see the <strong>active case</strong> name and a short summary of the subject and identifiers. If no project is active, open one with <strong>Set active</strong>.</p>
+
+<h3>4.2 Project list</h3>
+
+<ul>
+<li><strong>+ New</strong> — create a project (name, description, workspace, identifiers, order metadata).</li>
+<li><strong>Edit</strong> — edit the selected project.</li>
+<li><strong>Delete</strong> — permanently removes the project, its datasets, findings, activity log, and workspace folders (with confirmation).</li>
+<li><strong>↻</strong> — refresh the project list (resets the active case).</li>
+</ul>
+
+<p>Select a project to preview details on the right. <strong>Set active</strong> makes it the working case for JSON, PCAP, Notes, Findings, and Profile.</p>
+
+<h3>4.3 New / Edit project dialog</h3>
+
+<p><strong>Project</strong></p>
+
+<ul>
+<li><strong>Project name</strong> — required.</li>
+<li><strong>Description</strong> — free text (multi-line).</li>
+<li><strong>Workspace parent</strong> — required folder; ViaNyquist creates a workspace subfolder for this project. Use <strong>Browse…</strong> to pick a parent directory.</li>
+</ul>
+
+<p><strong>Case subject / identifiers</strong></p>
+
+<ul>
+<li><strong>First name</strong>, <strong>Last name</strong>, <strong>OIB</strong> (11 digits with valid Croatian check digit).</li>
+<li><strong>Mobile / MSISDN</strong>, <strong>IMSI</strong>, <strong>IMEI</strong> — use the <strong>+</strong> button to add multiple values; <strong>−</strong> removes a row.</li>
+<li><strong>Other identifiers</strong> — additional lines (e.g. email, legacy IDs).</li>
+</ul>
+
+<p><strong>Case order metadata</strong></p>
+
+<ul>
+<li><strong>Klasa</strong>, <strong>Urbroj</strong> — with <strong>…</strong> picker if saved values exist.</li>
+<li><strong>Order validity</strong> — from / to dates; <strong>…</strong> opens saved validity periods.</li>
+</ul>
+
+<p>After creating a project you may be asked <strong>Open dataset</strong> to load evidence immediately.</p>
+
+<h3>4.4 Project details panel</h3>
+
+<p>Shows ID, subject, identifiers, Klasa/Urbroj, order validity, description, workspace path, and timestamps.</p>
+
+<h3>4.5 Recent cards (bottom)</h3>
+
+<table>
+<tr><th>Card</th><th>Action</th></tr>
+<tr><td><strong>Recent JSON files</strong></td><td><strong>Open JSON list</strong> — load or open indexed JSON days</td></tr>
+<tr><td><strong>Recent PCAP days</strong></td><td><strong>Open PCAP list</strong> — open saved PCAP periods</td></tr>
+<tr><td><strong>Recent activity</strong></td><td><strong>Open activity log</strong> — project event timeline</td></tr>
+</table>
+
+<hr>
+
+<h2 id="5-loading-evidence">5. Loading evidence</h2>
+
+<h3>5.1 From JSON (Explore)</h3>
+
+<p>Click <strong>Load dataset</strong> in the JSON header (or accept <strong>Open dataset</strong> after creating a project).</p>
+
+<p>Choose:</p>
+
+<ol>
+<li><strong>Folder</strong> — scan a folder for JSON/PCAP evidence.</li>
+<li><strong>JSON file</strong> — single <code>.json</code> file.</li>
+<li><strong>PCAP file</strong> — switches to PCAP and opens the file loader.</li>
+</ol>
+
+<p><strong>Folder import</strong> offers <strong>Import all</strong>, <strong>Choose date range</strong>, or <strong>Cancel</strong>. JSON is indexed by calendar day. Use <strong>Period</strong> (Day / Month / <strong>Selected period</strong>), <strong>Pick range…</strong>, and <strong>Missing days</strong> to work with date spans.</p>
+
+<h3>5.2 From PCAP</h3>
+
+<p>On the PCAP page, click <strong>Load dataset</strong> and select one or more <code>.pcap</code> / <code>.pcapng</code> files. Use <strong>Save Period to Project</strong> to register the capture to the active project workspace.</p>
+
+<h3>5.3 From Projects</h3>
+
+<p>Use <strong>Open JSON list</strong> or <strong>Open PCAP list</strong> on the recent cards; multi-select rows and <strong>Load selected</strong>, or double-click a row.</p>
+
+<hr>
+
+<h2 id="6-json-explore">6. JSON — Explore</h2>
+
+<p>Sub-tabs: <strong>Summary</strong>, <strong>Flows</strong>, <strong>Findings</strong>.</p>
+
+<h3>6.1 Header</h3>
+
+<ul>
+<li><strong>Load dataset</strong>, <strong>Generate AI Summary</strong>, <strong>Add AI to Notes</strong></li>
+<li>Project path and stats; <strong>Page size</strong> and <strong>Load next</strong> for large datasets</li>
+<li><strong>Period</strong> controls and search: <code>Search IP / SNI / app...</code></li>
+</ul>
+
+<h3>6.2 Summary</h3>
+
+<ul>
+<li>Cards: <strong>Top source IPs</strong>, <strong>Top destination IPs</strong>, <strong>Top protocols</strong>, <strong>Top applications</strong> — each with <strong>Expand table</strong></li>
+<li><strong>AI assistant output</strong> — filled by <strong>Generate AI Summary</strong></li>
+</ul>
+
+<h3>6.3 Flows</h3>
+
+<ul>
+<li>Filters: <strong>Filter source</strong>, <strong>Filter destination</strong>, <strong>Filter SNI</strong></li>
+<li><strong>Conversation: OFF/ON</strong> — focus on one endpoint pair</li>
+<li><strong>Expand Flows</strong> / <strong>Collapse Flows</strong></li>
+<li><strong>Export table</strong> (CSV / Excel / HTML)</li>
+<li><strong>Mark as Finding</strong> — save selected flow as a finding</li>
+<li><strong>Explain with AI</strong> — send flow context to AI</li>
+</ul>
+
+<p>Sortable table columns include Source/destination IP and port, Protocol, Application, Bytes, Duration, SNI. <strong>Flow details</strong> panel shows the selected row.</p>
+
+<h3>6.4 Findings (in Explore)</h3>
+
+<p>See section 11.</p>
+
+<hr>
+
+<h2 id="7-json-registry">7. JSON — Registry</h2>
+
+<p>Tabs: <strong>Report</strong> | <strong>Dataset</strong></p>
+
+<ul>
+<li><strong>Include full dataset</strong> — enables the full table on the Dataset tab</li>
+<li><strong>Export HTML report</strong> — registry report for the loaded JSON</li>
+</ul>
+
+<p><strong>Report</strong> includes flow statistics, observed activity, hourly patterns, direction breakdown, and rankings (endpoints, applications, protocols, volume). <strong>Expand table</strong> opens sortable dialogs. Double-clicking some rows can jump to Explore with a pre-filled search.</p>
+
+<p><strong>Dataset</strong> tab shows the full flow table with export options.</p>
+
+<hr>
+
+<h2 id="8-json-listing">8. JSON — Listing</h2>
+
+<p>Tabular view of the loaded dataset with flexible columns.</p>
+
+<ul>
+<li><strong>View:</strong> Default, All fields, Custom, or saved presets</li>
+<li><strong>Customize</strong> — pick columns (Custom mode)</li>
+<li><strong>Presets ▾</strong> — save, update, or delete column presets</li>
+<li><strong>Export</strong> — CSV, Excel, or HTML</li>
+</ul>
+
+<p>Default columns include Date, Time, IPs, ports, Protocol, Application, Server Name, Volume, Packets, Duration.</p>
+
+<hr>
+
+<h2 id="9-pcap">9. PCAP</h2>
+
+<h3>9.1 Header</h3>
+
+<ul>
+<li><strong>Load dataset</strong>, <strong>Save Period to Project</strong>, <strong>AI Summary</strong>, <strong>Add to Notes</strong>, <strong>Export Summary</strong></li>
+<li><strong>Period</strong> row: day combo, Day / Month / Selected period, <strong>Pick range…</strong>, <strong>Re-analyze Period</strong>, <strong>Missing days</strong></li>
+</ul>
+
+<h3>9.2 Tabs</h3>
+
+<table>
+<tr><th>Tab</th><th>Content</th></tr>
+<tr><td><strong>Summary</strong></td><td>Plain-language overview, key points, limitations, service groups, hourly activity</td></tr>
+<tr><td><strong>Communications</strong></td><td>Communication highlights (service, indicator, host, volume, timing)</td></tr>
+<tr><td><strong>Evidence</strong></td><td><strong>Evidence</strong> (DNS, TLS SNI, HTTP hosts, visible samples) and <strong>Artifacts</strong> (extracted artefacts)</td></tr>
+<tr><td><strong>Network</strong></td><td><strong>Overview</strong> and <strong>Connections</strong> tables</td></tr>
+<tr><td><strong>AI Summary</strong></td><td>AI explanation of the capture</td></tr>
+</table>
+
+<p>Many sections offer <strong>Expand table</strong> or <strong>Open full … table</strong> for larger views.</p>
+
+<h3>9.3 Limitations</h3>
+
+<p>HTTPS, QUIC, and most app traffic are encrypted. Without plaintext, only metadata and visible artefacts are shown. Messaging or call-like indicators are heuristic, not proof of user action.</p>
+
+<hr>
+
+<h2 id="10-osint">10. OSINT</h2>
+
+<p>Pivot workspace for <strong>Identifiers</strong>, <strong>IPs</strong>, and <strong>Domains</strong> collected from saved project evidence.</p>
+
+<p>On entity selection:</p>
+
+<ul>
+<li><strong>Repository</strong> — search imported leak datasets</li>
+<li><strong>Decode IMEI</strong> / <strong>Decode operator</strong> for device identifiers</li>
+<li><strong>Save to Notes</strong>, <strong>History</strong>, <strong>Flows</strong> (IPs), <strong>PCAP</strong></li>
+<li><strong>External links</strong> and <strong>Online lookup</strong> (DNS, WHOIS, GeoIP, VirusTotal, Shodan, etc.)</li>
+</ul>
+
+<p>Requires an active project. Configure API keys in <strong>Settings → OSINT</strong>.</p>
+
+<hr>
+
+<h2 id="11-findings">11. Findings</h2>
+
+<p>A <strong>Finding</strong> is an item you mark as important for the case.</p>
+
+<h3>11.1 Create</h3>
+
+<p>In <strong>Flows</strong>, select a row and click <strong>Mark as Finding</strong>. Enter <strong>Title</strong>, optional <strong>Note</strong>, and <strong>Tags</strong> (comma-separated). The view switches to the Findings tab.</p>
+
+<h3>11.2 Browse and filter</h3>
+
+<ul>
+<li>List shows time, status, title, endpoints, application, tags</li>
+<li>Filters: <strong>Status</strong>, search, tag, sort (<strong>Newest</strong>, <strong>Oldest</strong>, <strong>Status</strong>, <strong>Title</strong>), <strong>Clear</strong></li>
+</ul>
+
+<h3>11.3 Actions</h3>
+
+<ul>
+<li><strong>Edit</strong> — single dialog: Title, Status, Tags, Analyst note</li>
+<li><strong>Delete</strong>, <strong>Jump to Flow</strong>, <strong>Explain with AI</strong></li>
+<li>Context menu and keyboard shortcuts (J, E, Del)</li>
+<li>Quick status: New / Investigating / Confirmed / False Positive</li>
+</ul>
+
+<p><strong>Jump to Flow</strong> opens Explore <strong>Flows</strong> in conversation mode for that finding’s endpoints.</p>
+
+<p>Findings are stored per project; set the project <strong>active</strong> first.</p>
+
+<hr>
+
+<h2 id="12-ai-output">12. AI output</h2>
+
+<p>Central place for the latest AI text. Context line shows source (JSON, PCAP, Profile, Finding, Flow) and project name.</p>
+
+<p><strong>Add to Notes</strong> copies the text into project notes.</p>
+
+<p>AI is triggered from Explore (<strong>Generate AI Summary</strong>, <strong>Explain with AI</strong>), Findings (<strong>Explain with AI</strong>), PCAP (<strong>AI Summary</strong>), and Profile (<strong>AI Profile Summary</strong>).</p>
+
+<p><strong>Important:</strong> AI output is explanatory only. Verify claims against the data shown in the app. AI must not be treated as legal or technical proof.</p>
+
+<p>Configure <strong>Base URL</strong>, <strong>Model</strong>, and <strong>Timeout</strong> under <strong>Settings → AI</strong> (default: local Ollama-compatible API).</p>
+
+<hr>
+
+<h2 id="13-notes">13. Notes</h2>
+
+<p>Rich-text project notes with <strong>autosave</strong>.</p>
+
+<p><strong>Editor</strong> panel:</p>
+
+<ul>
+<li>Font family and size</li>
+<li><strong>B</strong>, <strong>I</strong>, <strong>U</strong>, text colour, alignment</li>
+<li><strong>Image</strong>, <strong>Chart</strong> (from profile/PCAP charts)</li>
+<li><strong>Export:</strong> Word, HTML, PDF</li>
+</ul>
+
+<p>Requires an active project. Notes are stored with the project and in the workspace.</p>
+
+<hr>
+
+<h2 id="14-profile-activity-profile">14. Profile (Activity Profile)</h2>
+
+<p>Aggregated view of saved JSON, PCAP, findings, and activity for the active project.</p>
+
+<ul>
+<li><strong>AI Profile Summary</strong>, <strong>Add to Notes</strong>, <strong>Export Profile</strong> (HTML)</li>
+<li><strong>Evidence Overview</strong> metrics</li>
+<li><strong>Profile Summary</strong> and <strong>Activity rhythm</strong></li>
+<li>Charts: evidence sources, device IPs, event types, behaviour insights</li>
+<li><strong>Repository hits</strong> banner when internal repository matches exist</li>
+</ul>
+
+<p>Activity patterns are indicators only — they do not prove who used a device or whether a person was awake or asleep.</p>
+
+<hr>
+
+<h2 id="15-settings">15. Settings</h2>
+
+<ul>
+<li><strong>Save</strong>, <strong>Reload</strong></li>
+<li><strong>AI</strong> — Base URL, Model, Timeout</li>
+<li><strong>Appearance</strong> — Dark / Light theme</li>
+<li><strong>OSINT</strong> — VirusTotal and Shodan API keys</li>
+<li><strong>IMEI TAC database</strong> — <strong>Import TAC CSV…</strong></li>
+<li><strong>Repository</strong> — import leak datasets for OSINT <strong>Repository</strong> search</li>
+</ul>
+
+<p>The application UI stays in English. AI and export language may follow your AI/report settings.</p>
+
+<hr>
+
+<h2 id="16-refresh">16. Refresh</h2>
+
+<p><strong>Refresh</strong> (sidebar) reloads projects, notes, findings, profile, PCAP view, OSINT, and settings. Use it if the UI looks stale after import or save.</p>
+
+<p>The <strong>↻</strong> button on the Projects list only refreshes the project list.</p>
+
+<hr>
+
+<h2 id="17-exports">17. Exports</h2>
+
+<p>Default location: project workspace <code>exports/</code> (when workspace is configured).</p>
+
+<table>
+<tr><th>Area</th><th>Formats</th><th>How</th></tr>
+<tr><td>Listing</td><td>CSV, Excel, HTML</td><td><strong>Export</strong></td></tr>
+<tr><td>Explore Flows</td><td>CSV, Excel, HTML</td><td><strong>Export table</strong></td></tr>
+<tr><td>Registry</td><td>HTML</td><td><strong>Export HTML report</strong></td></tr>
+<tr><td>Registry dataset</td><td>CSV, Excel, HTML</td><td><strong>Open dataset table</strong></td></tr>
+<tr><td>PCAP</td><td>HTML</td><td><strong>Export Summary</strong></td></tr>
+<tr><td>Profile</td><td>HTML</td><td><strong>Export Profile</strong></td></tr>
+<tr><td>Notes</td><td>Word, HTML, PDF</td><td>Editor <strong>Word</strong> / <strong>HTML</strong> / <strong>PDF</strong></td></tr>
+<tr><td>Expand-table dialogs</td><td>CSV, Excel, HTML</td><td>Dialog export buttons</td></tr>
+</table>
+
+<hr>
+
+<h2 id="18-workspace-folder">18. Workspace folder</h2>
+
+<p>Each project has a workspace under the chosen parent folder. Typical structure:</p>
+
+<pre>
+&lt;workspace&gt;/
+  datasets/
+  exports/
+  findings/
+  notes/
+  reports/
+  .vianyquist-workspace
+</pre>
+
+<hr>
+
+<h2 id="19-limitations-and-good-practice">19. Limitations and good practice</h2>
+
+<ul>
+<li>No decryption of HTTPS, QUIC, or app-layer encryption</li>
+<li>Metadata ≠ message content</li>
+<li>Device activity ≠ proof a specific person used the device</li>
+<li>Do not treat AI text as evidence</li>
+<li>Use <strong>Findings</strong> for key items; <strong>Notes</strong> for your reasoning</li>
+<li>Check dataset/project identifier warnings before trusting a load</li>
+</ul>
+
+<hr>
+
+<h2 id="20-glossary">20. Glossary</h2>
+
+<table>
+<tr><th>Term</th><th>Meaning</th></tr>
+<tr><td><strong>Flow</strong></td><td>Communication record between source and destination</td></tr>
+<tr><td><strong>JSON dataset</strong></td><td>Indexed network flow export (by calendar day)</td></tr>
+<tr><td><strong>PCAP</strong></td><td>Packet capture file</td></tr>
+<tr><td><strong>Finding</strong></td><td>Investigator-marked important item</td></tr>
+<tr><td><strong>SNI</strong></td><td>TLS server name indicator (visible hostname hint)</td></tr>
+<tr><td><strong>MSISDN</strong></td><td>Mobile subscriber number</td></tr>
+<tr><td><strong>IMSI</strong></td><td>SIM identifier</td></tr>
+<tr><td><strong>IMEI</strong></td><td>Device identifier</td></tr>
+<tr><td><strong>Activity Profile</strong></td><td>Cross-evidence summary for the project</td></tr>
+</table>
+
+<hr>
+
+<h2 id="21-help">21. Help</h2>
+
+<p>Click <strong>Help</strong> in the sidebar. ViaNyquist opens <code>docs/USER_GUIDE_EN.html</code> (or <code>docs/USER_GUIDE.html</code>) in your default browser.</p>
+
+<p>To rebuild HTML after editing the manual: <code>python docs/build_user_manual_html.py</code></p>
+
+<hr>
+
+<p class="footer-note">ViaNyquist — investigative support tool. Use professional judgement alongside the data shown.</p>
+    </main>
+  </div>
+  <footer class="site-footer">ViaNyquist — investigative support tool. Verify all conclusions against the underlying evidence.</footer>
+</body>
+</html>

@@ -210,18 +210,26 @@ class App(QWidget):
             width=width,
         )
     def open_user_manual(self):
-        manual_path = self.project_dir / "docs" / "ViaNyquist.pdf"
+        docs_dir = self.project_dir / "docs"
+        candidates = (
+            docs_dir / "USER_GUIDE_EN.html",
+            docs_dir / "USER_GUIDE.html",
+            docs_dir / "USER_GUIDE_EN.md",
+        )
+        for manual_path in candidates:
+            if manual_path.exists():
+                webbrowser.open(manual_path.resolve().as_uri())
+                return
 
-        if not manual_path.exists():
-            self._message_dialog(
-                "Help",
-                "User manual not found.",
-                str(manual_path),
-                width=460,
-            )
-            return
-
-        webbrowser.open(manual_path.resolve().as_uri())
+        self._message_dialog(
+            "Help",
+            "User manual not found.",
+            "Expected one of:\n"
+            "- docs/USER_GUIDE_EN.html\n"
+            "- docs/USER_GUIDE.html\n"
+            "- docs/USER_GUIDE_EN.md",
+            width=460,
+        )
 
     def _confirm_dialog(
         self,
