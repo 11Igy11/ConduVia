@@ -78,7 +78,12 @@ from core.exporters.pcap_metadata_exporter import export_pcap_dns_csv, export_pc
 from core.analysis_limits import MAX_PCAP_FLOWS, MAX_PCAP_READABLE_SAMPLES, PROFILE_CHART_MAX_DAYS
 from core.project_datasets import count_project_json_datasets, list_project_json_dataset_files, load_project_dataset_flows
 from core.project_behavior_index import build_project_behavior_index
-from core.project_identity import identifier_values_match, is_valid_oib, normalize_identifier_value
+from core.project_identity import (
+    identifier_values_match,
+    is_valid_oib,
+    normalize_identifier_value,
+    project_identifiers_text,
+)
 from core.project_profile import build_project_activity_profile, format_project_activity_profile
 from core.osint.links import build_domain_links, build_identifier_search_links, build_ip_links
 from core.osint.normalize import normalize_domain, normalize_msisdn
@@ -1589,6 +1594,42 @@ class ProjectTargetTests(unittest.TestCase):
                 project_type="MSISDN",
                 dataset_type="ISDNDataOnly",
             )
+        )
+
+    def test_project_identifiers_text_supports_multiple_lines_per_identifier_type(self):
+        with temporary_directory() as tmp:
+            db_path = Path(tmp) / "projects.db"
+            init_db(db_path)
+
+            project_id = create_project("Case A", db_path=db_path)
+            set_project_subject(
+                project_id,
+                msisdn="385911234567\n38598111222",
+                imsi="219011234567890\n219011234567891",
+                imei="356789012345678\n356789012345679",
+                db_path=db_path,
+            )
+            project = get_project(project_id, db_path=db_path)
+
+        self.assertIsNotNone(project)
+        text = project_identifiers_text(project)
+        self.assertIn("MSISDN: 385911234567", text)
+        self.assertIn("MSISDN: 38598111222", text)
+        self.assertIn("IMSI: 219011234567890", text)
+        self.assertIn("IMSI: 219011234567891", text)
+        self.assertIn("IMEI: 356789012345678", text)
+        self.assertIn("IMEI: 356789012345679", text)
+
+    def test_identifier_values_for_editor_splits_concatenated_imsi(self):
+        from core.project_identity import identifier_values_for_editor
+
+        values = identifier_values_for_editor(
+            "2190137001119313721901271100098122",
+            kind="IMSI",
+        )
+        self.assertEqual(
+            values,
+            ["21901370011193137", "21901271100098122"],
         )
 
     def test_format_intercept_imsi_restores_hr_mcc_prefix(self):

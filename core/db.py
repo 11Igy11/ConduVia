@@ -640,9 +640,12 @@ def set_project_subject(
 ) -> None:
     from core.osint.imsi import format_intercept_imsi
 
-    imsi_value = (imsi or "").strip()
-    if imsi_value:
-        imsi_value = format_intercept_imsi(imsi_value)
+    imsi_rows = []
+    for part in str(imsi or "").replace(";", "\n").replace(",", "\n").splitlines():
+        item = part.strip()
+        if item:
+            imsi_rows.append(format_intercept_imsi(item))
+    imsi_value = "\n".join(imsi_rows)
     with _connect(db_path) as con:
         con.execute(
             """

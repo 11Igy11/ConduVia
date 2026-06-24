@@ -73,7 +73,7 @@ class ProjectsUIController:
         self.app.notes_controller.refresh_ui()
         self.app.refresh_activity_profile_ui()
 
-    def _short_text(self, value: str, limit: int = 54) -> str:
+    def _short_text(self, value: str, limit: int = 180) -> str:
         text = (value or "").strip()
         if len(text) <= limit:
             return text
@@ -138,7 +138,7 @@ class ProjectsUIController:
                 subject_msisdn=values.get("msisdn", ""),
                 subject_imsi=values.get("imsi", ""),
                 subject_imei=values.get("imei", ""),
-                subject_ip=values.get("ip", ""),
+                subject_ip="",
                 subject_extra_identifiers=values.get("extra_identifiers", ""),
             )
         except Exception as e:
@@ -201,9 +201,6 @@ class ProjectsUIController:
         validity_history = format_order_validity_history(metadata)
 
         info = []
-        info.append("Project details")
-        info.append("")
-        info.append(f"Name: {p.name}")
         info.append(f"ID: {p.id}")
         info.append(f"Subject: {subject_display_label(p)}")
         info.append(f"Identifiers: {project_identifiers_text(p)}")
@@ -214,8 +211,6 @@ class ProjectsUIController:
             info.append(f"Earlier validity periods: {validity_history}")
         if p.subject_oib:
             info.append(f"OIB: {p.subject_oib}")
-        if p.subject_ip:
-            info.append(f"Known IP: {p.subject_ip}")
         info.append("")
         if p.description:
             info.append("Description:")
@@ -386,7 +381,7 @@ class ProjectsUIController:
                 subject_msisdn=values.get("msisdn", ""),
                 subject_imsi=values.get("imsi", ""),
                 subject_imei=values.get("imei", ""),
-                subject_ip=values.get("ip", ""),
+                subject_ip="",
                 subject_extra_identifiers=values.get("extra_identifiers", ""),
             )
 
@@ -766,9 +761,6 @@ class ProjectsUIController:
         validity_active = format_active_order_validity(metadata)
         validity_history = format_order_validity_history(metadata)
         info = [
-            "Project details",
-            "",
-            f"Name: {project.name}",
             f"ID: {project.id}",
             f"Subject: {subject_display_label(project)}",
             f"Identifiers: {project_identifiers_text(project)}",
@@ -780,8 +772,6 @@ class ProjectsUIController:
             info.append(f"Earlier validity periods: {validity_history}")
         if project.subject_oib:
             info.append(f"OIB: {project.subject_oib}")
-        if project.subject_ip:
-            info.append(f"Known IP: {project.subject_ip}")
         info.append("")
         if project.description:
             info.extend(["Description:", project.description, ""])

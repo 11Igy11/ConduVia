@@ -17,6 +17,11 @@ from core.osint.normalize import (
 from core.osint.public_ips import is_public_ip
 
 
+def _split_project_values(value: str) -> list[str]:
+    text = str(value or "").replace(";", "\n").replace(",", "\n")
+    return [part.strip() for part in text.splitlines() if part.strip()]
+
+
 def build_osint_snapshot(project_id: int, *, db_path: Path = DEFAULT_DB_PATH) -> dict[str, Any]:
     kwargs = {"db_path": db_path}
 
@@ -80,13 +85,14 @@ def _collect_identifiers(project) -> list[dict[str, Any]]:
 
     if project.subject_oib:
         add("OIB", project.subject_oib, source="project", label="OIB")
-    msisdn = normalize_msisdn(project.subject_msisdn)
-    if msisdn:
-        add("MSISDN", msisdn, source="project", label="Mobile number")
-    if project.subject_imsi:
-        add("IMSI", project.subject_imsi, source="project", label="IMSI")
-    if project.subject_imei:
-        add("IMEI", project.subject_imei, source="project", label="IMEI")
+    for value in _split_project_values(project.subject_msisdn):
+        msisdn = normalize_msisdn(value)
+        if msisdn:
+            add("MSISDN", msisdn, source="project", label="Mobile number")
+    for value in _split_project_values(project.subject_imsi):
+        add("IMSI", value, source="project", label="IMSI")
+    for value in _split_project_values(project.subject_imei):
+        add("IMEI", value, source="project", label="IMEI")
     if project.target_identifier:
         add(project.target_type or "Target", project.target_identifier, source="project")
     subject_ip = normalize_ip(project.subject_ip)

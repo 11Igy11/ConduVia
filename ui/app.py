@@ -413,6 +413,8 @@ class App(QWidget):
 
     def refresh_all_views(self):
         self.notes_controller.flush()
+        if hasattr(self, "pcap_page"):
+            self.pcap_page.refresh_current_view()
 
         active_project_id = self.current_project_id
         self.projects_ui_controller.refresh_projects()
@@ -452,8 +454,6 @@ class App(QWidget):
         self.findings_controller.refresh_ui()
         self.notes_controller.refresh_ui()
         self.refresh_activity_profile_ui()
-        if hasattr(self, "pcap_page"):
-            self.pcap_page.refresh_current_view()
         if hasattr(self, "osint_ui_controller"):
             self.osint_ui_controller.refresh()
 

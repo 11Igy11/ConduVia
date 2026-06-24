@@ -7,6 +7,7 @@ from PySide6.QtWidgets import QMenu
 
 from core.db import add_finding, delete_finding, get_finding, list_findings, update_finding
 from ui.app_helpers import normalize_tags, status_emoji
+from ui.dialogs import finding_details_dialog
 from ui.explore_widgets import AITextWorker
 from ui.findings_format import format_finding_detail, update_finding_status
 
@@ -199,47 +200,19 @@ class FindingsController:
         if fid is None or row is None:
             return
 
-        title, ok = app._text_input_dialog("Edit finding", "Title:", text=row["title"] or "", width=480)
-        if not ok:
+        values, ok = finding_details_dialog(
+            app,
+            title="Edit finding",
+            finding=dict(row),
+        )
+        if not ok or not values:
             return
-        title = (title or "").strip()
+        title = str(values.get("title") or "").strip()
         if not title:
             return
-
-        note, ok2 = app._multiline_input_dialog(
-            "Edit finding",
-            "Note:",
-            text=row["note"] or "",
-            width=480,
-            height=260,
-        )
-        if not ok2:
-            return
-
-        statuses = ["New", "Investigating", "Confirmed", "False Positive"]
-        cur = row["status"] if row["status"] in statuses else "New"
-        idx = statuses.index(cur)
-
-        status, ok3 = app._item_choice_dialog(
-            "Edit finding",
-            "Status:",
-            statuses,
-            current_index=idx,
-            width=420,
-        )
-        if not ok3:
-            return
-
-        tags, ok4 = app._text_input_dialog(
-            "Edit finding",
-            "Tags (comma-separated):",
-            text=row["tags"] or "",
-            width=440,
-        )
-        if not ok4:
-            return
-
-        tags = normalize_tags(tags)
+        note = str(values.get("note") or "")
+        status = str(values.get("status") or "New")
+        tags = normalize_tags(str(values.get("tags") or ""))
 
         try:
             update_finding(fid, title=title, note=note, status=status, tags=tags)

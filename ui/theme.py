@@ -5,7 +5,7 @@ from pathlib import Path
 from PySide6.QtWidgets import QApplication
 
 from ui.app_helpers import normalize_ui_theme
-from ui.font_utils import app_font
+from ui.font_utils import app_font, install_font_sanitizer
 
 LIGHT_THEME_OVERRIDES = """
 QWidget {
@@ -560,3 +560,4 @@ def apply_app_stylesheet(qapp: QApplication, theme: str | None = "dark") -> None
     qapp.setProperty("ui_theme", normalized_theme)
     qapp.setFont(app_font(point_size=10))
     qapp.setStyleSheet(app_stylesheet(normalized_theme))
+    install_font_sanitizer(qapp)

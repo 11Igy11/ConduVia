@@ -4,6 +4,61 @@ from core.db import Project
 from core.osint.imsi import format_identifier_display, format_intercept_imsi, is_imsi_target_type
 
 
+def _split_identifier_values(value: str) -> list[str]:
+    text = str(value or "").replace(";", "\n").replace(",", "\n")
+    rows: list[str] = []
+    seen: set[str] = set()
+    for part in text.splitlines():
+        item = part.strip()
+        if not item:
+            continue
+        key = item.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        rows.append(item)
+    return rows
+
+
+def identifier_values_for_editor(value: str, *, kind: str = "") -> list[str]:
+    """Split stored identifier text into separate dialog rows."""
+    import re
+
+    from core.osint.imsi import format_intercept_imsi
+
+    rows = _split_identifier_values(value)
+    if len(rows) > 1:
+        return rows
+
+    raw = str(value or "").strip()
+    if not raw:
+        return []
+
+    if str(kind or "").casefold() == "imsi":
+        digits = re.sub(r"\D", "", raw)
+        if len(digits) > 15:
+            chunks: list[str] = []
+            start = 0
+            mcc = "219"
+            while start < len(digits):
+                next_start = None
+                search_from = start + 14
+                while search_from < len(digits):
+                    if digits.startswith(mcc, search_from):
+                        next_start = search_from
+                        break
+                    search_from += 1
+                if next_start is None:
+                    chunks.append(digits[start:])
+                    break
+                chunks.append(digits[start:next_start])
+                start = next_start
+            if len(chunks) > 1:
+                return [format_intercept_imsi(part) for part in chunks if part]
+
+    return [raw]
+
+
 def subject_full_name(project: Project) -> str:
     parts = [
         (project.subject_first_name or "").strip(),
@@ -37,12 +92,15 @@ def target_display_label(project: Project) -> str:
 
 
 def project_identifier_rows(project: Project) -> list[dict[str, str]]:
-    rows = [
-        {"type": "MSISDN", "label": "Mobile number", "value": project.subject_msisdn},
-        {"type": "IMSI", "label": "IMSI", "value": format_identifier_display(project.subject_imsi, "IMSI")},
-        {"type": "IMEI", "label": "IMEI", "value": project.subject_imei},
-        {"type": "IP", "label": "IP address", "value": project.subject_ip},
-    ]
+    rows = []
+    for value in _split_identifier_values(project.subject_msisdn):
+        rows.append({"type": "MSISDN", "label": "Mobile number", "value": value})
+    for value in _split_identifier_values(project.subject_imsi):
+        rows.append({"type": "IMSI", "label": "IMSI", "value": format_identifier_display(value, "IMSI")})
+    for value in _split_identifier_values(project.subject_imei):
+        rows.append({"type": "IMEI", "label": "IMEI", "value": value})
+    if (project.subject_ip or "").strip():
+        rows.append({"type": "IP", "label": "IP address", "value": project.subject_ip})
 
     if (project.target_identifier or "").strip():
         legacy_type = (project.target_type or "Target").strip() or "Target"
