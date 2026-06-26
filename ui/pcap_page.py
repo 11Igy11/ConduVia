@@ -25,7 +25,6 @@ from PySide6.QtWidgets import (
     QProgressBar,
     QPushButton,
     QScrollArea,
-    QSplitter,
     QTableView,
     QTabWidget,
     QTextEdit,
@@ -36,6 +35,14 @@ from PySide6.QtWidgets import (
 
 from core.exporters.pcap_metadata_exporter import export_pcap_dns_csv, export_pcap_tls_csv
 from core.analysis_limits import PROFILE_CHART_PREVIEW_ROWS
+from ui.expand_dialogs import (
+    build_dict_table,
+    open_communication_indicators_dialog,
+    open_dict_rows_expand_dialog,
+    open_dict_table_expand_dialog,
+    open_missing_period_days_dialog,
+    set_dict_table_rows,
+)
 from ui.table_export import append_table_export_footer
 from ui.buttons import make_action_button, style_action_button
 from ui.dataset_header_layout import (
@@ -909,41 +916,19 @@ class PcapPage(QWidget):
             banner.clear()
 
     def _open_missing_days_dialog(self) -> None:
-        missing = list(self._period_gap_info.get("missing_days") or [])
-        if not missing:
-            self._info("Missing days", "No internal gaps in the indexed period range.")
-            return
-
-        first = self._format_day_label(str(self._period_gap_info.get("first_day") or ""))
-        last = self._format_day_label(str(self._period_gap_info.get("last_day") or ""))
-        rows = [
-            {"label": self._format_day_label(day), "day": day}
-            for day in missing
-        ]
-
-        dlg = QDialog(self)
-        dlg.setWindowTitle("Missing PCAP days")
-        dlg.resize(720, 560)
-        layout = QVBoxLayout(dlg)
-        layout.setContentsMargins(14, 14, 14, 28)
-        hint = QLabel(
-            f"{len(missing):,} indexed days missing between {first} and {last}. "
-            "These are internal gaps — calendar days inside the imported period with no PCAP files."
+        open_missing_period_days_dialog(
+            self,
+            title="Missing PCAP days",
+            missing_days=list(self._period_gap_info.get("missing_days") or []),
+            first_day_label=self._format_day_label(str(self._period_gap_info.get("first_day") or "")),
+            last_day_label=self._format_day_label(str(self._period_gap_info.get("last_day") or "")),
+            evidence_kind="PCAP",
+            format_day_label=self._format_day_label,
+            on_empty=self._info,
+            append_export_footer=lambda footer, table: self._append_export_footer(
+                footer, title="Missing PCAP days", table=table
+            ),
         )
-        hint.setWordWrap(True)
-        layout.addWidget(hint)
-        table = self._table([("label", "Missing day"), ("day", "ISO date")], fixed_widths={0: 180, 1: 140})
-        self._set_table(table, rows)
-        layout.addWidget(table, 1)
-        footer = QHBoxLayout()
-        self._append_export_footer(footer, title="Missing PCAP days", table=table)
-        footer.addStretch()
-        close_btn = QPushButton("Close")
-        close_btn.setMinimumHeight(42)
-        close_btn.clicked.connect(dlg.accept)
-        footer.addWidget(close_btn)
-        layout.addLayout(footer)
-        dlg.exec()
 
     def _build_visibility_panel(self) -> QFrame:
         panel = QFrame()
@@ -1122,30 +1107,13 @@ class PcapPage(QWidget):
         fixed_widths: dict[int, int] | None = None,
         stretch_columns: list[int] | None = None,
     ) -> CopyableTableView:
-        table = CopyableTableView(self.app)
-        table.setModel(DictTableModel(columns))
-        table.setSortingEnabled(True)
-        table.setAlternatingRowColors(True)
-        table.setSelectionBehavior(QTableView.SelectRows)
-        table.setSelectionMode(QAbstractItemView.SingleSelection)
-        table.setEditTriggers(QTableView.NoEditTriggers)
-        table.setWordWrap(False)
-        table.verticalHeader().setVisible(False)
-        table.setHorizontalScrollMode(QAbstractItemView.ScrollPerPixel)
-        table.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
-        table.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        table.setMinimumHeight(210)
-        header = table.horizontalHeader()
-        header.setSectionResizeMode(QHeaderView.Interactive)
-        header.setStretchLastSection(stretch_last)
-        fixed_widths = fixed_widths or {}
-        for idx, width in fixed_widths.items():
-            if 0 <= idx < len(columns):
-                table.setColumnWidth(idx, width)
-        for idx in stretch_columns or []:
-            if 0 <= idx < len(columns):
-                header.setSectionResizeMode(idx, QHeaderView.Stretch)
-        return table
+        return build_dict_table(
+            self.app,
+            columns,
+            stretch_last=stretch_last,
+            fixed_widths=fixed_widths,
+            stretch_columns=stretch_columns,
+        )
 
     def _group(self, title: str, widget: QWidget) -> QGroupBox:
         group = QGroupBox(title)
@@ -1153,55 +1121,16 @@ class PcapPage(QWidget):
         layout.addWidget(widget)
         return group
 
-    def _dialog_size(self, preferred_width: int, preferred_height: int) -> tuple[int, int]:
-        screen = QApplication.primaryScreen()
-        if screen is None:
-            return preferred_width, preferred_height
-        available = screen.availableGeometry()
-        width = min(preferred_width, max(760, available.width() - 120))
-        height = min(preferred_height, max(520, available.height() - 120))
-        return width, height
-
     def _open_table_dialog(self, title: str, source_table: QTableView) -> None:
-        source_model = source_table.model()
-        if not isinstance(source_model, DictTableModel) or not source_model.rows:
-            self._info(title, "No rows are loaded.")
-            return
-
-        dlg = QDialog(self)
-        dlg.setWindowTitle(title)
-        dlg.resize(*self._dialog_size(1180, 720))
-
-        layout = QVBoxLayout(dlg)
-        layout.setContentsMargins(14, 14, 14, 28)
-        layout.setSpacing(10)
-
-        hint = QLabel("Expanded table view. Sort columns, select rows, or right-click to copy values.")
-        hint.setObjectName("MutedLabel")
-        hint.setWordWrap(True)
-        layout.addWidget(hint)
-
-        fixed_widths = {
-            idx: self._expanded_column_width(source_model.columns[idx], source_table.columnWidth(idx))
-            for idx in range(source_model.columnCount())
-        }
-        table = self._table(source_model.columns, fixed_widths=fixed_widths, stretch_columns=[])
-        table.setMinimumHeight(520)
-        table.verticalHeader().setDefaultSectionSize(max(34, source_table.verticalHeader().defaultSectionSize()))
-        self._set_table(table, list(source_model.rows))
-        layout.addWidget(table, 1)
-
-        footer = QHBoxLayout()
-        self._append_export_footer(footer, title=title, table=table)
-        footer.addStretch()
-        btn_close = QPushButton("Close")
-        btn_close.setMinimumHeight(42)
-        btn_close.clicked.connect(dlg.accept)
-        footer.addWidget(btn_close)
-        layout.addSpacing(6)
-        layout.addLayout(footer)
-
-        dlg.exec()
+        open_dict_table_expand_dialog(
+            self,
+            title=title,
+            source_table=source_table,
+            on_empty=self._info,
+            append_export_footer=lambda footer, table: self._append_export_footer(
+                footer, title=title, table=table
+            ),
+        )
 
     def _append_export_footer(self, footer: QHBoxLayout, *, title: str, table: QTableView) -> None:
         append_table_export_footer(
@@ -1214,21 +1143,21 @@ class PcapPage(QWidget):
             source_label=self.lbl_file.text() or "",
         )
 
-    def _expanded_column_width(self, column: tuple[str, str], current_width: int) -> int:
-        key, title = column
-        name = f"{key} {title}".lower()
-        preferred = 140
-        if "time" in name or "seen" in name:
-            preferred = 190
-        if "source" in name or "destination" in name or "endpoint" in name:
-            preferred = 210
-        if "host" in name or "signal" in name or "query" in name:
-            preferred = 300
-        if "value" in name or "evidence" in name or "detail" in name:
-            preferred = 380
-        if "packet" in name or "count" in name or "port" in name:
-            preferred = 120
-        return max(preferred, max(110, min(440, current_width)))
+    def _open_rows_dialog(self, title: str, columns: list[tuple[str, str]], rows: list[dict[str, Any]]) -> None:
+        open_dict_rows_expand_dialog(
+            self,
+            title=title,
+            columns=columns,
+            rows=rows,
+            on_empty=self._info,
+            append_export_footer=lambda footer, table: self._append_export_footer(
+                footer, title=title, table=table
+            ),
+            hint_text=(
+                "Click an indicator above to inspect the underlying rows. "
+                "Sort columns or right-click to copy values."
+            ),
+        )
 
     def _format_pcap_time(self, value: Any) -> str:
         text = format_pcap_datetime(value)
@@ -2457,39 +2386,6 @@ class PcapPage(QWidget):
             })
         return chart_rows
 
-    def _open_rows_dialog(self, title: str, columns: list[tuple[str, str]], rows: list[dict[str, Any]]) -> None:
-        if not rows:
-            self._info(title, "No rows are loaded.")
-            return
-
-        dlg = QDialog(self)
-        dlg.setWindowTitle(title)
-        dlg.resize(*self._dialog_size(1180, 720))
-
-        layout = QVBoxLayout(dlg)
-        layout.setContentsMargins(14, 14, 14, 28)
-        layout.setSpacing(10)
-
-        hint = QLabel("Click an indicator above to inspect the underlying rows. Sort columns or right-click to copy values.")
-        hint.setObjectName("MutedLabel")
-        hint.setWordWrap(True)
-        layout.addWidget(hint)
-
-        table = self._table(columns, stretch_columns=[idx for idx, _ in enumerate(columns)])
-        table.setMinimumHeight(520)
-        self._set_table(table, rows)
-        layout.addWidget(table, 1)
-
-        footer = QHBoxLayout()
-        self._append_export_footer(footer, title=title, table=table)
-        footer.addStretch()
-        btn_close = QPushButton("Close")
-        btn_close.setMinimumHeight(42)
-        btn_close.clicked.connect(dlg.accept)
-        footer.addWidget(btn_close)
-        layout.addLayout(footer)
-        dlg.exec()
-
     def _visibility_kind(self, label: str) -> str:
         text = str(label or "").strip().lower()
         if text.startswith("encrypted"):
@@ -2759,70 +2655,18 @@ class PcapPage(QWidget):
 
     def _open_communications_dialog(self) -> None:
         model = self.tbl_communications.model()
-        if not isinstance(model, DictTableModel) or not model.rows:
-            self._info("Communication indicators", "No communication indicators are loaded.")
-            return
-
-        dlg = QDialog(self)
-        dlg.setWindowTitle("Communication indicators")
-        dlg.resize(*self._dialog_size(1180, 720))
-
-        layout = QVBoxLayout(dlg)
-        layout.setContentsMargins(14, 14, 14, 28)
-        layout.setSpacing(10)
-
-        hint = QLabel("Metadata-based communication indicators. Sort columns, select rows, or right-click to copy values.")
-        hint.setObjectName("MutedLabel")
-        hint.setWordWrap(True)
-        layout.addWidget(hint)
-
-        table = self._table(
-            self.communication_full_columns,
+        rows = list(model.rows) if isinstance(model, DictTableModel) else []
+        open_communication_indicators_dialog(
+            self,
+            rows=rows,
+            columns=self.communication_full_columns,
             fixed_widths=self.communication_full_fixed_widths,
-            stretch_columns=[3],
+            detail_text=self._communication_detail_text,
+            on_empty=self._info,
+            append_export_footer=lambda footer, table: self._append_export_footer(
+                footer, title="Communication indicators", table=table
+            ),
         )
-        table.setMinimumWidth(980)
-        table.verticalHeader().setDefaultSectionSize(42)
-        self._set_table(table, list(model.rows))
-
-        detail = QTextEdit()
-        detail.setReadOnly(True)
-        detail.setMinimumWidth(320)
-        detail.setPlaceholderText("Select a communication indicator to see the evidence used for classification.")
-
-        def update_detail(current: QModelIndex, previous: QModelIndex | None = None) -> None:
-            table_model = table.model()
-            if not isinstance(table_model, DictTableModel) or not current.isValid():
-                detail.clear()
-                return
-            if current.row() < 0 or current.row() >= len(table_model.rows):
-                detail.clear()
-                return
-            detail.setPlainText(self._communication_detail_text(table_model.rows[current.row()]))
-
-        table.selectionModel().currentRowChanged.connect(update_detail)
-
-        splitter = QSplitter(Qt.Horizontal)
-        splitter.addWidget(table)
-        splitter.addWidget(self._group("Selected indicator evidence", detail))
-        splitter.setStretchFactor(0, 5)
-        splitter.setStretchFactor(1, 1)
-        splitter.setCollapsible(0, False)
-        splitter.setCollapsible(1, False)
-        layout.addWidget(splitter, 1)
-        table.selectRow(0)
-
-        footer = QHBoxLayout()
-        self._append_export_footer(footer, title="Communication indicators", table=table)
-        footer.addStretch()
-        btn_close = QPushButton("Close")
-        btn_close.setMinimumHeight(42)
-        btn_close.clicked.connect(dlg.accept)
-        footer.addWidget(btn_close)
-        layout.addSpacing(6)
-        layout.addLayout(footer)
-
-        dlg.exec()
 
     def _on_error(self, message: str):
         self._close_period_load_progress()
@@ -3102,13 +2946,7 @@ class PcapPage(QWidget):
                 pass
 
     def _set_table(self, table: QTableView, rows: list[dict[str, Any]]):
-        model = table.model()
-        if isinstance(model, DictTableModel):
-            model.set_rows(rows)
-            section = table.horizontalHeader().sortIndicatorSection()
-            order = table.horizontalHeader().sortIndicatorOrder()
-            if table.isSortingEnabled() and section >= 0:
-                model.sort(section, order)
+        set_dict_table_rows(table, rows)
 
     def _set_artifact_tables(self, artifacts: list[dict[str, Any]]) -> None:
         self._all_artifacts = artifacts or []

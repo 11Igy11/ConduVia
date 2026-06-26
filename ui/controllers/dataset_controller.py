@@ -15,8 +15,6 @@ from PySide6.QtWidgets import (
     QProgressBar,
     QProgressDialog,
     QPushButton,
-    QTableWidget,
-    QTableWidgetItem,
     QVBoxLayout,
 )
 
@@ -73,7 +71,9 @@ from core.evidence_policy import (
 )
 
 
+from ui.expand_dialogs import open_missing_period_days_dialog
 from ui.project_rows_dialog import open_project_rows_dialog
+from ui.table_export import append_table_export_footer
 from ui.thread_utils import stop_qthread
 from ui.workers.dataset_workers import (
     BehaviorIndexWorker,
@@ -1728,45 +1728,25 @@ class DatasetController(QObject):
         self._sync_json_gap_visibility()
 
     def open_json_missing_days_dialog(self) -> None:
-        missing = list(self._json_gap_info.get("missing_days") or [])
-        if not missing:
-            self.app._message_dialog("Missing days", "No internal gaps in the indexed period range.", width=420)
-            return
-
-        first = self._format_day_label(str(self._json_gap_info.get("first_day") or ""))
-        last = self._format_day_label(str(self._json_gap_info.get("last_day") or ""))
-
-        dlg = QDialog(self.app)
-        dlg.setWindowTitle("Missing JSON days")
-        dlg.resize(720, 560)
-        layout = QVBoxLayout(dlg)
-        layout.setContentsMargins(14, 14, 14, 28)
-        hint = QLabel(
-            f"{len(missing):,} indexed days missing between {first} and {last}. "
-            "These are internal gaps — calendar days inside the imported period with no JSON files."
+        open_missing_period_days_dialog(
+            self.app,
+            title="Missing JSON days",
+            missing_days=list(self._json_gap_info.get("missing_days") or []),
+            first_day_label=self._format_day_label(str(self._json_gap_info.get("first_day") or "")),
+            last_day_label=self._format_day_label(str(self._json_gap_info.get("last_day") or "")),
+            evidence_kind="JSON",
+            format_day_label=self._format_day_label,
+            on_empty=lambda title, message: self.app._message_dialog(title, message, width=420),
+            append_export_footer=lambda footer, table: append_table_export_footer(
+                self.app,
+                footer,
+                title="Missing JSON days",
+                table=table,
+                project_id=self.app.current_project_id,
+                category="json",
+                source_label=str(getattr(self, "_json_day_source", "") or ""),
+            ),
         )
-        hint.setWordWrap(True)
-        layout.addWidget(hint)
-
-        table = QTableWidget(len(missing), 2, dlg)
-        table.setHorizontalHeaderLabels(["Missing day", "ISO date"])
-        table.verticalHeader().setVisible(False)
-        table.setEditTriggers(QTableWidget.NoEditTriggers)
-        table.setSelectionBehavior(QTableWidget.SelectRows)
-        for row_index, day in enumerate(missing):
-            table.setItem(row_index, 0, QTableWidgetItem(self._format_day_label(day)))
-            table.setItem(row_index, 1, QTableWidgetItem(day))
-        table.resizeColumnsToContents()
-        layout.addWidget(table, 1)
-
-        footer = QHBoxLayout()
-        footer.addStretch()
-        close_btn = QPushButton("Close")
-        close_btn.setMinimumHeight(42)
-        close_btn.clicked.connect(dlg.accept)
-        footer.addWidget(close_btn)
-        layout.addLayout(footer)
-        dlg.exec()
 
     def _format_day_label(self, day: str) -> str:
         return format_period_day_label(day)
