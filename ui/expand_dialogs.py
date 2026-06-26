@@ -138,6 +138,7 @@ def open_missing_period_days_dialog(
     layout.addWidget(hint)
 
     table = build_dict_table(
+        dlg,
         [("label", "Missing day"), ("day", "ISO date")],
         fixed_widths={0: 180, 1: 140},
         min_height=480,
