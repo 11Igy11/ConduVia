@@ -888,7 +888,6 @@ class DatasetController(DatasetLoadMixin, DatasetIngestMixin, QObject):
         pcap_page._set_day_groups(by_day, allow_empty_days=True)
         self._apply_period_index_after_project_sync(by_day, kind="pcap")
         pcap_page._sync_period_selector_panel()
-        pcap_page._update_period_gap_banner(list(by_day.keys()))
         if getattr(pcap_page, "summary", None) is None and hasattr(pcap_page, "lbl_stats"):
             if pcap_page.batch_is_running():
                 return
@@ -1019,11 +1018,22 @@ class DatasetController(DatasetLoadMixin, DatasetIngestMixin, QObject):
 
     def reset_dataset_views(self) -> None:
         """Full dataset reset including period selectors (project change / new import)."""
+        self._reset_import_finalize_state()
         self.reset_loaded_flow_views()
         self._clear_json_day_groups()
 
         if hasattr(self.app, "pcap_page"):
             self.app.pcap_page.clear_project_view()
+
+    def _reset_import_finalize_state(self) -> None:
+        """Clear deferred import flags so project switches cannot leave the UI stuck."""
+        self._import_finalize_pending = False
+        self._import_finalize_running = False
+        self._import_finalize_completed = False
+        self._defer_import_finalize = False
+        self._import_plan = None
+        self._pending_import_banner_message = ""
+        self._clear_import_status()
 
     def clear_context(self) -> None:
         self.reset_dataset_views()
