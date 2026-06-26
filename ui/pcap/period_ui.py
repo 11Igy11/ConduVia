@@ -4,7 +4,7 @@ from pathlib import Path
 
 from core.evidence_policy import format_period_day_label
 from core.formatters import human_bytes
-from core.pcap_analyzer import PcapSummary, build_investigator_view
+from core.pcap_analyzer import PcapSummary
 from core.pcap_period import _iso_day_from_path, resolve_period_day
 from core.period_gaps import (
     calendar_days_between,
@@ -215,19 +215,27 @@ class PcapPeriodMixin:
 
     def _apply_full_project_period_index(self) -> None:
         """Show every indexed PCAP day after reloading ingest (not only the last import window)."""
-        self._pcap_period_granularity = "day"
-        self._pcap_period_range_start = ""
-        self._pcap_period_range_end = ""
-        if hasattr(self, "cmb_pcap_period_mode"):
-            self.cmb_pcap_period_mode.blockSignals(True)
-            day_index = self.cmb_pcap_period_mode.findData("day")
-            if day_index >= 0:
-                self.cmb_pcap_period_mode.setCurrentIndex(day_index)
-            self.cmb_pcap_period_mode.blockSignals(False)
-        self._sync_pcap_range_button()
+        needs_reset = (
+            self._pcap_period_granularity != "day"
+            or bool(self._pcap_period_range_start)
+            or bool(self._pcap_period_range_end)
+        )
+        if needs_reset:
+            self._pcap_period_granularity = "day"
+            self._pcap_period_range_start = ""
+            self._pcap_period_range_end = ""
+            if hasattr(self, "cmb_pcap_period_mode"):
+                self.cmb_pcap_period_mode.blockSignals(True)
+                day_index = self.cmb_pcap_period_mode.findData("day")
+                if day_index >= 0:
+                    self.cmb_pcap_period_mode.setCurrentIndex(day_index)
+                self.cmb_pcap_period_mode.blockSignals(False)
+            self._sync_pcap_range_button()
+            if self._pcap_day_groups_raw:
+                self._rebuild_pcap_period_combo()
+                return
         if self._pcap_day_groups_raw:
-            self._rebuild_pcap_period_combo()
-        self._update_period_gap_banner(list(self._pcap_day_groups_raw.keys()))
+            self._update_period_gap_banner(list(self._pcap_day_groups_raw.keys()))
         self._sync_period_gap_visibility()
 
     def _set_day_groups(self, day_groups: dict[str, list[str]], *, allow_empty_days: bool = False) -> list[str]:
@@ -761,13 +769,20 @@ class PcapPeriodMixin:
             auto_save=False,
             day_groups=day_groups,
         )
-        self._batch_runner.start(
+        started = self._batch_runner.start(
             worker,
             thread_parent=self._thread_parent(),
             progress_slot=self._on_batch_progress,
             finished_slot=self._on_batch_finished,
             cleanup_slot=self._cleanup_batch_thread,
         )
+        if not started:
+            self._info("PCAP", "PCAP batch analysis is already running.")
+            self.btn_open.setEnabled(True)
+            self._update_open_button_text()
+            self._close_period_load_progress()
+            self._update_reanalyze_button_state()
+            self._update_batch_status()
 
     def _sync_period_selector_to_summary(self, summary: PcapSummary) -> None:
         if not self._pcap_day_groups or not hasattr(self, "cmb_pcap_day"):
@@ -788,23 +803,6 @@ class PcapPeriodMixin:
         self.cmb_pcap_day.setCurrentIndex(index)
         self.cmb_pcap_day.blockSignals(False)
         self._pcap_active_day = day
-        if not self.summary:
-            return
-        summary = self.summary
-        investigator = build_investigator_view(summary)
-        self._set_highlights(summary)
-        self._set_investigator_text(investigator)
-        self._update_limit_notice(summary)
-        self._apply_investigator_charts(investigator)
-        self._set_visibility_indicators(
-            investigator.get("visibility_rows") or [],
-            empty_text="No visibility indicators are available.",
-        )
-        self.lbl_overview_text.setText(self._overview_text(summary))
-        self._set_network_overview_table(summary)
-        self._set_evidence_tables(summary)
-        self._set_artifact_tables(summary.artifacts)
-        self._set_connections_table(summary)
 
     def _batch_context_label(self, current_file: str = "") -> str:
         text = str(current_file or self._pcap_batch_current_label or "").strip()

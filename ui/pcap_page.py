@@ -1011,7 +1011,6 @@ class PcapPage(PcapInvestigatorMixin, PcapPeriodMixin, PcapExportMixin, QWidget)
                 grouped_day = bool(self._pcap_day_groups_raw)
                 if grouped_day:
                     self._apply_imported_period_range_only(period_start, period_end)
-                    self._rebuild_pcap_period_combo()
             else:
                 paths = self._set_day_groups(day_groups) or paths
                 grouped_day = bool(self._pcap_day_groups)
@@ -1089,13 +1088,19 @@ class PcapPage(PcapInvestigatorMixin, PcapPeriodMixin, PcapExportMixin, QWidget)
             auto_save=auto_save,
             day_groups=batch_day_groups or None,
         )
-        self._batch_runner.start(
+        started = self._batch_runner.start(
             worker,
             thread_parent=self._thread_parent(),
             progress_slot=self._on_batch_progress,
             finished_slot=self._on_batch_finished,
             cleanup_slot=self._cleanup_batch_thread,
         )
+        if not started:
+            self._info("PCAP", "PCAP batch analysis is already running.")
+            self.btn_open.setEnabled(True)
+            self._update_open_button_text()
+            self._close_period_load_progress()
+            self._update_batch_status()
 
     def _load_next_queued_pcap(self) -> None:
         if not self._pcap_queue:
@@ -1123,8 +1128,15 @@ class PcapPage(PcapInvestigatorMixin, PcapPeriodMixin, PcapExportMixin, QWidget)
         if self._pcap_day_groups_raw or self._thread is not None or self._batch_runner.is_running():
             return
         controller = getattr(self.app, "dataset_controller", None)
-        if controller is not None:
-            controller.sync_pcap_periods_from_project(project_id)
+        if controller is None:
+            return
+        if (
+            getattr(controller, "_import_finalize_running", False)
+            or getattr(controller, "_import_finalize_pending", False)
+            or getattr(controller, "_import_plan", None)
+        ):
+            return
+        controller.sync_pcap_periods_from_project(project_id)
 
 
 

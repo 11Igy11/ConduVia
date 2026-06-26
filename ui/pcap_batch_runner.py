@@ -27,7 +27,8 @@ class PcapBatchRunner(QObject):
         return self._worker
 
     def is_running(self) -> bool:
-        return self._thread is not None
+        thread = self._thread
+        return thread is not None and thread.isRunning()
 
     def start(
         self,
