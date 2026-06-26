@@ -23,6 +23,7 @@ from core.analysis_limits import (
     PROFILE_CHART_PREVIEW_ROWS,
 )
 from core.behavior_profile import build_flow_behavior_profile
+from core.limit_notices import profile_skipped_json_notice
 from core.db import get_project, get_project_behavior_profile
 from core.exporters.profile_exporter import export_activity_profile_html
 from core.project_datasets import count_project_json_datasets, load_project_dataset_flows
@@ -195,6 +196,12 @@ class ActivityProfilePage(QWidget):
         header_layout.addLayout(title_row)
         header_layout.addWidget(self.lbl_subtitle)
         header_layout.addWidget(self.lbl_readiness)
+
+        self.lbl_limit_notice = QLabel("")
+        self.lbl_limit_notice.setObjectName("AnalysisLimitNotice")
+        self.lbl_limit_notice.setWordWrap(True)
+        self.lbl_limit_notice.hide()
+        header_layout.addWidget(self.lbl_limit_notice)
 
         self.lbl_profile_hit = QLabel("")
         self.lbl_profile_hit.setObjectName("HitBanner")
@@ -433,6 +440,27 @@ class ActivityProfilePage(QWidget):
         banner.setProperty("readinessState", state)
         banner.show()
 
+    def _update_limit_notice(self, behavior: dict[str, Any] | None = None) -> None:
+        banner = getattr(self, "lbl_limit_notice", None)
+        if banner is None:
+            return
+        behavior = behavior or {}
+        info = behavior.get("project_dataset_info") or self._project_dataset_info or {}
+        skipped = int(info.get("skipped_json_file_count") or behavior.get("skipped_json_file_count") or 0)
+        loaded = int(info.get("loaded_json_file_count") or behavior.get("loaded_json_file_count") or 0)
+        indexed_count = int(info.get("json_file_count") or behavior.get("json_file_count") or 0)
+        text = profile_skipped_json_notice(
+            skipped_count=skipped,
+            loaded_count=loaded,
+            indexed_file_count=indexed_count,
+        )
+        if text:
+            banner.setText(text)
+            banner.show()
+        else:
+            banner.hide()
+            banner.clear()
+
     def _update_hit_banner(self, project_id: int | None) -> None:
         banner = getattr(self, "lbl_profile_hit", None)
         if banner is None:
@@ -530,6 +558,9 @@ class ActivityProfilePage(QWidget):
         if hasattr(self, "lbl_readiness"):
             self.lbl_readiness.hide()
             self.lbl_readiness.clear()
+        if hasattr(self, "lbl_limit_notice"):
+            self.lbl_limit_notice.hide()
+            self.lbl_limit_notice.clear()
         if hasattr(self, "lbl_profile_hit"):
             self.lbl_profile_hit.hide()
             self.lbl_profile_hit.clear()
@@ -834,6 +865,7 @@ class ActivityProfilePage(QWidget):
             self.domain_chart.set_rows([], empty_text="No saved project dataset is available for observed domains.")
             self.hour_chart.set_rows([], empty_text="No saved project dataset is available for hourly activity.")
             self._set_behavior_routine_text(behavior)
+            self._update_limit_notice(behavior)
             return
 
         service_rows = behavior.get("service_rows") or []
@@ -864,6 +896,7 @@ class ActivityProfilePage(QWidget):
             footer_text="Project-wide aggregate — not filtered by Explore period or month selection.",
         )
         self._set_behavior_routine_text(behavior)
+        self._update_limit_notice(behavior)
         self._update_profile_expand_buttons(self.profile)
 
     def _update_profile_expand_buttons(self, profile: dict[str, Any] | None = None) -> None:

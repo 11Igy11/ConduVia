@@ -65,6 +65,7 @@ from core.period_selector import (
     month_view_available,
     rebuild_period_selector,
 )
+from core.limit_notices import pcap_flow_cap_notice
 from core.pcap_analyzer import (
     PcapSummary,
     analyze_pcap,
@@ -258,6 +259,11 @@ class PcapPage(QWidget):
         gap_row.addWidget(self.btn_expand_period_gaps)
         self._period_gap_row = gap_row
 
+        self.lbl_limit_notice = QLabel("")
+        self.lbl_limit_notice.setObjectName("AnalysisLimitNotice")
+        self.lbl_limit_notice.setWordWrap(True)
+        self.lbl_limit_notice.hide()
+
         self.lbl_load_progress = QLabel("")
         self.lbl_load_progress.setObjectName("MutedLabel")
         self.lbl_load_progress.setWordWrap(True)
@@ -273,6 +279,7 @@ class PcapPage(QWidget):
         header_layout.addLayout(header_bottom)
         header_layout.addLayout(header_meta)
         header_layout.addLayout(gap_row)
+        header_layout.addWidget(self.lbl_limit_notice)
         header_layout.addWidget(self.lbl_load_progress)
         header_layout.addWidget(self.load_progress)
 
@@ -879,6 +886,27 @@ class PcapPage(QWidget):
         if hasattr(self, "btn_expand_period_gaps"):
             missing_count = int(self._period_gap_info.get("missing_count") or 0)
             self.btn_expand_period_gaps.setVisible(missing_count > 0 and not loading)
+
+    def _update_limit_notice(self, summary: PcapSummary | None = None) -> None:
+        banner = getattr(self, "lbl_limit_notice", None)
+        if banner is None:
+            return
+        summary = summary or getattr(self, "summary", None)
+        if summary is None:
+            banner.hide()
+            banner.clear()
+            return
+        text = pcap_flow_cap_notice(
+            flows_capped=bool(getattr(summary, "flows_capped", False)),
+            flow_map_limit=int(getattr(summary, "flow_map_limit", 0) or 0),
+            total_flows=int(getattr(summary, "total_flows", 0) or len(summary.flows or [])),
+        )
+        if text:
+            banner.setText(text)
+            banner.show()
+        else:
+            banner.hide()
+            banner.clear()
 
     def _open_missing_days_dialog(self) -> None:
         missing = list(self._period_gap_info.get("missing_days") or [])
@@ -1733,6 +1761,9 @@ class PcapPage(QWidget):
             self.load_progress.setValue(0)
         if hasattr(self, "lbl_period_gaps"):
             self.lbl_period_gaps.clear()
+        if hasattr(self, "lbl_limit_notice"):
+            self.lbl_limit_notice.hide()
+            self.lbl_limit_notice.clear()
         if hasattr(self, "btn_expand_period_gaps"):
             self.btn_expand_period_gaps.setVisible(False)
         if hasattr(self, "btn_reanalyze_period"):
@@ -2143,6 +2174,7 @@ class PcapPage(QWidget):
         investigator = build_investigator_view(summary)
         self._set_highlights(summary)
         self._set_investigator_text(investigator)
+        self._update_limit_notice(summary)
         self._apply_investigator_charts(investigator)
         self._set_visibility_indicators(
             investigator.get("visibility_rows") or [],
@@ -2315,6 +2347,7 @@ class PcapPage(QWidget):
         investigator = build_investigator_view(summary)
         self._set_highlights(summary)
         self._set_investigator_text(investigator)
+        self._update_limit_notice(summary)
         self._apply_investigator_charts(investigator)
         self._set_visibility_indicators(
             investigator.get("visibility_rows") or [],
@@ -3181,7 +3214,7 @@ class PcapPage(QWidget):
 
         key_points = "\n".join(f"- {point}" for point in (investigator.get("key_points") or [])[:4])
         self.lbl_key_points.setText(f"Key points:\n{key_points}" if key_points else "")
-        limitations = "\n".join(f"- {item}" for item in (investigator.get("limitations") or [])[:2])
+        limitations = "\n".join(f"- {item}" for item in (investigator.get("limitations") or [])[:4])
         self.lbl_limitations.setText(f"Limitations:\n{limitations}" if limitations else "")
 
     def generate_ai_summary(self):

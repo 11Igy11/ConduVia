@@ -42,6 +42,7 @@ from core.service_classification import (
     classify_communication_service,
     classify_pcap_investigator_service,
 )
+from core.limit_notices import pcap_flow_cap_notice
 
 
 PCAPNG_MAGIC = b"\x0a\x0d\x0d\x0a"
@@ -183,6 +184,8 @@ class PcapSummary:
     notes: list[str] = field(default_factory=list)
     total_flows: int = 0
     total_readable_samples: int = 0
+    flows_capped: bool = False
+    flow_map_limit: int = 0
 
 
 @dataclass
@@ -561,6 +564,8 @@ class _PcapAccumulator:
             notes=notes,
             total_flows=len(all_flows),
             total_readable_samples=self.total_readable_samples,
+            flows_capped=self.flows_capped,
+            flow_map_limit=self._flow_map_limit() if self.flows_capped else 0,
         )
 
 
@@ -787,6 +792,8 @@ def merge_pcap_summaries(summaries: list[PcapSummary], *, label: str = "") -> Pc
 
         total_readable += int(getattr(summary, "total_readable_samples", 0) or len(summary.readable_samples or []))
         total_flow_candidates += int(getattr(summary, "total_flows", 0) or len(summary.flows or []))
+        if getattr(summary, "flows_capped", False):
+            flows_capped = True
         if sample_limit > 0 and len(samples) < sample_limit:
             samples.extend(
                 (summary.readable_samples or [])[: max(0, sample_limit - len(samples))]
@@ -905,6 +912,8 @@ def merge_pcap_summaries(summaries: list[PcapSummary], *, label: str = "") -> Pc
         flows=flows,
         total_flows=max(total_flows, total_flow_candidates),
         total_readable_samples=max(total_readable, len(samples)),
+        flows_capped=flows_capped,
+        flow_map_limit=flow_map_limit if flows_capped else 0,
         notes=[
             f"Aggregated PCAP view built from {len(items):,} files.",
             "Encrypted traffic payload is not readable; ViaNyquist reports metadata such as endpoints, ports, DNS and TLS SNI.",
@@ -989,6 +998,23 @@ def build_investigator_view(summary: PcapSummary) -> dict[str, Any]:
     activity_rows = _with_share(summary.hourly_activity, "packets")
     visibility_rows = _build_visibility_rows(summary)
 
+    limitations = [
+        "Encrypted HTTPS, QUIC and app traffic content cannot be read from the capture alone.",
+        "DNS names, TLS SNI names, endpoints, ports and timing are metadata. They show communication patterns, not message contents.",
+        "Plaintext credentials are reported only when visible in unencrypted payload.",
+    ]
+    cap_note = pcap_flow_cap_notice(
+        flows_capped=bool(getattr(summary, "flows_capped", False)),
+        flow_map_limit=int(getattr(summary, "flow_map_limit", 0) or 0),
+        total_flows=int(getattr(summary, "total_flows", 0) or len(summary.flows or [])),
+    )
+    if cap_note:
+        limitations.insert(0, cap_note)
+    for note in summary.notes or []:
+        lowered = str(note).lower()
+        if note and note not in limitations and ("capped" in lowered or "samples" in lowered):
+            limitations.append(str(note))
+
     return {
         "plain_summary": _plain_summary(summary, service_rows, visibility_rows),
         "key_points": _key_points(summary, service_rows),
@@ -997,11 +1023,7 @@ def build_investigator_view(summary: PcapSummary) -> dict[str, Any]:
         "activity_rows": activity_rows,
         "visibility_rows": visibility_rows,
         "communication_rows": summary.communication_rows,
-        "limitations": [
-            "Encrypted HTTPS, QUIC and app traffic content cannot be read from the capture alone.",
-            "DNS names, TLS SNI names, endpoints, ports and timing are metadata. They show communication patterns, not message contents.",
-            "Plaintext credentials are reported only when visible in unencrypted payload.",
-        ],
+        "limitations": limitations,
     }
 
 

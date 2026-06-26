@@ -138,6 +138,14 @@ QLabel#HitBanner {
     font-weight: 600;
 }
 
+QLabel#AnalysisLimitNotice {
+    background: #422006;
+    border: 1px solid #d97706;
+    border-radius: 8px;
+    color: #fde68a;
+    padding: 6px 10px;
+}
+
 QLabel#CaseMetricCompact {
     background: #273549;
     border: 1px solid #475569;
