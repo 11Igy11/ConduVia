@@ -33,16 +33,18 @@ from core.analysis_limits import (
     SUMMARY_VALUE_COL_WIDTH,
 )
 from ui.buttons import make_action_button, style_action_button
-from core.period_selector import PERIOD_MODE_OPTIONS
+from ui.period_selector_panel import (
+    build_period_selector_row,
+    make_period_day_combo,
+    make_period_label,
+    make_period_mode_combo,
+    make_pick_range_button,
+)
 from ui.dataset_header_layout import (
     DATASET_HEADER_MARGINS,
     DATASET_HEADER_SPACING,
     DATASET_PAGE_SPACING,
-    DATASET_PERIOD_ROW_SPACING,
-    DATASET_PERIOD_ROW_TOP_MARGIN,
-    PERIOD_COMBO_DAY_MIN_WIDTH,
     PERIOD_COMBO_FILE_MIN_WIDTH,
-    PERIOD_COMBO_MODE_MIN_WIDTH,
     PERIOD_CONTROL_HEIGHT,
 )
 from ui.explore_models import FlowTableModel, NumericSortProxy
@@ -77,17 +79,13 @@ def build_explore_workspace(app: App) -> tuple[QWidget, QFrame]:
     app.lbl_showing = QLabel("")
     app.lbl_showing.setObjectName("HeaderStatLabel")
 
-    app.lbl_json_day = QLabel("Period:")
-    app.lbl_json_day.setObjectName("HeaderStatLabel")
-    app.lbl_json_day.setVisible(False)
+    header_card = QFrame()
+    header_card.setObjectName("ExploreHeaderCard")
 
-    app.cmb_json_day = QComboBox()
-    app.cmb_json_day.setMinimumWidth(PERIOD_COMBO_DAY_MIN_WIDTH)
-    app.cmb_json_day.setObjectName("CompactControl")
-    app.cmb_json_day.setFixedHeight(PERIOD_CONTROL_HEIGHT)
-    app.cmb_json_day.setVisible(False)
+    app.lbl_json_day = make_period_label(header_card)
+    app.cmb_json_day = make_period_day_combo(header_card)
 
-    app.cmb_json_file = QComboBox()
+    app.cmb_json_file = QComboBox(header_card)
     app.cmb_json_file.setMinimumWidth(PERIOD_COMBO_FILE_MIN_WIDTH)
     app.cmb_json_file.setObjectName("CompactControl")
     app.cmb_json_file.setFixedHeight(PERIOD_CONTROL_HEIGHT)
@@ -111,9 +109,6 @@ def build_explore_workspace(app: App) -> tuple[QWidget, QFrame]:
     app.cmb_page_size.setFixedHeight(28)
     app.cmb_page_size.addItems(["1000", "2000", "5000", "10000"])
     app.cmb_page_size.setCurrentText("2000")
-
-    header_card = QFrame()
-    header_card.setObjectName("ExploreHeaderCard")
 
     header_layout = QVBoxLayout(header_card)
     header_layout.setContentsMargins(*DATASET_HEADER_MARGINS)
@@ -141,28 +136,16 @@ def build_explore_workspace(app: App) -> tuple[QWidget, QFrame]:
     header_bottom.setContentsMargins(0, 0, 0, 0)
     header_bottom.addWidget(app.lbl_stats, 1)
 
-    app.cmb_json_period_mode = QComboBox()
-    app.cmb_json_period_mode.setMinimumWidth(PERIOD_COMBO_MODE_MIN_WIDTH)
-    app.cmb_json_period_mode.setObjectName("CompactControl")
-    app.cmb_json_period_mode.setFixedHeight(PERIOD_CONTROL_HEIGHT)
-    for label, value in PERIOD_MODE_OPTIONS:
-        app.cmb_json_period_mode.addItem(label, value)
-    app.cmb_json_period_mode.setVisible(False)
-
-    app.btn_json_pick_range = make_action_button("Pick range…")
-    app.btn_json_pick_range.hide()
-
-    app.json_period_row = QWidget()
-    json_period_layout = QHBoxLayout(app.json_period_row)
-    json_period_layout.setContentsMargins(0, DATASET_PERIOD_ROW_TOP_MARGIN, 0, 0)
-    json_period_layout.setSpacing(DATASET_PERIOD_ROW_SPACING)
-    json_period_layout.addWidget(app.lbl_json_day)
-    json_period_layout.addWidget(app.cmb_json_day)
-    json_period_layout.addWidget(app.cmb_json_file)
-    json_period_layout.addWidget(app.cmb_json_period_mode)
-    json_period_layout.addWidget(app.btn_json_pick_range)
-    json_period_layout.addStretch(1)
-    app.json_period_row.setVisible(False)
+    app.cmb_json_period_mode = make_period_mode_combo(header_card)
+    app.btn_json_pick_range = make_pick_range_button(header_card)
+    app.json_period_row = build_period_selector_row(
+        header_card,
+        period_label=app.lbl_json_day,
+        day_combo=app.cmb_json_day,
+        mode_combo=app.cmb_json_period_mode,
+        pick_range_button=app.btn_json_pick_range,
+        middle_widgets=[app.cmb_json_file],
+    )
 
     header_meta = QHBoxLayout()
     header_meta.setSpacing(4)

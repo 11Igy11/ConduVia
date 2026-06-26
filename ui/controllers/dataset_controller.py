@@ -72,6 +72,7 @@ from core.evidence_policy import (
 
 
 from ui.expand_dialogs import open_missing_period_days_dialog
+from ui.period_selector_panel import sync_period_selector_panel, sync_pick_range_button
 from ui.project_rows_dialog import open_project_rows_dialog
 from ui.table_export import append_table_export_footer
 from ui.thread_utils import stop_qthread
@@ -1416,11 +1417,11 @@ class DatasetController(QObject):
             self.app.notes_controller.refresh_activity_ui_for_project(int(project_id))
 
     def _sync_json_range_button(self) -> None:
-        button = getattr(self.app, "btn_json_pick_range", None)
-        if button is None:
-            return
-        visible = self._json_period_granularity == "range" and bool(self._json_day_groups_raw)
-        button.setVisible(visible)
+        sync_pick_range_button(
+            getattr(self.app, "btn_json_pick_range", None),
+            granularity=self._json_period_granularity,
+            has_periods=bool(self._json_day_groups_raw),
+        )
 
     def _indexed_json_day_bounds(self) -> tuple[str, str]:
         from core.period_gaps import normalize_period_day
@@ -1609,22 +1610,15 @@ class DatasetController(QObject):
         self.load_dataset_files(self._json_day_source, files, progress_label=period_label)
 
     def _sync_json_period_selector_panel(self) -> None:
-        has_periods = bool(self._json_day_groups_raw)
-        combo = getattr(self.app, "cmb_json_day", None)
-        label = getattr(self.app, "lbl_json_day", None)
-        mode_combo = getattr(self.app, "cmb_json_period_mode", None)
-        pick_range = getattr(self.app, "btn_json_pick_range", None)
-        if label is not None:
-            label.setVisible(has_periods)
-        if combo is not None:
-            combo.setVisible(has_periods)
-        if mode_combo is not None:
-            mode_combo.setVisible(has_periods)
-        if pick_range is not None:
-            pick_range.setVisible(has_periods and self._json_period_granularity == "range")
-        period_row = getattr(self.app, "json_period_row", None)
-        if period_row is not None:
-            period_row.setVisible(has_periods)
+        sync_period_selector_panel(
+            has_periods=bool(self._json_day_groups_raw),
+            granularity=self._json_period_granularity,
+            period_label=getattr(self.app, "lbl_json_day", None),
+            day_combo=getattr(self.app, "cmb_json_day", None),
+            mode_combo=getattr(self.app, "cmb_json_period_mode", None),
+            pick_range_button=getattr(self.app, "btn_json_pick_range", None),
+            period_row=getattr(self.app, "json_period_row", None),
+        )
 
     def _restore_json_period_range_from_days(self) -> None:
         if not self._json_day_groups_raw:

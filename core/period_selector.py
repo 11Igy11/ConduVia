@@ -28,6 +28,10 @@ def normalize_period_mode(mode: str) -> str:
     return "day"
 
 
+def pick_range_button_visible(*, granularity: str, has_periods: bool) -> bool:
+    return normalize_period_mode(granularity) == "range" and has_periods
+
+
 def month_view_available(day_keys: Iterable[str]) -> bool:
     from core.period_gaps import complete_calendar_month_keys
 
