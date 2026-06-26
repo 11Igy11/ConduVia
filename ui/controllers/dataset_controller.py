@@ -462,6 +462,9 @@ class DatasetController(QObject):
                 opened = self._process_import_json_phase(folder, scan, plan)
                 if opened:
                     plan["opened"] = opened
+                project_id = getattr(self.app, "current_project_id", None)
+                if project_id is not None:
+                    self.sync_json_periods_from_project(project_id)
                 plan["phase"] = "pcap" if plan.get("pcap_files") else "done"
                 QTimer.singleShot(0, self._import_process_tick)
                 return
@@ -501,6 +504,9 @@ class DatasetController(QObject):
             return
         self._clear_import_status()
         self._import_finalize_completed = True
+        project_id = getattr(self.app, "current_project_id", None)
+        if project_id is not None and not getattr(self, "_import_finalize_pending", False):
+            self.deferred_sync_project_periods(project_id)
         self._finalize_import_refresh()
 
     def complete_deferred_import_finalize(self) -> None:
@@ -513,10 +519,9 @@ class DatasetController(QObject):
         self._defer_import_finalize = False
         self._pending_import_banner_message = ""
         self._clear_import_status()
-        pcap_page = getattr(self.app, "pcap_page", None)
-        if pcap_page is not None and getattr(pcap_page, "_pcap_day_groups_raw", None):
-            pcap_page._update_period_gap_banner(list(pcap_page._pcap_day_groups_raw.keys()))
-            pcap_page._sync_period_gap_visibility()
+        project_id = getattr(self.app, "current_project_id", None)
+        if project_id is not None:
+            self.deferred_sync_project_periods(project_id)
         self._finalize_import_refresh()
 
     def _process_import_json_phase(self, folder: str, scan, plan: dict) -> str | None:
@@ -2114,6 +2119,49 @@ class DatasetController(QObject):
         self._load_thread = None
         self._set_loading(False)
 
+    def _apply_json_full_period_index(self) -> None:
+        """Show every indexed JSON day after reloading ingest (not only the last import window)."""
+        self._json_period_granularity = "day"
+        self._json_period_range_start = ""
+        self._json_period_range_end = ""
+        mode_combo = getattr(self.app, "cmb_json_period_mode", None)
+        if mode_combo is not None:
+            mode_combo.blockSignals(True)
+            day_index = mode_combo.findData("day")
+            if day_index >= 0:
+                mode_combo.setCurrentIndex(day_index)
+            mode_combo.blockSignals(False)
+        self._sync_json_range_button()
+        if self._json_day_groups_raw:
+            self._rebuild_json_period_combo()
+        self._sync_json_period_selector_panel()
+
+    def _apply_period_index_after_project_sync(self, by_day: dict[str, list[str]], *, kind: str) -> None:
+        from core.period_gaps import normalize_period_day
+        from core.period_groups import is_range_period_key, parse_range_period_key
+
+        daily_keys = [day for day in by_day if normalize_period_day(day)]
+        range_keys = [day for day in by_day if is_range_period_key(day)]
+
+        if kind == "json":
+            if len(range_keys) == 1 and not daily_keys:
+                start, end = parse_range_period_key(range_keys[0])
+                if start and end:
+                    self._apply_imported_period_as_default(start, end)
+                    return
+            self._apply_json_full_period_index()
+            return
+
+        pcap_page = getattr(self.app, "pcap_page", None)
+        if pcap_page is None:
+            return
+        if len(range_keys) == 1 and not daily_keys:
+            start, end = parse_range_period_key(range_keys[0])
+            if start and end:
+                pcap_page._apply_imported_period_range_only(start, end)
+                return
+        pcap_page._apply_full_project_period_index()
+
     def deferred_sync_project_periods(self, project_id: int | None) -> None:
         """Populate JSON/PCAP period selectors without loading flows or PCAP analysis."""
         if project_id is None or self.app.current_project_id != project_id:
@@ -2161,9 +2209,7 @@ class DatasetController(QObject):
             source_root = str(Path(by_day[sorted(by_day)[0]][0]).parent)
 
         self._set_json_day_groups(source_root, by_day)
-        self._restore_json_period_range_from_days()
-        if self._json_day_groups_raw:
-            self._rebuild_json_period_combo()
+        self._apply_period_index_after_project_sync(by_day, kind="json")
 
         total_files = sum(len(paths) for paths in by_day.values())
         if hasattr(self.app, "lbl_path") and not str(getattr(self.app, "current_folder", "") or "").strip():
@@ -2192,7 +2238,7 @@ class DatasetController(QObject):
             return
 
         pcap_page._set_day_groups(by_day, allow_empty_days=True)
-        self._restore_pcap_period_range_from_days(pcap_page, by_day)
+        self._apply_period_index_after_project_sync(by_day, kind="pcap")
         pcap_page._sync_period_selector_panel()
         pcap_page._update_period_gap_banner(list(by_day.keys()))
         if getattr(pcap_page, "summary", None) is None and hasattr(pcap_page, "lbl_stats"):

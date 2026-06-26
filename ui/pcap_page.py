@@ -1390,6 +1390,23 @@ class PcapPage(QWidget):
             self.cmb_pcap_period_mode.blockSignals(False)
         self._rebuild_pcap_period_combo()
 
+    def _apply_full_project_period_index(self) -> None:
+        """Show every indexed PCAP day after reloading ingest (not only the last import window)."""
+        self._pcap_period_granularity = "day"
+        self._pcap_period_range_start = ""
+        self._pcap_period_range_end = ""
+        if hasattr(self, "cmb_pcap_period_mode"):
+            self.cmb_pcap_period_mode.blockSignals(True)
+            day_index = self.cmb_pcap_period_mode.findData("day")
+            if day_index >= 0:
+                self.cmb_pcap_period_mode.setCurrentIndex(day_index)
+            self.cmb_pcap_period_mode.blockSignals(False)
+        self._sync_pcap_range_button()
+        if self._pcap_day_groups_raw:
+            self._rebuild_pcap_period_combo()
+        self._update_period_gap_banner(list(self._pcap_day_groups_raw.keys()))
+        self._sync_period_gap_visibility()
+
     def _set_day_groups(self, day_groups: dict[str, list[str]], *, allow_empty_days: bool = False) -> list[str]:
         cleaned = {
             str(day): [str(path) for path in paths if str(path or "").strip()]
