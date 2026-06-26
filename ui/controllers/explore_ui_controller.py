@@ -2,7 +2,7 @@ from PySide6.QtWidgets import QMenu
 from ui.explore_widgets import AITextWorker
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QTableView
-from ui.table_export import export_table_dialog, LARGE_EXPORT_ROW_THRESHOLD
+from ui.table_export import export_table_dialog
 
 from core.formatters import human_bytes
 from core.protocols import format_ip_proto
@@ -306,7 +306,7 @@ class ExploreUIController:
                 export_format,
                 project_id=self.app.current_project_id,
                 category="json",
-                flows_override=flows if len(flows) >= LARGE_EXPORT_ROW_THRESHOLD else None,
+                flows_override=flows,
             )
             return
 

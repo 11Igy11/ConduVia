@@ -2,16 +2,17 @@ from __future__ import annotations
 
 from typing import Any
 
-from PySide6.QtCore import QObject, QThread, Qt, Signal, Slot
-from PySide6.QtWidgets import QFileDialog, QMessageBox, QProgressDialog, QTableView, QWidget
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QFileDialog, QHBoxLayout, QTableView, QWidget
 
 from core.db import get_project
 from core.exporters.listing_exporter import export_listing_csv, export_listing_excel
 from core.exporters.table_exporter import export_table_html
 from core.protocols import format_ip_proto
 from core.workspace import workspace_export_path
+from ui.dialogs import message_dialog
 
-LARGE_EXPORT_ROW_THRESHOLD = 5000
+EXPORT_BUTTON_HEIGHT = 42
 
 
 def table_export_data(table: QTableView) -> tuple[list[str], list[list[str]]]:
@@ -118,110 +119,32 @@ def export_table_file(
     raise ValueError(f"Unsupported export format: {export_format}")
 
 
-class TableExportWorker(QObject):
-    finished = Signal(str)
-    error = Signal(str)
-
-    def __init__(
-        self,
-        file_path: str,
-        title: str,
-        export_format: str,
-        *,
-        headers: list[str] | None = None,
-        rows: list[list[str]] | None = None,
-        flows: list[dict[str, Any]] | None = None,
-        project_id: int | None = None,
-        project_name: str = "",
-        source_label: str = "",
-    ):
-        super().__init__()
-        self.file_path = file_path
-        self.title = title
-        self.headers = headers or []
-        self.rows = rows or []
-        self.flows = flows
-        self.export_format = export_format
-        self.project_id = project_id
-        self.project_name = project_name
-        self.source_label = source_label
-
-    @Slot()
-    def run(self) -> None:
-        try:
-            headers = self.headers
-            rows = self.rows
-            if self.flows is not None:
-                headers, rows = flows_to_export_rows(self.flows)
-            export_table_file(
-                self.file_path,
-                self.title,
-                headers,
-                rows,
-                self.export_format,
-                project_id=self.project_id,
-                project_name=self.project_name,
-                source_label=self.source_label,
-            )
-            self.finished.emit(self.file_path)
-        except Exception as exc:
-            self.error.emit(str(exc))
+def resolve_export_project(parent: QWidget, project_id: int | None = None) -> tuple[int | None, str]:
+    project_name = ""
+    app = getattr(parent, "app", None)
+    if app is not None:
+        project_name = getattr(app, "current_project_name", "") or ""
+        if project_id is None:
+            project_id = getattr(app, "current_project_id", None)
+    return project_id, project_name
 
 
-def _run_export_in_background(
-    parent: QWidget,
-    *,
-    file_path: str,
-    title: str,
-    export_format: str,
-    project_id: int | None,
-    project_name: str,
-    source_label: str,
-    headers: list[str] | None = None,
-    rows: list[list[str]] | None = None,
-    flows: list[dict[str, Any]] | None = None,
-) -> None:
-    row_hint = len(flows) if flows is not None else len(rows or [])
-    progress = QProgressDialog(f"Exporting {row_hint:,} rows...", None, 0, 0, parent)
-    progress.setWindowTitle(f"Export {title}")
-    progress.setWindowModality(Qt.WindowModal)
-    progress.setMinimumDuration(0)
-    progress.setCancelButton(None)
-    progress.show()
+def notify_export_empty(parent: QWidget, *, title: str = "Export table") -> None:
+    message_dialog(parent, title, "No rows are loaded.", width=400)
 
-    thread = QThread(parent)
-    worker = TableExportWorker(
-        file_path,
+
+def notify_export_success(parent: QWidget, file_path: str, *, title: str = "Export table") -> None:
+    message_dialog(
+        parent,
         title,
-        export_format,
-        headers=headers,
-        rows=rows,
-        flows=flows,
-        project_id=project_id,
-        project_name=project_name,
-        source_label=source_label,
+        "Export completed successfully.",
+        details=f"File:\n{file_path}",
+        width=460,
     )
-    worker.moveToThread(thread)
-    thread.started.connect(worker.run)
 
-    def _cleanup() -> None:
-        progress.close()
-        thread.quit()
 
-    def _on_finished(path: str) -> None:
-        _cleanup()
-        QMessageBox.information(parent, "Export table", f"Exported:\n{path}")
-
-    def _on_error(message: str) -> None:
-        _cleanup()
-        QMessageBox.critical(parent, "Export table failed", message)
-
-    worker.finished.connect(_on_finished, Qt.QueuedConnection)
-    worker.error.connect(_on_error, Qt.QueuedConnection)
-    worker.finished.connect(worker.deleteLater)
-    worker.error.connect(worker.deleteLater)
-    thread.finished.connect(thread.deleteLater)
-    thread.start()
+def notify_export_error(parent: QWidget, message: str, *, title: str = "Export failed") -> None:
+    message_dialog(parent, title, "Export failed.", details=message, width=480)
 
 
 def append_table_export_buttons(
@@ -242,7 +165,7 @@ def append_table_export_buttons(
         ("html", "Export HTML"),
     ):
         button = make_action_button(label)
-        button.setMinimumHeight(42)
+        button.setMinimumHeight(EXPORT_BUTTON_HEIGHT)
         button.clicked.connect(
             lambda checked=False, fmt=export_format: export_table_dialog(
                 parent,
@@ -257,6 +180,28 @@ def append_table_export_buttons(
         footer_layout.addWidget(button)
 
 
+def append_table_export_footer(
+    parent: QWidget,
+    footer_layout: QHBoxLayout,
+    *,
+    title: str,
+    table: QTableView,
+    project_id: int | None = None,
+    category: str = "json",
+    source_label: str = "",
+) -> None:
+    """Add CSV / Excel / HTML export buttons to a dialog footer row."""
+    append_table_export_buttons(
+        parent,
+        footer_layout,
+        title=title,
+        table=table,
+        project_id=project_id,
+        category=category,
+        source_label=source_label,
+    )
+
+
 def export_table_dialog(
     parent: QWidget,
     title: str,
@@ -269,14 +214,11 @@ def export_table_dialog(
     flows_override: list[dict[str, Any]] | None = None,
 ) -> None:
     if flows_override is not None:
-        headers, rows = [], []
+        headers, rows = flows_to_export_rows(flows_override)
     else:
         headers, rows = table_export_data(table)
-    if flows_override is None and (not headers or not rows):
-        QMessageBox.information(parent, "Export table", "No rows are loaded.")
-        return
-    if flows_override is not None and not flows_override:
-        QMessageBox.information(parent, "Export table", "No rows are loaded.")
+    if not headers or not rows:
+        notify_export_empty(parent)
         return
 
     filters = {
@@ -294,28 +236,7 @@ def export_table_dialog(
     if not file_path:
         return
 
-    project_name = ""
-    app = getattr(parent, "app", None)
-    if app is not None:
-        project_name = getattr(app, "current_project_name", "") or ""
-        if project_id is None:
-            project_id = getattr(app, "current_project_id", None)
-
-    row_count = len(flows_override) if flows_override is not None else len(rows)
-    if row_count >= LARGE_EXPORT_ROW_THRESHOLD:
-        _run_export_in_background(
-            parent,
-            file_path=file_path,
-            title=title,
-            headers=headers if flows_override is None else None,
-            rows=rows if flows_override is None else None,
-            flows=flows_override,
-            export_format=export_format,
-            project_id=project_id,
-            project_name=project_name,
-            source_label=source_label,
-        )
-        return
+    project_id, project_name = resolve_export_project(parent, project_id)
 
     try:
         export_table_file(
@@ -329,7 +250,7 @@ def export_table_dialog(
             source_label=source_label,
         )
     except Exception as exc:
-        QMessageBox.critical(parent, "Export table failed", str(exc))
+        notify_export_error(parent, str(exc))
         return
 
-    QMessageBox.information(parent, "Export table", f"Exported:\n{file_path}")
+    notify_export_success(parent, file_path)

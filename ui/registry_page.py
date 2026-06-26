@@ -6,7 +6,7 @@ from typing import Any
 from core.formatters import bytes_mb_or_b, human_bytes, safe_int, format_short_date
 from core.timeutils import parse_flow_timestamp
 from core.exporters.registry_exporter import export_registry_html
-from ui.table_export import export_table_dialog
+from ui.table_export import append_table_export_footer
 from ui.buttons import make_action_button
 from core.db import get_app_settings, get_project
 from core.workspace import workspace_export_path
@@ -1370,9 +1370,15 @@ class RegistryPage(QWidget):
         layout.addWidget(table, 1)
 
         footer = QHBoxLayout()
-        footer.addWidget(self._export_table_button("Export CSV", "Registry dataset", table, "csv"))
-        footer.addWidget(self._export_table_button("Export Excel", "Registry dataset", table, "xlsx"))
-        footer.addWidget(self._export_table_button("Export HTML", "Registry dataset", table, "html"))
+        append_table_export_footer(
+            self,
+            footer,
+            title="Registry dataset",
+            table=table,
+            project_id=getattr(self.app, "current_project_id", None),
+            category="json",
+            source_label=str(self._folder or ""),
+        )
         footer.addStretch()
         btn_close = QPushButton("Close")
         btn_close.setMinimumHeight(42)
@@ -1416,22 +1422,6 @@ class RegistryPage(QWidget):
         if "url" in name or "path" in name or "user" in name:
             return 300
         return 150
-
-    def _export_table_button(self, text: str, title: str, table: QTableView, export_format: str) -> QPushButton:
-        button = QPushButton(text)
-        button.setMinimumHeight(42)
-        button.clicked.connect(
-            lambda: export_table_dialog(
-                self,
-                title,
-                table,
-                export_format,
-                project_id=getattr(self.app, "current_project_id", None),
-                category="json",
-                source_label=str(self._folder or ""),
-            )
-        )
-        return button
 
     def _current_project(self):
         project_id = getattr(self.app, "current_project_id", None)

@@ -43,7 +43,7 @@ from core.db import (
     get_app_settings,
 )
 from ui.app_helpers import normalize_ui_theme
-from ui.theme import apply_app_stylesheet
+from ui.theme import apply_app_stylesheet, polish_combo_popups
 from ui.app_sidebar import build_sidebar, wire_navigation
 from ui.projects_page import build_projects_page
 from ui.explore_page import build_explore_workspace
@@ -130,6 +130,7 @@ class App(QWidget):
         self.explore_ui_controller.update_mode_label()
         self.findings_controller.refresh_ui()
         self.notes_controller.refresh_ui()
+        polish_combo_popups(self, get_app_settings().get("ui.theme", "dark"))
         
     def _message_dialog(
         self,
@@ -300,6 +301,7 @@ class App(QWidget):
         self.IDX_NOTES = 2
         self.IDX_AI = 3
         self.IDX_JSON = 4
+        # Explore, Registry, and Listing share one stacked page (IDX_JSON).
         self.IDX_EXPLORE = self.IDX_JSON
         self.IDX_REGISTRY = self.IDX_JSON
         self.IDX_LISTING = self.IDX_JSON
@@ -502,7 +504,9 @@ class App(QWidget):
     def apply_theme(self, theme: str | None) -> None:
         qapp = QApplication.instance()
         if qapp is not None:
-            apply_app_stylesheet(qapp, normalize_ui_theme(theme))
+            normalized = normalize_ui_theme(theme)
+            apply_app_stylesheet(qapp, normalized)
+            polish_combo_popups(self, normalized)
 
     def _open_from_registry(self, src: str, dst: str):
         self.go_to_explore_flows()

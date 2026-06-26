@@ -201,7 +201,7 @@ def build_osint_page(app: App) -> QWidget:
     fetch_row = QHBoxLayout()
     fetch_row.setSpacing(6)
     app.btn_osint_fetch_dns = _btn("DNS")
-    app.btn_osint_fetch_rdap = _btn("WHOIS")
+    app.btn_osint_fetch_rdap = _btn("RDAP")
     app.btn_osint_fetch_reverse = _btn("Reverse DNS")
     app.btn_osint_fetch_geo = _btn("GeoIP")
     app.btn_osint_fetch_vt = _btn("VirusTotal")

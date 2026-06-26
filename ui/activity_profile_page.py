@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QScrollArea,
+    QSizePolicy,
     QSplitter,
     QTextEdit,
     QVBoxLayout,
@@ -35,6 +36,42 @@ from ui.project_rows_dialog import open_project_rows_dialog
 from ui.worker_runner import WorkerRunner
 
 
+def _build_evidence_metric_cell(title: str) -> dict[str, QLabel | QWidget]:
+    cell = QWidget()
+    cell.setObjectName("ProfileEvidenceCell")
+    cell.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+
+    layout = QVBoxLayout(cell)
+    layout.setContentsMargins(10, 6, 10, 6)
+    layout.setSpacing(2)
+
+    title_label = QLabel(title)
+    title_label.setObjectName("ProfileEvidenceMetricTitle")
+    title_label.setAlignment(Qt.AlignmentFlag.AlignLeft)
+
+    body_label = QLabel("—")
+    body_label.setObjectName("ProfileEvidenceMetricBody")
+    body_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+    body_label.setWordWrap(True)
+
+    layout.addWidget(title_label)
+    layout.addWidget(body_label)
+    return {"cell": cell, "title": title_label, "body": body_label}
+
+
+def _metric_body_text(metric: dict[str, Any]) -> str:
+    lines = metric.get("lines")
+    if lines:
+        return " · ".join(str(line) for line in lines)
+    return str(metric.get("value", "-"))
+
+
+def _apply_metric_card(card: dict[str, QLabel | QWidget], metric: dict[str, Any]) -> None:
+    card["title"].setText(str(metric.get("label") or ""))
+    card["body"].setText(_metric_body_text(metric))
+    card["cell"].setToolTip(str(metric.get("detail") or ""))
+
+
 def _compact_range(first_seen: str, last_seen: str) -> str:
     first_seen = (first_seen or "").strip()
     last_seen = (last_seen or "").strip()
@@ -43,8 +80,8 @@ def _compact_range(first_seen: str, last_seen: str) -> str:
     first_date, first_time = _split_timestamp(_format_profile_timestamp(first_seen))
     last_date, last_time = _split_timestamp(_format_profile_timestamp(last_seen))
     if first_date == last_date:
-        return f"{first_date}\n{first_time} - {last_time}"
-    return f"{first_date} {first_time}\n{last_date} {last_time}"
+        return f"{first_date} {first_time} – {last_time}"
+    return f"{first_date} {first_time} → {last_date} {last_time}"
 
 
 def _format_profile_timestamp(value: str) -> str:
@@ -52,7 +89,7 @@ def _format_profile_timestamp(value: str) -> str:
     if dt is None:
         return value
     time_value = dt.strftime("%H:%M:%S.%f")[:-3]
-    return f"{dt.strftime('%d/%m/%Y')} {time_value}"
+    return f"{dt.strftime('%d.%m.%Y')} {time_value}"
 
 
 def _split_timestamp(value: str) -> tuple[str, str]:
@@ -179,19 +216,29 @@ class ActivityProfilePage(QWidget):
         evidence_title.setObjectName("SectionTitle")
         scroll_layout.addWidget(evidence_title)
 
-        self.metric_cards: list[QLabel] = []
-        metric_grid = QGridLayout()
-        metric_grid.setSpacing(10)
-        for title in ("JSON", "PCAP", "Findings", "Device IPs", "PCAP Volume", "Capture Range"):
-            card = QLabel(f"{title}\n0")
-            card.setObjectName("ProfileMetric")
-            card.setAlignment(Qt.AlignCenter)
-            card.setMinimumHeight(86)
-            card.setWordWrap(True)
+        self.metric_cards: list[dict[str, QLabel | QWidget]] = []
+        evidence_panel = QFrame()
+        evidence_panel.setObjectName("ProfileEvidencePanel")
+        evidence_panel.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        metric_grid = QGridLayout(evidence_panel)
+        metric_grid.setContentsMargins(4, 4, 4, 4)
+        metric_grid.setHorizontalSpacing(0)
+        metric_grid.setVerticalSpacing(0)
+        for col in range(3):
+            metric_grid.setColumnStretch(col, 1)
+
+        titles = ("JSON", "PCAP", "Findings", "Device IPs", "PCAP Volume", "Capture Range")
+        for idx, title in enumerate(titles):
+            card = _build_evidence_metric_cell(title)
             self.metric_cards.append(card)
-            idx = len(self.metric_cards) - 1
-            metric_grid.addWidget(card, idx // 3, idx % 3)
-        scroll_layout.addLayout(metric_grid)
+            grid_row = 0 if idx < 3 else 2
+            metric_grid.addWidget(card["cell"], grid_row, idx % 3)
+
+        divider = QFrame()
+        divider.setObjectName("ProfileEvidenceDivider")
+        divider.setFixedHeight(1)
+        metric_grid.addWidget(divider, 1, 0, 1, 3)
+        scroll_layout.addWidget(evidence_panel)
 
         self.txt_summary = QTextEdit()
         self.txt_summary.setReadOnly(True)
@@ -653,17 +700,16 @@ class ActivityProfilePage(QWidget):
 
     def _set_metrics(self, metrics: list[dict[str, Any]]):
         defaults = [
-            {"label": "JSON", "value": 0, "detail": "loaded"},
-            {"label": "PCAP", "value": 0, "detail": "saved"},
+            {"label": "JSON", "lines": ["0 files", "0 indexed days", "0 flow days"], "detail": "loaded"},
+            {"label": "PCAP", "lines": ["0 indexed files", "0 indexed days", "0 saved days"], "detail": "saved"},
             {"label": "Findings", "value": 0, "detail": "saved"},
             {"label": "Device IPs", "value": 0, "detail": "from PCAP"},
             {"label": "PCAP Volume", "value": "0 B", "detail": "0 packets"},
             {"label": "Capture Range", "value": "-", "detail": "from saved PCAP"},
         ]
         values = metrics or defaults
-        for widget, metric in zip(self.metric_cards, values):
-            widget.setText(f"{metric.get('label')}\n{metric.get('value')}")
-            widget.setToolTip(str(metric.get("detail") or ""))
+        for card, metric in zip(self.metric_cards, values):
+            _apply_metric_card(card, metric)
 
     def _set_overview(self, profile: dict[str, Any]):
         updates = {
@@ -680,8 +726,7 @@ class ActivityProfilePage(QWidget):
         }
         for idx, metric in updates.items():
             if idx < len(self.metric_cards):
-                self.metric_cards[idx].setText(f"{metric['label']}\n{metric['value']}")
-                self.metric_cards[idx].setToolTip(metric["detail"])
+                _apply_metric_card(self.metric_cards[idx], metric)
 
     def _set_pcap_period_coverage(self, rows: list[dict[str, Any]]) -> None:
         chart_rows = []

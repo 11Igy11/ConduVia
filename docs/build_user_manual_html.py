@@ -98,12 +98,29 @@ a:hover { text-decoration: underline; }
 .toc {
   position: sticky;
   top: 20px;
+  max-height: calc(100vh - 40px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
   background: #ffffff;
   border: 1px solid #dbe3ee;
   border-radius: 16px;
   padding: 18px 16px;
   box-shadow: 0 10px 24px rgba(15, 23, 42, 0.06);
 }
+
+.toc::-webkit-scrollbar { width: 8px; }
+
+.toc::-webkit-scrollbar-track {
+  background: transparent;
+  margin: 8px 0;
+}
+
+.toc::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 999px;
+}
+
+.toc::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
 
 .toc h2 {
   margin: 0 0 12px;
@@ -120,6 +137,19 @@ a:hover { text-decoration: underline; }
 }
 
 .toc li { margin: 7px 0; }
+
+.toc-root { padding-left: 18px; }
+
+.toc-sub {
+  list-style: none;
+  margin: 4px 0 8px;
+  padding-left: 14px;
+  font-size: 0.84rem;
+}
+
+.toc-sub li { margin: 4px 0; }
+
+.toc-sub a { color: #475569; }
 
 .content {
   background: #ffffff;
@@ -145,6 +175,7 @@ a:hover { text-decoration: underline; }
   font-size: 1.08rem;
   margin: 1.5rem 0 0.55rem;
   color: #1e3a5f;
+  scroll-margin-top: 24px;
 }
 
 .content p { margin: 0.65rem 0; color: #334155; }
@@ -226,7 +257,7 @@ a:hover { text-decoration: underline; }
 
 @media (max-width: 920px) {
   .page-layout { grid-template-columns: 1fr; }
-  .toc { position: static; }
+  .toc { position: static; max-height: none; overflow: visible; }
   .header-inner { padding: 22px 20px; }
   .content { padding: 24px 20px 30px; }
 }
@@ -268,20 +299,61 @@ def _strip_section_number(title: str) -> str:
     return re.sub(r"^\d+\.\s+", "", title).strip() or title
 
 
-def _extract_toc(md: str) -> list[tuple[str, str]]:
-    items: list[tuple[str, str]] = []
+def _strip_subsection_number(title: str) -> str:
+    return re.sub(r"^\d+\.\d+\s+", "", title).strip() or title
+
+
+def _main_section_number(title: str) -> int | None:
+    match = re.match(r"^(\d+)\.", title)
+    return int(match.group(1)) if match else None
+
+
+def _extract_toc(md: str) -> list[tuple[str, str, int]]:
+    """Return (slug, display title, level) for numbered sections 1–20 and their subsections."""
+    items: list[tuple[str, str, int]] = []
     for line in md.splitlines():
         if line.startswith("## "):
             title = line[3:].strip()
-            items.append((_slugify(title), _strip_section_number(title)))
+            section = _main_section_number(title)
+            if section is not None and section <= 20:
+                items.append((_slugify(title), _strip_section_number(title), 2))
+        elif line.startswith("### "):
+            title = line[4:].strip()
+            match = re.match(r"^(\d+)\.\d+\s", title)
+            if match and int(match.group(1)) <= 20:
+                items.append((_slugify(title), _strip_subsection_number(title), 3))
     return items
 
 
-def _render_toc(items: list[tuple[str, str]]) -> str:
+def _render_toc(items: list[tuple[str, str, int]]) -> str:
     if not items:
         return ""
-    rows = "\n".join(f'<li><a href="#{slug}">{html.escape(title)}</a></li>' for slug, title in items)
-    return f'<nav class="toc"><h2>Contents</h2><ol>{rows}</ol></nav>'
+    rows: list[str] = []
+    index = 0
+    while index < len(items):
+        slug, title, level = items[index]
+        if level != 2:
+            index += 1
+            continue
+        sub_items: list[tuple[str, str, int]] = []
+        next_index = index + 1
+        while next_index < len(items) and items[next_index][2] == 3:
+            sub_items.append(items[next_index])
+            next_index += 1
+        if sub_items:
+            sub_rows = "\n".join(
+                f'<li><a href="#{sub_slug}">{html.escape(sub_title)}</a></li>'
+                for sub_slug, sub_title, _ in sub_items
+            )
+            rows.append(
+                f'<li><a href="#{slug}">{html.escape(title)}</a>'
+                f'<ul class="toc-sub">{sub_rows}</ul></li>'
+            )
+        else:
+            rows.append(f'<li><a href="#{slug}">{html.escape(title)}</a></li>')
+        index = next_index
+    body = "\n".join(rows)
+    return f'<nav class="toc"><h2>Contents</h2><ol class="toc-root">{body}</ol></nav>'
 
 
 def md_to_html(md: str) -> str:
@@ -368,7 +440,9 @@ def md_to_html(md: str) -> str:
             out.append(f'<h2 id="{slug}">{_inline(title)}</h2>')
         elif line.startswith("### "):
             close_lists()
-            out.append(f"<h3>{_inline(line[4:].strip())}</h3>")
+            title = line[4:].strip()
+            slug = _slugify(title)
+            out.append(f'<h3 id="{slug}">{_inline(title)}</h3>')
         elif line.strip() == "---":
             close_lists()
             out.append("<hr>")

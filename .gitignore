@@ -50,4 +50,6 @@ BaseFolder/
 
 installer/third_party/
 
+# Local crash log (runtime)
+via_nyquist_crash.log
 
