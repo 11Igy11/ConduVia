@@ -97,6 +97,34 @@ QLabel#CaseMetricCompact {
     color: #0f172a;
 }
 
+QFrame#ProfileEvidencePanel {
+    background: #f8fafc;
+    border: 1px solid #cbd5e1;
+}
+
+QWidget#ProfileEvidenceCell {
+    background: transparent;
+}
+
+QFrame#ProfileEvidenceDivider {
+    background: #e2e8f0;
+    border: none;
+}
+
+QLabel#ProfileEvidenceMetricTitle {
+    background: transparent;
+    color: #0f172a;
+    font-size: 12px;
+    font-weight: 700;
+}
+
+QLabel#ProfileEvidenceMetricBody {
+    background: transparent;
+    color: #475569;
+    font-size: 11px;
+    font-weight: 400;
+}
+
 QFrame#ProfileCountRow {
     background: #f8fafc;
     border-color: #cbd5e1;
@@ -149,6 +177,31 @@ QTableView {
     border-color: #cbd5e1;
 }
 
+QComboBox#CompactControl,
+QLineEdit#CompactControl {
+    background: #ffffff;
+    color: #111827;
+    border: 1px solid #cbd5e1;
+}
+
+QComboBox#CompactControl:focus,
+QLineEdit#CompactControl:focus {
+    border-color: #2563eb;
+}
+
+QComboBox#CompactControl::drop-down {
+    border: none;
+    background: transparent;
+}
+
+QComboBox#CompactControl QAbstractItemView {
+    background: #ffffff;
+    color: #111827;
+    border: 1px solid #cbd5e1;
+    selection-background-color: #3b82f6;
+    selection-color: #ffffff;
+}
+
 QTextEdit#SummaryTextBox,
 QPlainTextEdit#SummaryTextBox {
     background: transparent;
@@ -169,6 +222,44 @@ QComboBox#SettingsField {
     max-height: 28px;
     padding: 4px 8px;
     border-radius: 8px;
+    background: #ffffff;
+    color: #111827;
+    border: 1px solid #cbd5e1;
+}
+
+QComboBox#SettingsField::drop-down {
+    border: none;
+    background: transparent;
+}
+
+QComboBox#SettingsField QAbstractItemView,
+QComboBox#SettingsField QListView {
+    background-color: #ffffff;
+    color: #111827;
+    border: 1px solid #cbd5e1;
+    selection-background-color: #3b82f6;
+    selection-color: #ffffff;
+    outline: none;
+}
+
+QComboBox#SettingsField QAbstractItemView::item,
+QComboBox#SettingsField QListView::item {
+    color: #111827;
+    background-color: #ffffff;
+    min-height: 24px;
+    padding: 4px 8px;
+}
+
+QComboBox#SettingsField QAbstractItemView::item:selected,
+QComboBox#SettingsField QListView::item:selected {
+    background-color: #3b82f6;
+    color: #ffffff;
+}
+
+QComboBox#SettingsField QAbstractItemView::item:hover,
+QComboBox#SettingsField QListView::item:hover {
+    background-color: #eff6ff;
+    color: #111827;
 }
 
 QLabel#SettingsFieldLabel,
@@ -185,11 +276,34 @@ QFrame#SettingsSectionRule {
     margin: 4px 0 2px;
 }
 
-QComboBox QAbstractItemView {
-    background: #ffffff;
+QComboBox QAbstractItemView,
+QComboBox QListView {
+    background-color: #ffffff;
     color: #111827;
+    border: 1px solid #cbd5e1;
     selection-background-color: #3b82f6;
     selection-color: #ffffff;
+    outline: none;
+}
+
+QComboBox QAbstractItemView::item,
+QComboBox QListView::item {
+    color: #111827;
+    background-color: #ffffff;
+    min-height: 24px;
+    padding: 4px 8px;
+}
+
+QComboBox QAbstractItemView::item:selected,
+QComboBox QListView::item:selected {
+    background-color: #3b82f6;
+    color: #ffffff;
+}
+
+QComboBox QAbstractItemView::item:hover,
+QComboBox QListView::item:hover {
+    background-color: #eff6ff;
+    color: #111827;
 }
 
 QTabWidget::pane {
@@ -477,10 +591,14 @@ QSpinBox:focus {
 
 QCheckBox {
     color: #111827;
+    spacing: 8px;
 }
 
 QCheckBox::indicator {
+    width: 18px;
+    height: 18px;
     border: 1px solid #94a3b8;
+    border-radius: 5px;
     background: #ffffff;
 }
 
@@ -489,9 +607,16 @@ QCheckBox::indicator:hover {
     background: #eff6ff;
 }
 
+QCheckBox::indicator:unchecked {
+    border: 1px solid #94a3b8;
+    border-radius: 5px;
+    background: #ffffff;
+}
+
 QCheckBox::indicator:checked {
-    border-color: #2563eb;
-    background: #3b82f6;
+    border: 1px solid #2563eb;
+    border-radius: 5px;
+    background-color: #3b82f6;
 }
 
 QTableView::item {
@@ -539,12 +664,51 @@ QInputDialog QLabel {
 
 QDialog QLineEdit,
 QDialog QPlainTextEdit,
-QDialog QComboBox {
+QDialog QComboBox,
+QDialog QLineEdit#DialogField,
+QDialog QPlainTextEdit#DialogField,
+QDialog QComboBox#DialogField {
     background: #ffffff;
     border-color: #cbd5e1;
     color: #111827;
 }
 """
+
+COMBO_POPUP_LIGHT_QSS = """
+QListView {
+    background-color: #ffffff;
+    color: #111827;
+    border: 1px solid #cbd5e1;
+    outline: none;
+}
+QListView::item {
+    color: #111827;
+    background-color: #ffffff;
+    padding: 6px 8px;
+}
+QListView::item:selected {
+    background-color: #3b82f6;
+    color: #ffffff;
+}
+QListView::item:hover {
+    background-color: #eff6ff;
+    color: #111827;
+}
+"""
+
+
+def polish_combo_popups(root, theme: str | None = "dark") -> None:
+    """Combo dropdown lists are separate views; give them explicit light styling."""
+    from PySide6.QtWidgets import QComboBox, QWidget
+
+    if not isinstance(root, QWidget):
+        return
+    popup_qss = COMBO_POPUP_LIGHT_QSS if normalize_ui_theme(theme) == "light" else ""
+    for combo in root.findChildren(QComboBox):
+        view = combo.view()
+        if view is not None:
+            view.setStyleSheet(popup_qss)
+
 
 def app_stylesheet(theme: str | None = "dark") -> str:
     qss_path = Path(__file__).resolve().parent / "style.qss"
@@ -561,3 +725,5 @@ def apply_app_stylesheet(qapp: QApplication, theme: str | None = "dark") -> None
     qapp.setFont(app_font(point_size=10))
     qapp.setStyleSheet(app_stylesheet(normalized_theme))
     install_font_sanitizer(qapp)
+    for widget in qapp.topLevelWidgets():
+        polish_combo_popups(widget, normalized_theme)

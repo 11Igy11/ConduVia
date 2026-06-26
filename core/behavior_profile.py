@@ -11,23 +11,8 @@ from core.analysis_limits import (
     counter_most_common,
 )
 from core.formatters import human_bytes, safe_int
+from core.service_classification import classify_behavior_service
 from core.timeutils import parse_timestamp
-
-
-SERVICE_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
-    ("Apple / iCloud", ("apple.com", "icloud", "push.apple", "courier", "itunes", "applepush")),
-    ("Facebook / Meta", ("facebook", "fbcdn", "fb.com", "instagram", "edge-mqtt", "messenger")),
-    ("WhatsApp", ("whatsapp", "wa.me")),
-    ("Google / YouTube", ("youtube", "ytimg", "googlevideo", "googleapis", "googleusercontent")),
-    ("TikTok", ("tiktok", "byteoversea", "pangle")),
-    ("Telegram", ("telegram", "t.me")),
-    ("Viber", ("viber",)),
-    ("Snapchat", ("snapchat",)),
-    ("X / Twitter", ("twitter", "x.com", "twimg")),
-    ("Spotify", ("spotify",)),
-    ("Travel / Booking", ("booking", "airbnb", "tripadvisor")),
-    ("Advertising / tracking", ("doubleclick", "googlesyndication", "adservice", "analytics", "ads.")),
-)
 
 
 def build_flow_behavior_profile(flows: list[dict[str, Any]] | None, *, limit: int = MAX_BEHAVIOR_SERVICE_ROWS) -> dict[str, Any]:
@@ -64,7 +49,7 @@ class BehaviorProfileAccumulator:
 
         domain = _flow_domain(flow)
         app = str(flow.get("application_name") or "").strip()
-        service = _service_label(domain) or _service_label(app) or app
+        service = classify_behavior_service(domain) or classify_behavior_service(app) or app
         if service:
             self.service_counts[service] += 1
             self.service_bytes[service] += byte_count
@@ -145,16 +130,6 @@ def _flow_timestamp(flow: dict[str, Any]) -> Any:
         if value:
             return value
     return None
-
-
-def _service_label(value: str) -> str:
-    text = (value or "").lower()
-    if not text:
-        return ""
-    for label, needles in SERVICE_RULES:
-        if any(needle in text for needle in needles):
-            return label
-    return "Other visible services" if "." in text else ""
 
 
 def _service_rows(

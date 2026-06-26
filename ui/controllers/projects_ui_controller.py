@@ -708,10 +708,13 @@ class ProjectsUIController:
             return
 
         self.app.lbl_case_dashboard_title.setText(f"Active case: {project.name}")
-        self.app.lbl_case_dashboard_subject.setText(
-            f"Subject: {subject_display_label(project)} | "
-            f"Identifiers: {project_identifiers_text(project)}"
-        )
+        description = (project.description or "").strip()
+        if description:
+            self.app.lbl_case_dashboard_subject.setText(description)
+            self.app.lbl_case_dashboard_subject.show()
+        else:
+            self.app.lbl_case_dashboard_subject.clear()
+            self.app.lbl_case_dashboard_subject.hide()
 
     def _update_selection_panel(self) -> None:
         if not hasattr(self.app, "lbl_project_selection_title"):

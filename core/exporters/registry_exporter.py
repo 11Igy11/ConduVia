@@ -7,7 +7,7 @@ from typing import Any
 
 from core.db import Project
 from core.analysis_limits import EMBEDDED_SUMMARY_TOP_N
-from core.exporters.case_context import build_case_context, context_cards_html
+from core.exporters.case_context import build_case_context, case_context_table_html
 from core.exporters.template_utils import logo_data_uri
 from core.flow_stats import build_daily_activity_rows
 from core.formatters import (
@@ -48,19 +48,21 @@ def _simple_table(title: str, items: list[tuple[Any, Any]], col1: str, col2: str
         rows.append("<tr><td colspan='2'>—</td></tr>")
 
     return f"""
-    <section class="insight-card">
-        <h3>{_esc(title)}</h3>
-        <table class="mini-table">
-            <thead>
-                <tr>
-                    <th>{_esc(col1)}</th>
-                    <th class="num">{_esc(col2)}</th>
-                </tr>
-            </thead>
-            <tbody>
-                {''.join(rows)}
-            </tbody>
-        </table>
+    <section class="table-shell">
+        <div class="table-head"><h2>{_esc(title)}</h2></div>
+        <div class="table-wrap">
+            <table class="data">
+                <thead>
+                    <tr>
+                        <th>{_esc(col1)}</th>
+                        <th class="num">{_esc(col2)}</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {''.join(rows)}
+                </tbody>
+            </table>
+        </div>
     </section>
     """
 
@@ -110,11 +112,11 @@ def _daily_activity_table_html(rows: list[dict[str, Any]], *, limit: int = EMBED
 
     return (
         note
-        + "<table class='mini-table'>"
-        "<thead><tr><th>Date</th><th class='num'>Flows</th><th class='num'>Volume</th></tr></thead>"
+        + "<section class=\"table-shell\"><div class=\"table-wrap\"><table class=\"data\">"
+        "<thead><tr><th>Date</th><th class=\"num\">Flows</th><th class=\"num\">Volume</th></tr></thead>"
         "<tbody>"
         + "".join(body)
-        + "</tbody></table>"
+        + "</tbody></table></div></section>"
     )
 
 
@@ -220,7 +222,7 @@ def _full_dataset_table(flows: list[dict[str, Any]], columns: list[str], *, titl
         </div>
 
         <div class="table-wrap">
-            <table>
+            <table class="data">
                 <thead>
                     <tr>{thead}</tr>
                 </thead>
@@ -345,13 +347,15 @@ def export_registry_html(
 
     if cmp:
         compare_html = f"""
-        <section class="panel">
-            <h2>{_esc(text["dataset_compare"])}</h2>
+        <section class="table-shell">
+            <div class="table-head"><h2>{_esc(text["dataset_compare"])}</h2></div>
+            <div class="panel" style="border:none;border-radius:0;margin:0;background:transparent;">
             <div class="compare-grid">
                 <div><span>{_esc(text["current_unique"])}</span><strong>{_esc(cmp.get("total_current", 0))}</strong></div>
                 <div><span>{_esc(text["previous_unique"])}</span><strong>{_esc(cmp.get("total_previous", 0))}</strong></div>
                 <div><span>{_esc(text["new"])}</span><strong>{len(cmp.get("new", []) or [])}</strong></div>
                 <div><span>{_esc(text["known"])}</span><strong>{len(cmp.get("known", []) or [])}</strong></div>
+            </div>
             </div>
         </section>
         """
@@ -366,7 +370,7 @@ def export_registry_html(
         .replace("{{LOGO}}", _esc(logo_data_uri()))
         .replace("{{FOLDER}}", _esc(Path(folder).name if folder else "—"))
         .replace("{{EXPORTED_AT}}", datetime.now().strftime("%d.%m.%Y %H:%M:%S"))
-        .replace("{{CASE_CONTEXT_CARDS}}", context_cards_html(case_context, card_class="chip"))
+        .replace("{{CASE_TABLE}}", case_context_table_html(case_context))
         .replace("{{KLASA}}", _esc(klasa))
         .replace("{{URBROJ}}", _esc(urbroj))
         .replace("{{TARGET}}", _esc(target))

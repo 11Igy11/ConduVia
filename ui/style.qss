@@ -81,6 +81,35 @@ QLabel#ProfileMetric {
     font-weight: 700;
 }
 
+QFrame#ProfileEvidencePanel {
+    background: #273549;
+    border: 1px solid #475569;
+    border-radius: 10px;
+}
+
+QWidget#ProfileEvidenceCell {
+    background: transparent;
+}
+
+QFrame#ProfileEvidenceDivider {
+    background: #475569;
+    border: none;
+}
+
+QLabel#ProfileEvidenceMetricTitle {
+    background: transparent;
+    color: #f8fafc;
+    font-size: 12px;
+    font-weight: 700;
+}
+
+QLabel#ProfileEvidenceMetricBody {
+    background: transparent;
+    color: #cbd5e1;
+    font-size: 11px;
+    font-weight: 400;
+}
+
 QFrame#CaseDashboardCompact {
     background: #22324a;
     border: 1px solid #3c4f6b;
@@ -846,25 +875,25 @@ QCheckBox {
 QCheckBox::indicator {
     width: 18px;
     height: 18px;
-    border: 1px solid #ffffff;
-    border-radius: 4px;
+    border: 1px solid #64748b;
+    border-radius: 5px;
     background: #1f2937;
 }
 
 QCheckBox::indicator:hover {
-    border: 1px solid #ffffff;
+    border: 1px solid #93c5fd;
     background: #334155;
 }
 
 QCheckBox::indicator:checked {
-    border: 1px solid #ffffff;
-    border-radius: 4px;
-    background: #3b82f6;
+    border: 1px solid #2563eb;
+    border-radius: 5px;
+    background-color: #3b82f6;
 }
 
 QCheckBox::indicator:unchecked {
-    border: 1px solid #e5e7eb;
-    border-radius: 4px;
+    border: 1px solid #64748b;
+    border-radius: 5px;
     background: #1f2937;
 }
 
@@ -1049,16 +1078,28 @@ QDialog QComboBox {
     background: #273549;
     border: 1px solid #475569;
     border-radius: 8px;
-    padding: 4px 10px;
+    padding: 8px 10px;
     color: #e5e7eb;
-    min-height: 40px;
+    min-height: 28px;
 }
 
-QDialog QPlainTextEdit {
+QDialog QLineEdit#DialogField,
+QDialog QComboBox#DialogField {
     background: #273549;
     border: 1px solid #475569;
     border-radius: 8px;
-    padding: 6px 10px;
+    padding: 8px 10px;
+    color: #e5e7eb;
+    min-height: 0px;
+    max-height: none;
+}
+
+QDialog QPlainTextEdit,
+QDialog QPlainTextEdit#DialogField {
+    background: #273549;
+    border: 1px solid #475569;
+    border-radius: 8px;
+    padding: 8px 10px;
     color: #e5e7eb;
     min-height: 56px;
 }

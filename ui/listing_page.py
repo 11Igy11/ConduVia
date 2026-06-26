@@ -15,8 +15,8 @@ from core.exporters.listing_exporter import export_listing_csv, export_listing_e
 from core.db import get_app_settings, get_project, get_app_setting, set_app_setting
 from core.parser import extract_dataset_meta
 from core.timeutils import parse_timestamp
-from core.workspace import workspace_export_path
 from ui.explore_widgets import CopyableTableView
+from ui.table_export import notify_export_error, notify_export_empty, notify_export_success, table_export_default_path
 
 
 class ListingTableModel(QAbstractTableModel):
@@ -699,7 +699,7 @@ class ListingPage(QWidget):
 
     def _open_export_dialog(self):
         if not self.flows or not self.model._columns:
-            message_dialog(self, "Export", "There is no data to export.", width=400)
+            notify_export_empty(self, title="Export")
             return
 
         format_name = self._choose_export_format()
@@ -772,11 +772,15 @@ class ListingPage(QWidget):
         return {}
 
     def _export_csv(self, headers, rows):
-        default_path = self._default_export_path("listing_export.csv")
         file_path, _ = QFileDialog.getSaveFileName(
             self,
             "Export CSV",
-            default_path,
+            table_export_default_path(
+                "Listing export",
+                "csv",
+                project_id=getattr(self.app, "current_project_id", None),
+                category="json",
+            ),
             "CSV files (*.csv)"
         )
 
@@ -792,29 +796,20 @@ class ListingPage(QWidget):
                 project_name=getattr(self.app, "current_project_name", "") or "",
                 dataset_meta=self._export_dataset_meta(),
             )
-
-            message_dialog(
-                self,
-                "Export",
-                "CSV export completed successfully.",
-                details=file_path,
-                width=460,
-            )
+            notify_export_success(self, file_path, title="Export")
         except Exception as e:
-            message_dialog(
-                self,
-                "Export Error",
-                "Failed to export CSV.",
-                details=str(e),
-                width=460,
-            )
+            notify_export_error(self, str(e))
 
     def _export_excel(self, headers, rows):
-        default_path = self._default_export_path("listing_export.xlsx")
         file_path, _ = QFileDialog.getSaveFileName(
             self,
             "Export Excel",
-            default_path,
+            table_export_default_path(
+                "Listing export",
+                "xlsx",
+                project_id=getattr(self.app, "current_project_id", None),
+                category="json",
+            ),
             "Excel files (*.xlsx)"
         )
 
@@ -830,29 +825,20 @@ class ListingPage(QWidget):
                 project_name=getattr(self.app, "current_project_name", "") or "",
                 dataset_meta=self._export_dataset_meta(),
             )
-
-            message_dialog(
-                self,
-                "Export",
-                "Excel export completed successfully.",
-                details=file_path,
-                width=460,
-            )
+            notify_export_success(self, file_path, title="Export")
         except Exception as e:
-            message_dialog(
-                self,
-                "Export Error",
-                "Failed to export Excel.",
-                details=str(e),
-                width=460,
-            )
+            notify_export_error(self, str(e))
 
     def _export_html(self, headers, rows):
-        default_path = self._default_export_path("listing_export.html")
         file_path, _ = QFileDialog.getSaveFileName(
             self,
             "Export HTML",
-            default_path,
+            table_export_default_path(
+                "Listing export",
+                "html",
+                project_id=getattr(self.app, "current_project_id", None),
+                category="json",
+            ),
             "HTML files (*.html)"
         )
 
@@ -873,31 +859,12 @@ class ListingPage(QWidget):
                 project=self._current_project(),
                 project_name=getattr(self.app, "current_project_name", "") or "",
             )
-
-            message_dialog(
-                self,
-                "Export",
-                "HTML export completed successfully.",
-                details=file_path,
-                width=460,
-            )
+            notify_export_success(self, file_path, title="Export")
         except Exception as e:
-            message_dialog(
-                self,
-                "Export Error",
-                "Failed to export HTML.",
-                details=str(e),
-                width=460,
-            )
+            notify_export_error(self, str(e))
 
     def _current_project(self):
         project_id = getattr(self.app, "current_project_id", None)
         if project_id is None:
             return None
         return get_project(project_id)
-
-    def _default_export_path(self, default_name: str) -> str:
-        project = self._current_project()
-        if project and project.base_folder:
-            return str(workspace_export_path(project.base_folder, default_name, category="json"))
-        return default_name

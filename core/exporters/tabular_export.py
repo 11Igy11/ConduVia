@@ -42,12 +42,23 @@ def _sanitize_excel_cell(value: object) -> str:
     return text
 
 
-def _autosize_columns(ws, *, min_col: int = 1, max_col: int | None = None, header_row: int = 1) -> None:
+def _autosize_columns(
+    ws,
+    *,
+    min_col: int = 1,
+    max_col: int | None = None,
+    header_row: int = 1,
+    sample_rows: int = 250,
+) -> None:
     if max_col is None:
         max_col = ws.max_column
+    data_last_row = ws.max_row
+    scan_last_row = data_last_row
+    if sample_rows > 0 and data_last_row > header_row + sample_rows:
+        scan_last_row = header_row + sample_rows
     for col_idx in range(min_col, max_col + 1):
         max_len = 0
-        for row_idx in range(header_row, ws.max_row + 1):
+        for row_idx in range(header_row, scan_last_row + 1):
             value = ws.cell(row=row_idx, column=col_idx).value
             if value is not None:
                 max_len = max(max_len, len(str(value)))

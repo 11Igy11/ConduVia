@@ -38,6 +38,10 @@ from core.analysis_limits import (
     slice_rows,
 )
 from core.formatters import format_pcap_datetime, human_bytes
+from core.service_classification import (
+    classify_communication_service,
+    classify_pcap_investigator_service,
+)
 
 
 PCAPNG_MAGIC = b"\x0a\x0d\x0d\x0a"
@@ -74,18 +78,25 @@ ARTIFACT_LIMIT_PER_KIND = MAX_PCAP_ARTIFACTS_PER_KIND
 def _output_flow_limit(max_flows: int) -> int:
     if max_flows > 0:
         return max_flows
-    return MAX_PCAP_OUTPUT_FLOWS_HARD_CAP
+    if MAX_PCAP_OUTPUT_FLOWS_HARD_CAP > 0:
+        return MAX_PCAP_OUTPUT_FLOWS_HARD_CAP
+    return 0
 
 
 def _parse_flow_map_limit(max_flows: int, *, file_size: int = 0, hard_cap: int | None = None) -> int:
     if max_flows > 0:
         return max_flows
-    cap = int(hard_cap or 0) or _flow_map_hard_cap_for_file_size(file_size)
-    return max(1, cap)
+    cap = int(hard_cap or 0)
+    if cap > 0:
+        return max(1, cap)
+    size_cap = _flow_map_hard_cap_for_file_size(file_size)
+    return size_cap if size_cap > 0 else 0
 
 
 def _flow_map_hard_cap_for_file_size(file_size: int) -> int:
     size = max(0, int(file_size or 0))
+    if MAX_PCAP_FLOW_MAP_HARD_CAP <= 0:
+        return 0
     if size >= 2_000_000_000:
         return 25_000
     if size >= 500_000_000:
@@ -96,7 +107,9 @@ def _flow_map_hard_cap_for_file_size(file_size: int) -> int:
 def _communication_row_limit(limit: int) -> int:
     if limit > 0:
         return limit
-    return MAX_COMMUNICATION_ROWS_HARD_CAP
+    if MAX_COMMUNICATION_ROWS_HARD_CAP > 0:
+        return MAX_COMMUNICATION_ROWS_HARD_CAP
+    return 0
 
 
 def _counter_hard_cap() -> int:
@@ -122,13 +135,17 @@ def analyze_timeout_for_path(path: str | Path) -> float:
 def _output_sample_limit(max_evidence: int) -> int:
     if max_evidence > 0:
         return max_evidence
-    return MAX_PCAP_READABLE_SAMPLES_HARD_CAP
+    if MAX_PCAP_READABLE_SAMPLES_HARD_CAP > 0:
+        return MAX_PCAP_READABLE_SAMPLES_HARD_CAP
+    return 0
 
 
 def _metadata_counter_limit(configured: int) -> int:
     if configured > 0:
         return configured
-    return MAX_PCAP_METADATA_COUNTER_HARD_CAP
+    if MAX_PCAP_METADATA_COUNTER_HARD_CAP > 0:
+        return MAX_PCAP_METADATA_COUNTER_HARD_CAP
+    return 0
 
 
 @dataclass
@@ -216,12 +233,14 @@ class _PcapAccumulator:
             return self.max_flows
         if self.flow_map_hard_cap > 0:
             return self.flow_map_hard_cap
-        return MAX_PCAP_FLOW_MAP_HARD_CAP
+        return MAX_PCAP_FLOW_MAP_HARD_CAP if MAX_PCAP_FLOW_MAP_HARD_CAP > 0 else 0
 
     def _artifact_kind_limit(self) -> int:
         if ARTIFACT_LIMIT_PER_KIND > 0:
             return ARTIFACT_LIMIT_PER_KIND
-        return MAX_PCAP_ARTIFACTS_HARD_CAP
+        if MAX_PCAP_ARTIFACTS_HARD_CAP > 0:
+            return MAX_PCAP_ARTIFACTS_HARD_CAP
+        return 0
 
     def add_packet(self, packet: _Packet) -> None:
         self.packet_count += 1
@@ -923,8 +942,13 @@ def _max_time_text(left: Any, right: Any) -> str:
 
 def build_communication_rows(flows: list[dict[str, Any]], *, limit: int = MAX_COMMUNICATION_ROWS) -> list[dict[str, Any]]:
     output_limit = _communication_row_limit(limit)
-    scan_limit = MAX_COMMUNICATION_SCAN_HARD_CAP if output_limit <= 0 else max(output_limit, MAX_COMMUNICATION_SCAN_HARD_CAP)
-    scan_source = flows[:scan_limit] if scan_limit > 0 else flows
+    if output_limit <= 0:
+        scan_source = flows
+    elif MAX_COMMUNICATION_SCAN_HARD_CAP > 0:
+        scan_limit = max(output_limit, MAX_COMMUNICATION_SCAN_HARD_CAP)
+        scan_source = flows[:scan_limit]
+    else:
+        scan_source = flows
     rows: list[dict[str, Any]] = []
     for flow in scan_source:
         service = _communication_service(flow)
@@ -981,48 +1005,8 @@ def build_investigator_view(summary: PcapSummary) -> dict[str, Any]:
     }
 
 
-COMMUNICATION_SERVICE_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
-    ("Apple / iCloud", (
-        "apple.com",
-        "icloud",
-        "push.apple",
-        "courier",
-        "itunes",
-        "mzstatic",
-        "apple-dns",
-        "mask-api.icloud",
-        "configuration.apple",
-        "applepush",
-    )),
-    ("WhatsApp", ("whatsapp", "wa.me")),
-    ("Viber", ("viber",)),
-    ("Telegram", ("telegram", "t.me")),
-    ("Signal", ("signal.org", "signal.art", "whispersystems")),
-    ("Facebook / Messenger", ("facebook", "messenger", "edge-mqtt", "fbcdn", "instagram")),
-    ("Microsoft / Teams", ("microsoft", "office365", "outlook", "teams", "skype", "live.com")),
-    ("Snapchat", ("snapchat", "snap.com")),
-    ("TikTok", ("tiktok", "byteoversea")),
-    ("Google / YouTube", ("youtube", "googlevideo", "googleapis", "geller-pa.googleapis.com", "notifications-pa")),
-    ("Spotify", ("spotify",)),
-)
-
-
 def _communication_service(flow: dict[str, Any]) -> str:
-    text = " ".join(
-        str(flow.get(key) or "")
-        for key in ("requested_server_name", "application_name", "pcap_payload_preview")
-    )
-    return _match_service_rules(text, COMMUNICATION_SERVICE_RULES)
-
-
-def _match_service_rules(text: str, rules: tuple[tuple[str, tuple[str, ...]], ...]) -> str:
-    haystack = (text or "").lower()
-    if not haystack:
-        return ""
-    for service, needles in rules:
-        if any(needle in haystack for needle in needles):
-            return service
-    return ""
+    return classify_communication_service(flow)
 
 
 def _communication_activity(flow: dict[str, Any], service: str) -> tuple[str, str, str]:
@@ -1060,7 +1044,7 @@ def _communication_activity(flow: dict[str, Any], service: str) -> tuple[str, st
 
     if _is_push_host(host_l) or 5222 in ports or "applepush" in app.lower():
         reasons.append("known push/messaging transport signal")
-        confidence = "medium" if service in {"Apple / iCloud", "Facebook / Messenger", "Google / YouTube"} else "low"
+        confidence = "medium" if service in {"Apple / iCloud", "Facebook / Meta", "Google / YouTube"} else "low"
         return "Push/background messaging transport", confidence, "; ".join(reasons)
 
     if service == "Apple / iCloud" and any(token in host_l for token in ("gateway.icloud", "mask-api", "courier", "push")):
@@ -1073,7 +1057,7 @@ def _communication_activity(flow: dict[str, Any], service: str) -> tuple[str, st
             "WhatsApp",
             "Viber",
             "Telegram",
-            "Facebook / Messenger",
+            "Facebook / Meta",
             "Signal",
             "Apple / iCloud",
         } else "low"
@@ -1263,22 +1247,7 @@ def _build_service_rows(summary: PcapSummary) -> list[dict[str, Any]]:
 
 
 def _service_label(host: str) -> str:
-    label = _match_service_rules(host, COMMUNICATION_SERVICE_RULES)
-    if label:
-        return label
-    h = (host or "").lower()
-    checks = [
-        ("Samsung", ("samsung",)),
-        ("Booking", ("booking.com",)),
-        ("Advertising / tracking", ("adnxs", "adform", "criteo", "rubiconproject", "googlesyndication", "zemanta")),
-        ("Certificates / validation", ("ocsp", "cert", "crl", "godaddy")),
-        ("Cloudflare / CDN", ("cloudflare", "cloudfront", "akamai", "cdn")),
-        ("LinkedIn", ("linkedin",)),
-    ]
-    for label, needles in checks:
-        if any(needle in h for needle in needles):
-            return label
-    return "Other visible services"
+    return classify_pcap_investigator_service(host)
 
 
 def _build_visibility_rows(summary: PcapSummary) -> list[dict[str, Any]]:

@@ -34,8 +34,9 @@ from PySide6.QtWidgets import (
     QHeaderView,
 )
 
+from core.exporters.pcap_metadata_exporter import export_pcap_dns_csv, export_pcap_tls_csv
 from core.analysis_limits import PROFILE_CHART_PREVIEW_ROWS
-from ui.table_export import export_table_dialog
+from ui.table_export import append_table_export_footer
 from ui.buttons import make_action_button, style_action_button
 from ui.dataset_header_layout import (
     DATASET_HEADER_MARGINS,
@@ -844,12 +845,17 @@ class PcapPage(QWidget):
         return get_saved_pcap_period_source(project_id, day) is not None
 
     def _update_period_gap_banner(self, present_days: list[str] | None = None) -> None:
-        days = list(present_days or self._pcap_day_groups_raw.keys() or self._pcap_day_groups.keys())
+        raw_days = [
+            day
+            for day in (self._pcap_day_groups_raw.keys() if self._pcap_day_groups_raw else [])
+            if str(day or "").strip()
+        ]
+        days = list(present_days if present_days is not None else raw_days or self._pcap_day_groups.keys())
         gap = missing_period_days(days)
         self._period_gap_info = gap
         summary = format_period_gap_summary(
             days,
-            granularity=getattr(self, "_pcap_period_granularity", "day"),
+            granularity="day" if raw_days else getattr(self, "_pcap_period_granularity", "day"),
         )
         if getattr(self, "_pcap_period_granularity", "day") == "day":
             partial = summarize_partial_months(days)
@@ -865,10 +871,11 @@ class PcapPage(QWidget):
         self._sync_period_gap_visibility()
 
     def _sync_period_gap_visibility(self) -> None:
-        # Hide coverage row during PCAP analysis (single file or batch).
-        loading = self._thread is not None or self._batch_thread is not None
+        # Hide coverage row only while a period is actively being analyzed on the worker thread.
+        # Day groups are known during batch import — keep the gap banner visible like on JSON.
+        loading = self._thread is not None
         if hasattr(self, "lbl_period_gaps"):
-            self.lbl_period_gaps.setVisible(not loading)
+            self.lbl_period_gaps.setVisible(bool(str(self.lbl_period_gaps.text() or "").strip()) and not loading)
         if hasattr(self, "btn_expand_period_gaps"):
             missing_count = int(self._period_gap_info.get("missing_count") or 0)
             self.btn_expand_period_gaps.setVisible(missing_count > 0 and not loading)
@@ -876,7 +883,7 @@ class PcapPage(QWidget):
     def _open_missing_days_dialog(self) -> None:
         missing = list(self._period_gap_info.get("missing_days") or [])
         if not missing:
-            QMessageBox.information(self, "Missing days", "No internal gaps in the indexed period range.")
+            self._info("Missing days", "No internal gaps in the indexed period range.")
             return
 
         first = self._format_day_label(str(self._period_gap_info.get("first_day") or ""))
@@ -901,6 +908,7 @@ class PcapPage(QWidget):
         self._set_table(table, rows)
         layout.addWidget(table, 1)
         footer = QHBoxLayout()
+        self._append_export_footer(footer, title="Missing PCAP days", table=table)
         footer.addStretch()
         close_btn = QPushButton("Close")
         close_btn.setMinimumHeight(42)
@@ -1129,7 +1137,7 @@ class PcapPage(QWidget):
     def _open_table_dialog(self, title: str, source_table: QTableView) -> None:
         source_model = source_table.model()
         if not isinstance(source_model, DictTableModel) or not source_model.rows:
-            QMessageBox.information(self, title, "No rows are loaded.")
+            self._info(title, "No rows are loaded.")
             return
 
         dlg = QDialog(self)
@@ -1156,9 +1164,7 @@ class PcapPage(QWidget):
         layout.addWidget(table, 1)
 
         footer = QHBoxLayout()
-        footer.addWidget(self._export_button("Export CSV", title, table, "csv"))
-        footer.addWidget(self._export_button("Export Excel", title, table, "xlsx"))
-        footer.addWidget(self._export_button("Export HTML", title, table, "html"))
+        self._append_export_footer(footer, title=title, table=table)
         footer.addStretch()
         btn_close = QPushButton("Close")
         btn_close.setMinimumHeight(42)
@@ -1169,21 +1175,16 @@ class PcapPage(QWidget):
 
         dlg.exec()
 
-    def _export_button(self, text: str, title: str, table: QTableView, export_format: str) -> QPushButton:
-        button = QPushButton(text)
-        button.setMinimumHeight(42)
-        button.clicked.connect(
-            lambda: export_table_dialog(
-                self,
-                title,
-                table,
-                export_format,
-                project_id=self._current_project_id(),
-                category="pcap",
-                source_label=self.lbl_file.text() or "",
-            )
+    def _append_export_footer(self, footer: QHBoxLayout, *, title: str, table: QTableView) -> None:
+        append_table_export_footer(
+            self,
+            footer,
+            title=title,
+            table=table,
+            project_id=self._current_project_id(),
+            category="pcap",
+            source_label=self.lbl_file.text() or "",
         )
-        return button
 
     def _expanded_column_width(self, column: tuple[str, str], current_width: int) -> int:
         key, title = column
@@ -1343,7 +1344,7 @@ class PcapPage(QWidget):
 
     def _start_auto_pcap_batch(self, paths: list[str], *, auto_save: bool) -> None:
         if self._thread is not None or self._batch_thread is not None:
-            QMessageBox.information(self, "PCAP", "PCAP analysis is already running.")
+            self._info("PCAP", "PCAP analysis is already running.")
             return
 
         project_id = self._current_project_id()
@@ -1557,7 +1558,7 @@ class PcapPage(QWidget):
             if normalize_period_day(day)
         )
         if not days:
-            QMessageBox.information(self, "Selected period", "No indexed PCAP days are available yet.")
+            self._info("Selected period", "No indexed PCAP days are available yet.")
             return False
         selected = period_range_dialog(
             self,
@@ -1612,10 +1613,9 @@ class PcapPage(QWidget):
                 if revert_index >= 0:
                     self.cmb_pcap_period_mode.setCurrentIndex(revert_index)
                 self.cmb_pcap_period_mode.blockSignals(False)
-                QMessageBox.information(
-                    self,
+                self._info(
                     "Month view unavailable",
-                    "Month view requires a complete calendar month (every day indexed).\n\n"
+                    "Month view requires a complete calendar month (every day indexed).",
                     "Use Day view for partial imports.",
                 )
                 return
@@ -1658,8 +1658,11 @@ class PcapPage(QWidget):
     def _sync_period_selector_panel(self) -> None:
         has_periods = bool(self._pcap_day_groups_raw or self._pcap_day_groups)
         batch_total = int(getattr(self, "_pcap_batch_total", 0) or 0)
+        batch_processed = int(getattr(self, "_pcap_batch_processed", 0) or 0)
         queue = list(getattr(self, "_pcap_queue", None) or [])
-        has_batch = batch_total > 1 or bool(queue) or self._batch_thread is not None
+        has_batch = bool(queue) or (
+            batch_total > 0 and (batch_processed < batch_total or self._batch_thread is not None)
+        )
         if hasattr(self, "lbl_pcap_day"):
             self.lbl_pcap_day.setVisible(has_periods)
         if hasattr(self, "cmb_pcap_period_mode"):
@@ -2031,7 +2034,7 @@ class PcapPage(QWidget):
             return
 
         if self._thread is not None:
-            QMessageBox.information(self, "PCAP", "PCAP analysis is already running.")
+            self._info("PCAP", "PCAP analysis is already running.")
             return
         paths = [str(path) for path in file_paths if str(path or "").strip()]
         if not paths:
@@ -2164,7 +2167,7 @@ class PcapPage(QWidget):
 
     def reanalyze_current_period(self) -> None:
         if self._thread is not None or self._batch_thread is not None:
-            QMessageBox.information(self, "PCAP", "PCAP analysis is already running.")
+            self._info("PCAP", "PCAP analysis is already running.")
             return
 
         day = str(self._pcap_active_day or self.cmb_pcap_day.currentData() or "")
@@ -2175,7 +2178,7 @@ class PcapPage(QWidget):
             paths = [self.summary.file_path]
 
         if not paths:
-            QMessageBox.information(self, "PCAP", "No PCAP period is loaded to re-analyze.")
+            self._info("PCAP", "No PCAP period is loaded to re-analyze.")
             return
 
         label = ""
@@ -2190,7 +2193,7 @@ class PcapPage(QWidget):
 
     def _start_period_reanalyze(self, paths: list[str], *, day: str = "", label: str = "") -> None:
         if self._thread is not None or self._batch_thread is not None:
-            QMessageBox.information(self, "PCAP", "PCAP analysis is already running.")
+            self._info("PCAP", "PCAP analysis is already running.")
             return
 
         clean_paths = [str(path) for path in paths if str(path or "").strip()]
@@ -2250,7 +2253,7 @@ class PcapPage(QWidget):
 
     def _export_full_metadata(self, kind: str) -> None:
         if not getattr(self, "summary", None):
-            QMessageBox.information(self, "PCAP export", "Open a PCAP file first.")
+            self._info("PCAP export", "Open a PCAP file first.")
             return
 
         project = get_project(self._current_project_id()) if self._current_project_id() is not None else None
@@ -2279,13 +2282,13 @@ class PcapPage(QWidget):
                 label = "TLS SNI hosts"
             else:
                 raise ValueError(f"Unsupported metadata export: {kind}")
-            QMessageBox.information(
-                self,
+            self._info(
                 "PCAP export",
-                f"Exported {row_count:,} {label} to:\n{file_path}",
+                f"Exported {row_count:,} {label}.",
+                f"File:\n{file_path}",
             )
         except Exception as exc:
-            QMessageBox.critical(self, "PCAP export failed", str(exc))
+            self._error("PCAP export failed", str(exc))
 
     def _sync_period_selector_to_summary(self, summary: PcapSummary) -> None:
         if not self._pcap_day_groups or not hasattr(self, "cmb_pcap_day"):
@@ -2423,7 +2426,7 @@ class PcapPage(QWidget):
 
     def _open_rows_dialog(self, title: str, columns: list[tuple[str, str]], rows: list[dict[str, Any]]) -> None:
         if not rows:
-            QMessageBox.information(self, title, "No rows are loaded.")
+            self._info(title, "No rows are loaded.")
             return
 
         dlg = QDialog(self)
@@ -2445,6 +2448,7 @@ class PcapPage(QWidget):
         layout.addWidget(table, 1)
 
         footer = QHBoxLayout()
+        self._append_export_footer(footer, title=title, table=table)
         footer.addStretch()
         btn_close = QPushButton("Close")
         btn_close.setMinimumHeight(42)
@@ -2502,7 +2506,7 @@ class PcapPage(QWidget):
     def _open_visibility_data(self, kind: str) -> None:
         summary = getattr(self, "summary", None)
         if summary is None:
-            QMessageBox.information(self, "PCAP", "Open a PCAP file first.")
+            self._info("PCAP", "Open a PCAP file first.")
             return
 
         if kind == "encrypted":
@@ -2723,7 +2727,7 @@ class PcapPage(QWidget):
     def _open_communications_dialog(self) -> None:
         model = self.tbl_communications.model()
         if not isinstance(model, DictTableModel) or not model.rows:
-            QMessageBox.information(self, "Communication indicators", "No communication indicators are loaded.")
+            self._info("Communication indicators", "No communication indicators are loaded.")
             return
 
         dlg = QDialog(self)
@@ -2776,9 +2780,7 @@ class PcapPage(QWidget):
         table.selectRow(0)
 
         footer = QHBoxLayout()
-        footer.addWidget(self._export_button("Export CSV", "Communication indicators", table, "csv"))
-        footer.addWidget(self._export_button("Export Excel", "Communication indicators", table, "xlsx"))
-        footer.addWidget(self._export_button("Export HTML", "Communication indicators", table, "html"))
+        self._append_export_footer(footer, title="Communication indicators", table=table)
         footer.addStretch()
         btn_close = QPushButton("Close")
         btn_close.setMinimumHeight(42)
@@ -2792,7 +2794,7 @@ class PcapPage(QWidget):
     def _on_error(self, message: str):
         self._close_period_load_progress()
         if not self._pcap_queue_auto_process:
-            QMessageBox.critical(self, "PCAP analysis failed", message)
+            self._error("PCAP analysis failed", message)
         self._set_stats_style("HeaderStatLabel")
         self.lbl_stats.setText("PCAP analysis failed.")
         self._pcap_batch_failed += 1
@@ -2878,9 +2880,13 @@ class PcapPage(QWidget):
         self._pcap_queue_auto_save = False
         if self._pcap_day_groups_raw and not self._pcap_day_groups:
             self._rebuild_pcap_period_combo()
+        elif self._pcap_day_groups_raw:
             self._update_period_gap_banner(list(self._pcap_day_groups_raw.keys()))
         if not self._pcap_day_groups:
             self._update_batch_status()
+        else:
+            self._sync_period_selector_panel()
+        self._sync_period_gap_visibility()
         project_id = self._current_project_id()
         QTimer.singleShot(
             0,
@@ -2906,6 +2912,9 @@ class PcapPage(QWidget):
                         self.app.notes_controller.refresh_activity_ui_for_project(int(project_id))
                     except Exception:
                         pass
+            if self._pcap_day_groups_raw:
+                self._update_period_gap_banner(list(self._pcap_day_groups_raw.keys()))
+                self._sync_period_gap_visibility()
             QTimer.singleShot(0, controller.complete_deferred_import_finalize)
             return
         self._refresh_project_after_batch()
@@ -2972,6 +2981,10 @@ class PcapPage(QWidget):
         self._batch_worker = None
         self._batch_thread = None
         self._update_reanalyze_button_state()
+        self._sync_period_selector_panel()
+        if self._pcap_day_groups_raw:
+            self._update_period_gap_banner(list(self._pcap_day_groups_raw.keys()))
+        self._sync_period_gap_visibility()
 
     def _update_open_button_text(self) -> None:
         if self._pcap_queue:
@@ -2986,6 +2999,7 @@ class PcapPage(QWidget):
         self._pcap_batch_current_label = ""
         self._close_period_load_progress()
         self._sync_period_selector_panel()
+        self._sync_period_gap_visibility()
 
     def _batch_context_label(self, current_file: str = "") -> str:
         text = str(current_file or self._pcap_batch_current_label or "").strip()
@@ -3005,7 +3019,11 @@ class PcapPage(QWidget):
         if not hasattr(self, "batch_status_panel"):
             return
 
-        has_batch = self._pcap_batch_total > 1 or bool(self._pcap_queue) or self._batch_thread is not None
+        batch_total = int(self._pcap_batch_total or 0)
+        batch_processed = int(self._pcap_batch_processed or 0)
+        has_batch = bool(self._pcap_queue) or (
+            batch_total > 0 and (batch_processed < batch_total or self._batch_thread is not None)
+        )
         if not has_batch:
             self._sync_period_selector_panel()
             return
@@ -3222,7 +3240,7 @@ class PcapPage(QWidget):
 
     def export_summary(self):
         if not self.summary:
-            QMessageBox.information(self, "PCAP export", "Open a PCAP file first.")
+            self._info("PCAP export", "Open a PCAP file first.")
             return
 
         default_name = Path(self.summary.file_name).with_suffix(".pcap-summary.html").name
@@ -3252,7 +3270,7 @@ class PcapPage(QWidget):
             )
             webbrowser.open(Path(file_path).resolve().as_uri())
         except Exception as exc:
-            QMessageBox.critical(self, "PCAP export failed", str(exc))
+            self._error("PCAP export failed", str(exc))
 
     def save_to_project(self):
         if not self.btn_save_project.isEnabled() or self._current_period_already_saved():

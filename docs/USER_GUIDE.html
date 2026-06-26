@@ -85,12 +85,29 @@ a:hover { text-decoration: underline; }
 .toc {
   position: sticky;
   top: 20px;
+  max-height: calc(100vh - 40px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
   background: #ffffff;
   border: 1px solid #dbe3ee;
   border-radius: 16px;
   padding: 18px 16px;
   box-shadow: 0 10px 24px rgba(15, 23, 42, 0.06);
 }
+
+.toc::-webkit-scrollbar { width: 8px; }
+
+.toc::-webkit-scrollbar-track {
+  background: transparent;
+  margin: 8px 0;
+}
+
+.toc::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 999px;
+}
+
+.toc::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
 
 .toc h2 {
   margin: 0 0 12px;
@@ -107,6 +124,19 @@ a:hover { text-decoration: underline; }
 }
 
 .toc li { margin: 7px 0; }
+
+.toc-root { padding-left: 18px; }
+
+.toc-sub {
+  list-style: none;
+  margin: 4px 0 8px;
+  padding-left: 14px;
+  font-size: 0.84rem;
+}
+
+.toc-sub li { margin: 4px 0; }
+
+.toc-sub a { color: #475569; }
 
 .content {
   background: #ffffff;
@@ -132,6 +162,7 @@ a:hover { text-decoration: underline; }
   font-size: 1.08rem;
   margin: 1.5rem 0 0.55rem;
   color: #1e3a5f;
+  scroll-margin-top: 24px;
 }
 
 .content p { margin: 0.65rem 0; color: #334155; }
@@ -213,7 +244,7 @@ a:hover { text-decoration: underline; }
 
 @media (max-width: 920px) {
   .page-layout { grid-template-columns: 1fr; }
-  .toc { position: static; }
+  .toc { position: static; max-height: none; overflow: visible; }
   .header-inner { padding: 22px 20px; }
   .content { padding: 24px 20px 30px; }
 }
@@ -238,17 +269,30 @@ a:hover { text-decoration: underline; }
     </div>
   </header>
   <div class="page-layout">
-    <nav class="toc"><h2>Contents</h2><ol><li><a href="#1-what-is-vianyquist">What is ViaNyquist?</a></li>
+    <nav class="toc"><h2>Contents</h2><ol class="toc-root"><li><a href="#1-what-is-vianyquist">What is ViaNyquist?</a></li>
 <li><a href="#2-recommended-workflow">Recommended workflow</a></li>
 <li><a href="#3-navigation">Navigation</a></li>
-<li><a href="#4-projects">Projects</a></li>
-<li><a href="#5-loading-evidence">Loading evidence</a></li>
-<li><a href="#6-json-explore">JSON — Explore</a></li>
+<li><a href="#4-projects">Projects</a><ul class="toc-sub"><li><a href="#4-1-active-case-dashboard">Active case dashboard</a></li>
+<li><a href="#4-2-project-list">Project list</a></li>
+<li><a href="#4-3-new-edit-project-dialog">New / Edit project dialog</a></li>
+<li><a href="#4-4-project-details-panel">Project details panel</a></li>
+<li><a href="#4-5-recent-cards-bottom">Recent cards (bottom)</a></li></ul></li>
+<li><a href="#5-loading-evidence">Loading evidence</a><ul class="toc-sub"><li><a href="#5-1-from-json-explore">From JSON (Explore)</a></li>
+<li><a href="#5-2-from-pcap">From PCAP</a></li>
+<li><a href="#5-3-from-projects">From Projects</a></li></ul></li>
+<li><a href="#6-json-explore">JSON — Explore</a><ul class="toc-sub"><li><a href="#6-1-header">Header</a></li>
+<li><a href="#6-2-summary">Summary</a></li>
+<li><a href="#6-3-flows">Flows</a></li>
+<li><a href="#6-4-findings-in-explore">Findings (in Explore)</a></li></ul></li>
 <li><a href="#7-json-registry">JSON — Registry</a></li>
 <li><a href="#8-json-listing">JSON — Listing</a></li>
-<li><a href="#9-pcap">PCAP</a></li>
+<li><a href="#9-pcap">PCAP</a><ul class="toc-sub"><li><a href="#9-1-header">Header</a></li>
+<li><a href="#9-2-tabs">Tabs</a></li>
+<li><a href="#9-3-limitations">Limitations</a></li></ul></li>
 <li><a href="#10-osint">OSINT</a></li>
-<li><a href="#11-findings">Findings</a></li>
+<li><a href="#11-findings">Findings</a><ul class="toc-sub"><li><a href="#11-1-create">Create</a></li>
+<li><a href="#11-2-browse-and-filter">Browse and filter</a></li>
+<li><a href="#11-3-actions">Actions</a></li></ul></li>
 <li><a href="#12-ai-output">AI output</a></li>
 <li><a href="#13-notes">Notes</a></li>
 <li><a href="#14-profile-activity-profile">Profile (Activity Profile)</a></li>
@@ -257,8 +301,7 @@ a:hover { text-decoration: underline; }
 <li><a href="#17-exports">Exports</a></li>
 <li><a href="#18-workspace-folder">Workspace folder</a></li>
 <li><a href="#19-limitations-and-good-practice">Limitations and good practice</a></li>
-<li><a href="#20-glossary">Glossary</a></li>
-<li><a href="#21-help">Help</a></li></ol></nav>
+<li><a href="#20-glossary">Glossary</a></li></ol></nav>
     <main class="content">
 
 <h2 id="1-what-is-vianyquist">1. What is ViaNyquist?</h2>
@@ -268,6 +311,8 @@ a:hover { text-decoration: underline; }
 <p>The name honours <strong>Harry Nyquist</strong> (1889–1976), the Swedish-born engineer whose work at Bell Labs shaped how we understand signals in communication systems. In 1928 he showed that a continuous signal can be reconstructed from discrete samples — but only if those samples are taken often enough to capture what is really happening. That idea, later known as the <strong>Nyquist sampling theorem</strong>, is one of the foundations of digital telephony, radio, and every modern network.</p>
 
 <p>Investigators face a similar problem. You rarely see an entire communication live and in full; you work from <strong>captured</strong> flows and packets — samples of activity taken at a point in time. ViaNyquist is built around that reality: helping you reconstruct a clear picture of behaviour from the evidence you have, without pretending the capture is more complete than it is.</p>
+
+<p>The same idea extends to the built-in <strong>AI assistant</strong>. You cannot read tens of thousands of flows line by line; the AI should not pretend it has either. Instead, ViaNyquist builds a <strong>structured context</strong> from what you are already viewing — dataset statistics, a selected flow, a finding, a PCAP summary, or the project profile — and asks the model for help in plain language. <strong>Summary</strong> answers *what stands out in this evidence?* <strong>Explain</strong> answers *what does this one record mean, and what should I check next?* Results appear on the <strong>AI output</strong> page (and inline where you triggered them); you can copy them to <strong>Notes</strong>. By default the assistant runs <strong>locally</strong> through <strong>Ollama</strong>, so case data normally stays on your machine.</p>
 
 <p>ViaNyquist does <strong>not</strong> decrypt traffic. For encrypted sessions it shows metadata only: IP addresses, ports, protocols, DNS queries, TLS server names (SNI), timing, and volume. These are investigative indicators, not proof of message content, identity, or intent.</p>
 
@@ -313,11 +358,11 @@ a:hover { text-decoration: underline; }
 
 <h2 id="4-projects">4. Projects</h2>
 
-<h3>4.1 Active case dashboard</h3>
+<h3 id="4-1-active-case-dashboard">4.1 Active case dashboard</h3>
 
 <p>At the top of the Projects page you see the <strong>active case</strong> name and a short summary of the subject and identifiers. If no project is active, open one with <strong>Set active</strong>.</p>
 
-<h3>4.2 Project list</h3>
+<h3 id="4-2-project-list">4.2 Project list</h3>
 
 <ul>
 <li><strong>+ New</strong> — create a project (name, description, workspace, identifiers, order metadata).</li>
@@ -328,7 +373,7 @@ a:hover { text-decoration: underline; }
 
 <p>Select a project to preview details on the right. <strong>Set active</strong> makes it the working case for JSON, PCAP, Notes, Findings, and Profile.</p>
 
-<h3>4.3 New / Edit project dialog</h3>
+<h3 id="4-3-new-edit-project-dialog">4.3 New / Edit project dialog</h3>
 
 <p><strong>Project</strong></p>
 
@@ -355,11 +400,11 @@ a:hover { text-decoration: underline; }
 
 <p>After creating a project you may be asked <strong>Open dataset</strong> to load evidence immediately.</p>
 
-<h3>4.4 Project details panel</h3>
+<h3 id="4-4-project-details-panel">4.4 Project details panel</h3>
 
 <p>Shows ID, subject, identifiers, Klasa/Urbroj, order validity, description, workspace path, and timestamps.</p>
 
-<h3>4.5 Recent cards (bottom)</h3>
+<h3 id="4-5-recent-cards-bottom">4.5 Recent cards (bottom)</h3>
 
 <table>
 <tr><th>Card</th><th>Action</th></tr>
@@ -372,7 +417,7 @@ a:hover { text-decoration: underline; }
 
 <h2 id="5-loading-evidence">5. Loading evidence</h2>
 
-<h3>5.1 From JSON (Explore)</h3>
+<h3 id="5-1-from-json-explore">5.1 From JSON (Explore)</h3>
 
 <p>Click <strong>Load dataset</strong> in the JSON header (or accept <strong>Open dataset</strong> after creating a project).</p>
 
@@ -386,11 +431,11 @@ a:hover { text-decoration: underline; }
 
 <p><strong>Folder import</strong> offers <strong>Import all</strong>, <strong>Choose date range</strong>, or <strong>Cancel</strong>. JSON is indexed by calendar day. Use <strong>Period</strong> (Day / Month / <strong>Selected period</strong>), <strong>Pick range…</strong>, and <strong>Missing days</strong> to work with date spans.</p>
 
-<h3>5.2 From PCAP</h3>
+<h3 id="5-2-from-pcap">5.2 From PCAP</h3>
 
 <p>On the PCAP page, click <strong>Load dataset</strong> and select one or more <code>.pcap</code> / <code>.pcapng</code> files. Use <strong>Save Period to Project</strong> to register the capture to the active project workspace.</p>
 
-<h3>5.3 From Projects</h3>
+<h3 id="5-3-from-projects">5.3 From Projects</h3>
 
 <p>Use <strong>Open JSON list</strong> or <strong>Open PCAP list</strong> on the recent cards; multi-select rows and <strong>Load selected</strong>, or double-click a row.</p>
 
@@ -400,7 +445,7 @@ a:hover { text-decoration: underline; }
 
 <p>Sub-tabs: <strong>Summary</strong>, <strong>Flows</strong>, <strong>Findings</strong>.</p>
 
-<h3>6.1 Header</h3>
+<h3 id="6-1-header">6.1 Header</h3>
 
 <ul>
 <li><strong>Load dataset</strong>, <strong>Generate AI Summary</strong>, <strong>Add AI to Notes</strong></li>
@@ -408,14 +453,14 @@ a:hover { text-decoration: underline; }
 <li><strong>Period</strong> controls and search: <code>Search IP / SNI / app...</code></li>
 </ul>
 
-<h3>6.2 Summary</h3>
+<h3 id="6-2-summary">6.2 Summary</h3>
 
 <ul>
 <li>Cards: <strong>Top source IPs</strong>, <strong>Top destination IPs</strong>, <strong>Top protocols</strong>, <strong>Top applications</strong> — each with <strong>Expand table</strong></li>
 <li><strong>AI assistant output</strong> — filled by <strong>Generate AI Summary</strong></li>
 </ul>
 
-<h3>6.3 Flows</h3>
+<h3 id="6-3-flows">6.3 Flows</h3>
 
 <ul>
 <li>Filters: <strong>Filter source</strong>, <strong>Filter destination</strong>, <strong>Filter SNI</strong></li>
@@ -428,7 +473,7 @@ a:hover { text-decoration: underline; }
 
 <p>Sortable table columns include Source/destination IP and port, Protocol, Application, Bytes, Duration, SNI. <strong>Flow details</strong> panel shows the selected row.</p>
 
-<h3>6.4 Findings (in Explore)</h3>
+<h3 id="6-4-findings-in-explore">6.4 Findings (in Explore)</h3>
 
 <p>See section 11.</p>
 
@@ -466,14 +511,14 @@ a:hover { text-decoration: underline; }
 
 <h2 id="9-pcap">9. PCAP</h2>
 
-<h3>9.1 Header</h3>
+<h3 id="9-1-header">9.1 Header</h3>
 
 <ul>
 <li><strong>Load dataset</strong>, <strong>Save Period to Project</strong>, <strong>AI Summary</strong>, <strong>Add to Notes</strong>, <strong>Export Summary</strong></li>
 <li><strong>Period</strong> row: day combo, Day / Month / Selected period, <strong>Pick range…</strong>, <strong>Re-analyze Period</strong>, <strong>Missing days</strong></li>
 </ul>
 
-<h3>9.2 Tabs</h3>
+<h3 id="9-2-tabs">9.2 Tabs</h3>
 
 <table>
 <tr><th>Tab</th><th>Content</th></tr>
@@ -486,7 +531,7 @@ a:hover { text-decoration: underline; }
 
 <p>Many sections offer <strong>Expand table</strong> or <strong>Open full … table</strong> for larger views.</p>
 
-<h3>9.3 Limitations</h3>
+<h3 id="9-3-limitations">9.3 Limitations</h3>
 
 <p>HTTPS, QUIC, and most app traffic are encrypted. Without plaintext, only metadata and visible artefacts are shown. Messaging or call-like indicators are heuristic, not proof of user action.</p>
 
@@ -513,18 +558,18 @@ a:hover { text-decoration: underline; }
 
 <p>A <strong>Finding</strong> is an item you mark as important for the case.</p>
 
-<h3>11.1 Create</h3>
+<h3 id="11-1-create">11.1 Create</h3>
 
 <p>In <strong>Flows</strong>, select a row and click <strong>Mark as Finding</strong>. Enter <strong>Title</strong>, optional <strong>Note</strong>, and <strong>Tags</strong> (comma-separated). The view switches to the Findings tab.</p>
 
-<h3>11.2 Browse and filter</h3>
+<h3 id="11-2-browse-and-filter">11.2 Browse and filter</h3>
 
 <ul>
 <li>List shows time, status, title, endpoints, application, tags</li>
 <li>Filters: <strong>Status</strong>, search, tag, sort (<strong>Newest</strong>, <strong>Oldest</strong>, <strong>Status</strong>, <strong>Title</strong>), <strong>Clear</strong></li>
 </ul>
 
-<h3>11.3 Actions</h3>
+<h3 id="11-3-actions">11.3 Actions</h3>
 
 <ul>
 <li><strong>Edit</strong> — single dialog: Title, Status, Tags, Analyst note</li>
@@ -541,15 +586,72 @@ a:hover { text-decoration: underline; }
 
 <h2 id="12-ai-output">12. AI output</h2>
 
-<p>Central place for the latest AI text. Context line shows source (JSON, PCAP, Profile, Finding, Flow) and project name.</p>
+<p>The <strong>AI output</strong> page (sidebar) is the central place for the latest generated text. A context line at the top shows the source (JSON dataset, PCAP, Profile, Finding, or Flow) and the active project name.</p>
 
-<p><strong>Add to Notes</strong> copies the text into project notes.</p>
+<h3 id="summary-vs-explain">Summary vs Explain</h3>
 
-<p>AI is triggered from Explore (<strong>Generate AI Summary</strong>, <strong>Explain with AI</strong>), Findings (<strong>Explain with AI</strong>), PCAP (<strong>AI Summary</strong>), and Profile (<strong>AI Profile Summary</strong>).</p>
+<p>ViaNyquist uses two complementary AI actions. Both send <strong>only a focused context</strong> — not your whole case folder — to the configured model.</p>
 
-<p><strong>Important:</strong> AI output is explanatory only. Verify claims against the data shown in the app. AI must not be treated as legal or technical proof.</p>
+<table>
+<tr><th>Action</th><th>Typical buttons</th><th>What it is for</th></tr>
+<tr><td><strong>Summary</strong></td><td><strong>Generate AI Summary</strong>, <strong>AI Summary</strong>, <strong>AI Profile Summary</strong></td><td>Overview after loading evidence: main services, endpoints, timing patterns, and stated limitations of the data.</td></tr>
+<tr><td><strong>Explain</strong></td><td><strong>Explain with AI</strong></td><td>Interpretation of <strong>one selected flow</strong> or <strong>one finding</strong>: what the metadata suggests and what to verify in the tables.</td></tr>
+</table>
 
-<p>Configure <strong>Base URL</strong>, <strong>Model</strong>, and <strong>Timeout</strong> under <strong>Settings → AI</strong> (default: local Ollama-compatible API).</p>
+<p>Use <strong>Summary</strong> when you open a new JSON day, PCAP period, or want a case-wide profile narrative. Use <strong>Explain</strong> when you are looking at a single row and want readable guidance before saving a <strong>Finding</strong> or writing <strong>Notes</strong>.</p>
+
+<h3 id="where-ai-is-triggered">Where AI is triggered</h3>
+
+<table>
+<tr><th>Screen</th><th>Buttons</th><th>Where results appear</th></tr>
+<tr><td><strong>JSON → Explore</strong></td><td><strong>Generate AI Summary</strong>, <strong>Explain with AI</strong></td><td>Summary/Flows area and <strong>AI output</strong></td></tr>
+<tr><td><strong>PCAP</strong></td><td><strong>AI Summary</strong></td><td><strong>AI Summary</strong> tab and <strong>AI output</strong></td></tr>
+<tr><td><strong>Findings</strong></td><td><strong>Explain with AI</strong></td><td><strong>AI output</strong></td></tr>
+<tr><td><strong>Profile</strong></td><td><strong>AI Profile Summary</strong></td><td><strong>AI output</strong></td></tr>
+</table>
+
+<p><strong>Add to Notes</strong> / <strong>Add AI to Notes</strong> copies the latest AI text into project notes (rich-text editor).</p>
+
+<p>While a request runs, the UI shows a progress message. Large JSON periods or PCAP captures can take several minutes — the <strong>Timeout</strong> in Settings controls the maximum wait.</p>
+
+<h3 id="ollama-local-ai">Ollama (local AI)</h3>
+
+<p>By default ViaNyquist uses <strong>[Ollama](https://ollama.com)</strong> — a free, local AI runtime for Windows, macOS, and Linux. Ollama serves models on your PC at <strong><code>http://localhost:11434</code></strong>. Inference does not require the internet once the model is downloaded; your evidence is not uploaded to a cloud AI service unless you change the Base URL yourself.</p>
+
+<p><strong>Typical first-time setup:</strong></p>
+
+<ol>
+<li>Install Ollama from [ollama.com](https://ollama.com). The ViaNyquist installer can optionally install Ollama and download the <strong>llama3</strong> model during setup.</li>
+<li>Make sure Ollama is running (system tray icon, or run <code>ollama serve</code> in a terminal).</li>
+<li>If needed, pull the model manually: <code>ollama pull llama3</code> (or another model name you prefer).</li>
+<li>In ViaNyquist, open <strong>Settings → AI</strong>, confirm <strong>Base URL</strong> and <strong>Model</strong>, then click <strong>Save</strong>.</li>
+</ol>
+
+<p>Default values match a standard Ollama install:</p>
+
+<table>
+<tr><th>Setting</th><th>Default</th><th>Meaning</th></tr>
+<tr><td><strong>Base URL</strong></td><td><code>http://localhost:11434</code></td><td>Ollama server address</td></tr>
+<tr><td><strong>Model</strong></td><td><code>llama3</code></td><td>Model name (must exist in <code>ollama list</code>)</td></tr>
+<tr><td><strong>Timeout</strong></td><td>600 s</td><td>Maximum wait for long summaries</td></tr>
+</table>
+
+<p>If AI buttons fail with a connection error, Ollama is usually not running, the model name is wrong, or a firewall is blocking localhost.</p>
+
+<p>You may point <strong>Base URL</strong> at another <strong>Ollama-compatible</strong> <code>/api/generate</code> endpoint if your organisation hosts models internally — but only do so if you accept where case context will be sent.</p>
+
+<h3 id="limits-and-good-practice">Limits and good practice</h3>
+
+<p>AI output is <strong>explanatory only</strong>. Models can misread sparse data, over-interpret encrypted traffic, or sound confident when the evidence is weak.</p>
+
+<ul>
+<li>Verify every claim against the flows, tables, charts, and PCAP metadata in the app.</li>
+<li>Do <strong>not</strong> treat AI text as legal proof, expert testimony, or decrypted message content.</li>
+<li>Record your own professional conclusions in <strong>Findings</strong> and <strong>Notes</strong>.</li>
+<li>AI does not replace OSINT lookups, exports, or reading the underlying records.</li>
+</ul>
+
+<p>See also <strong>Settings → AI</strong> and section <strong>19. Limitations and good practice</strong>.</p>
 
 <hr>
 
@@ -590,7 +692,7 @@ a:hover { text-decoration: underline; }
 
 <ul>
 <li><strong>Save</strong>, <strong>Reload</strong></li>
-<li><strong>AI</strong> — Base URL, Model, Timeout</li>
+<li><strong>AI</strong> — <strong>Base URL</strong>, <strong>Model</strong>, <strong>Timeout</strong> for the local <strong>Ollama</strong> server (defaults: <code>http://localhost:11434</code>, <code>llama3</code>). See section <strong>12. AI output</strong> for setup and usage.</li>
 <li><strong>Appearance</strong> — Dark / Light theme</li>
 <li><strong>OSINT</strong> — VirusTotal and Shodan API keys</li>
 <li><strong>IMEI TAC database</strong> — <strong>Import TAC CSV…</strong></li>
@@ -658,17 +760,74 @@ a:hover { text-decoration: underline; }
 
 <h2 id="20-glossary">20. Glossary</h2>
 
+<p>Alphabetical list of abbreviations and technical terms you may see in ViaNyquist screens, exports, and reports. Each entry gives the full meaning and how it appears in the application.</p>
+
+<h3 id="abbreviations-a-z">Abbreviations (A–Z)</h3>
+
 <table>
 <tr><th>Term</th><th>Meaning</th></tr>
-<tr><td><strong>Flow</strong></td><td>Communication record between source and destination</td></tr>
-<tr><td><strong>JSON dataset</strong></td><td>Indexed network flow export (by calendar day)</td></tr>
-<tr><td><strong>PCAP</strong></td><td>Packet capture file</td></tr>
-<tr><td><strong>Finding</strong></td><td>Investigator-marked important item</td></tr>
-<tr><td><strong>SNI</strong></td><td>TLS server name indicator (visible hostname hint)</td></tr>
-<tr><td><strong>MSISDN</strong></td><td>Mobile subscriber number</td></tr>
-<tr><td><strong>IMSI</strong></td><td>SIM identifier</td></tr>
-<tr><td><strong>IMEI</strong></td><td>Device identifier</td></tr>
-<tr><td><strong>Activity Profile</strong></td><td>Cross-evidence summary for the project</td></tr>
+<tr><td><strong>AH</strong></td><td><strong>Authentication Header</strong> — IPsec protocol that authenticates IP packets. Shown as a protocol label on flows; it indicates protected traffic, not the application in use.</td></tr>
+<tr><td><strong>AI</strong></td><td><strong>Artificial Intelligence</strong> — Optional assistant for <strong>Summary</strong> (overview of a dataset, PCAP, or profile) and <strong>Explain</strong> (one flow or finding). Runs locally via <strong>Ollama</strong> by default; configured under <strong>Settings → AI</strong>. Guidance only — not evidence.</td></tr>
+<tr><td><strong>API</strong></td><td><strong>Application Programming Interface</strong> — Online service access keys used in <strong>Settings → OSINT</strong> (VirusTotal, Shodan) and the AI <strong>Base URL</strong> for the local model server.</td></tr>
+<tr><td><strong>CSV</strong></td><td><strong>Comma-Separated Values</strong> — Spreadsheet-friendly export format. Available on Listing, Explore flow tables, Registry, PCAP tables, and expand-table dialogs.</td></tr>
+<tr><td><strong>DNS</strong></td><td><strong>Domain Name System</strong> — Maps host names to IP addresses. Shown in JSON flows, PCAP <strong>Evidence</strong>, and metadata summaries (DNS queries).</td></tr>
+<tr><td><strong>ESP</strong></td><td><strong>Encapsulating Security Payload</strong> — IPsec protocol that encrypts IP payloads. Listed as a protocol on flows when VPN/tunnel-style traffic is present.</td></tr>
+<tr><td><strong>GeoIP</strong></td><td><strong>Geographic IP lookup</strong> — Estimates country/region for a public IP. Available from <strong>OSINT</strong> online lookup buttons.</td></tr>
+<tr><td><strong>GRE</strong></td><td><strong>Generic Routing Encapsulation</strong> — Tunneling protocol that carries one protocol inside another. May appear in the <strong>Protocol</strong> column of flow data.</td></tr>
+<tr><td><strong>HTML</strong></td><td><strong>HyperText Markup Language</strong> — Rich report format for exports (Listing, Registry, PCAP, Profile) and the built-in user manual opened by <strong>Help</strong>.</td></tr>
+<tr><td><strong>HTTP</strong></td><td><strong>HyperText Transfer Protocol</strong> — Cleartext web traffic. ViaNyquist can show HTTP host names, headers, and sample payloads in PCAP when encryption is not used.</td></tr>
+<tr><td><strong>HTTPS</strong></td><td><strong>HyperText Transfer Protocol Secure</strong> — HTTP encrypted with TLS. Message content is not visible; only metadata (IPs, ports, timing, TLS SNI) is shown.</td></tr>
+<tr><td><strong>ICMP</strong></td><td><strong>Internet Control Message Protocol</strong> — Network diagnostic and control messages (for example reachability checks). Appears in protocol statistics and PCAP overviews.</td></tr>
+<tr><td><strong>ICMPv6</strong></td><td><strong>Internet Control Message Protocol version 6</strong> — IPv6 equivalent of ICMP for diagnostics and neighbour discovery.</td></tr>
+<tr><td><strong>ID</strong></td><td><strong>Identifier</strong> — Internal record number for a flow row, finding, or dataset entry in tables and exports.</td></tr>
+<tr><td><strong>IGMP</strong></td><td><strong>Internet Group Management Protocol</strong> — Multicast group membership signalling. May appear as a rare protocol label in flow data.</td></tr>
+<tr><td><strong>IMEI</strong></td><td><strong>International Mobile Equipment Identity</strong> — Unique mobile device number (15 digits). Entered in the project dialog; used for case context and OSINT pivots.</td></tr>
+<tr><td><strong>IMSI</strong></td><td><strong>International Mobile Subscriber Identity</strong> — SIM card identifier (up to 15 digits). Stored per project subject and shown in case summaries.</td></tr>
+<tr><td><strong>IP</strong></td><td><strong>Internet Protocol</strong> — Network addresses (<strong>Source IP</strong>, <strong>Destination IP</strong>, <strong>Device IP</strong>) that identify endpoints in JSON flows and PCAP analysis.</td></tr>
+<tr><td><strong>IPsec</strong></td><td><strong>Internet Protocol Security</strong> — Suite of protocols (ESP, AH) for encrypting or authenticating IP traffic. ViaNyquist shows protocol labels, not decrypted content.</td></tr>
+<tr><td><strong>IPv4</strong></td><td><strong>Internet Protocol version 4</strong> — Classic dotted-decimal addresses (for example <code>192.0.2.1</code>). Used throughout Explore, Listing, and PCAP views.</td></tr>
+<tr><td><strong>IPv6</strong></td><td><strong>Internet Protocol version 6</strong> — Longer hexadecimal addresses for modern networks. Handled the same way as IPv4 in tables and exports.</td></tr>
+<tr><td><strong>JSON</strong></td><td><strong>JavaScript Object Notation</strong> — Text file format for imported <strong>flow datasets</strong>, indexed by calendar day per project. Loaded in <strong>JSON → Explore / Registry / Listing</strong>.</td></tr>
+<tr><td><strong>LIID</strong></td><td><strong>Lawful Interception ID</strong> — Reference identifier from intercept/case metadata in some operator exports. Shown on the Registry header when present in the dataset.</td></tr>
+<tr><td><strong>LLMNR</strong></td><td><strong>Link-Local Multicast Name Resolution</strong> — Windows-style local name lookup on the LAN. PCAP may list LLMNR queries alongside mDNS.</td></tr>
+<tr><td><strong>MAC</strong></td><td><strong>Media Access Control address</strong> — Hardware address of a network interface (<code>Source MAC</code>, <code>Destination MAC</code> in Listing and Registry).</td></tr>
+<tr><td><strong>mDNS</strong></td><td><strong>multicast DNS</strong> — Local network name resolution (often <code>.local</code> hosts). Detected in PCAP artefacts and metadata counters.</td></tr>
+<tr><td><strong>MSISDN</strong></td><td><strong>Mobile Station International Subscriber Directory Number</strong> — Subscriber telephone number in international format. Entered as <strong>Mobile / MSISDN</strong> in project settings.</td></tr>
+<tr><td><strong>NBNS</strong></td><td><strong>NetBIOS Name Service</strong> — Legacy Windows name resolution on local networks. PCAP may show NBNS/NetBIOS queries as artefacts.</td></tr>
+<tr><td><strong>NetBIOS</strong></td><td><strong>Network Basic Input/Output System</strong> — Legacy Windows networking layer. Port 137 traffic may be labelled NetBIOS in PCAP hints.</td></tr>
+<tr><td><strong>OIB</strong></td><td><strong>Personal identification number (Osobni identifikacijski broj)</strong> — Croatian 11-digit personal ID with checksum. Validated when entered in the project dialog and Repository search.</td></tr>
+<tr><td><strong>Ollama</strong></td><td><strong>Local AI runtime</strong> — Serves language models on your PC (default <code>http://localhost:11434</code>). ViaNyquist sends structured case context to Ollama’s <code>/api/generate</code> endpoint; install from [ollama.com](https://ollama.com) or via the ViaNyquist installer option.</td></tr>
+<tr><td><strong>OSINT</strong></td><td><strong>Open Source Intelligence</strong> — Module for pivots on identifiers, domains, and IPs using external lookups (WHOIS/RDAP, GeoIP, VirusTotal, Shodan) and the local <strong>Repository</strong>.</td></tr>
+<tr><td><strong>OSPF</strong></td><td><strong>Open Shortest Path First</strong> — Routing protocol used between network devices. Appears only as a protocol label if present in captured traffic.</td></tr>
+<tr><td><strong>OUI</strong></td><td><strong>Organizationally Unique Identifier</strong> — First part of a MAC address identifying the vendor (<code>Source OUI</code>, <code>Destination OUI</code> in Listing).</td></tr>
+<tr><td><strong>PCAP</strong></td><td><strong>Packet Capture</strong> — Binary record of network packets (<code>.pcap</code> / <code>.pcapng</code>). Loaded on the <strong>PCAP</strong> page for metadata, artefacts, and exports.</td></tr>
+<tr><td><strong>QUIC</strong></td><td><strong>Quick UDP Internet Connections</strong> — Modern UDP-based transport used by HTTP/3. Encrypted payload; ViaNyquist shows metadata only (often labelled QUIC/HTTP3).</td></tr>
+<tr><td><strong>RDAP</strong></td><td><strong>Registration Data Access Protocol</strong> — Structured successor to WHOIS for domain and IP registration data. Fetched from <strong>OSINT</strong> via the <strong>RDAP</strong> button.</td></tr>
+<tr><td><strong>SCTP</strong></td><td><strong>Stream Control Transmission Protocol</strong> — Message-oriented transport used by some telecom systems. Shown as a protocol name when present in flows.</td></tr>
+<tr><td><strong>SNI</strong></td><td><strong>Server Name Indication</strong> — Hostname sent during a TLS handshake. Visible even when HTTPS content is encrypted; shown as <strong>TLS SNI</strong> in PCAP and flow fields.</td></tr>
+<tr><td><strong>SSDP</strong></td><td><strong>Simple Service Discovery Protocol</strong> — Local UPnP/device discovery on UDP port 1900. PCAP may list SSDP discovery artefacts.</td></tr>
+<tr><td><strong>TCP</strong></td><td><strong>Transmission Control Protocol</strong> — Reliable connection-oriented transport (IP protocol 6). Common for web, mail, and many apps; paired with port numbers in flow rows.</td></tr>
+<tr><td><strong>TAC</strong></td><td><strong>Type Allocation Code</strong> — First eight digits of an IMEI identifying device make/model. Decoded via the <strong>IMEI TAC database</strong> in Settings (bundled or imported CSV).</td></tr>
+<tr><td><strong>TLS</strong></td><td><strong>Transport Layer Security</strong> — Encrypts HTTPS and many other services. ViaNyquist shows TLS SNI and connection metadata, not decrypted application data.</td></tr>
+<tr><td><strong>UDP</strong></td><td><strong>User Datagram Protocol</strong> — Connectionless transport (IP protocol 17). Used for DNS, QUIC, VoIP-like patterns, and many short exchanges.</td></tr>
+<tr><td><strong>URL</strong></td><td><strong>Uniform Resource Locator</strong> — Web address string. External <strong>OSINT</strong> links open investigation URLs in your browser.</td></tr>
+<tr><td><strong>User-Agent</strong></td><td><strong>HTTP client identifier header</strong> — Names the browser or app in cleartext HTTP. PCAP <strong>Artifacts</strong> may surface User-Agent strings when visible.</td></tr>
+<tr><td><strong>VPN</strong></td><td><strong>Virtual Private Network</strong> — Encrypted tunnel traffic. Often appears as IPsec/GRE or unknown encrypted flows; content is not readable in ViaNyquist.</td></tr>
+<tr><td><strong>WHOIS</strong></td><td><strong>Registration lookup service</strong> — Public domain/IP ownership and contact records. Legacy protocol; ViaNyquist fetches equivalent data via <strong>RDAP</strong>.</td></tr>
+<tr><td><strong>XLSX</strong></td><td><strong>Excel Open XML Spreadsheet</strong> — Microsoft Excel export format (same tables as CSV/HTML exports).</td></tr>
+<tr><td><strong>XMPP</strong></td><td><strong>Extensible Messaging and Presence Protocol</strong> — Chat/messaging protocol. PCAP port hints may label XMPP/messaging traffic heuristically.</td></tr>
+</table>
+
+<h3 id="vianyquist-terms">ViaNyquist terms</h3>
+
+<table>
+<tr><th>Term</th><th>Meaning</th></tr>
+<tr><td><strong>Activity Profile</strong></td><td>Cross-evidence summary for the active project — JSON days, PCAP volume, findings, notes, and behaviour charts on the <strong>Profile</strong> page.</td></tr>
+<tr><td><strong>Finding</strong></td><td>Investigator-marked important flow or item, saved to the project with title, notes, and optional AI explanation.</td></tr>
+<tr><td><strong>Flow</strong></td><td>One communication record between source and destination (IPs, ports, protocol, application, timing, volume). Core unit in <strong>JSON → Explore</strong> and Listing.</td></tr>
+<tr><td><strong>JSON dataset</strong></td><td>Indexed collection of flow JSON files for a project period (by calendar day). Distinct from a single PCAP capture.</td></tr>
+<tr><td><strong>Repository</strong></td><td>Local store of imported leak/breach datasets searched from <strong>OSINT → Repository</strong> (phones, emails, OIB, names, etc.).</td></tr>
+<tr><td><strong>Workspace</strong></td><td>Per-project folder under the parent you choose at creation; holds <code>datasets/</code>, <code>exports/</code>, <code>findings/</code>, <code>notes/</code>, and <code>reports/</code>.</td></tr>
 </table>
 
 <hr>

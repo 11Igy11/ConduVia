@@ -101,6 +101,16 @@ def build_project_activity_profile(
         if json_day_count
         else ("index building…" if readiness["state"] == "building" else "0 flow days")
     )
+    json_metric_lines = [
+        f"{dataset_count:,} files",
+        f"{json_file_day_count:,} indexed days",
+        json_days_label,
+    ]
+    pcap_metric_lines = [
+        f"{pcap_indexed_file_count:,} indexed files",
+        f"{pcap_indexed_day_count:,} indexed days",
+        f"{pcap_day_count:,} saved days",
+    ]
     case_metadata = load_case_metadata(project_id, db_path=db_path)
 
     summary_lines = [
@@ -149,7 +159,8 @@ def build_project_activity_profile(
         "metrics": [
             {
                 "label": "JSON",
-                "value": f"{dataset_count:,} files / {json_file_day_count:,} d / {json_days_label}",
+                "lines": json_metric_lines,
+                "value": " · ".join(json_metric_lines),
                 "detail": (
                     f"{dataset_count:,} JSON files — behavior index building from saved evidence"
                     if index_building
@@ -161,7 +172,8 @@ def build_project_activity_profile(
             },
             {
                 "label": "PCAP",
-                "value": f"{pcap_indexed_file_count:,} indexed / {pcap_day_count:,} saved d",
+                "lines": pcap_metric_lines,
+                "value": " · ".join(pcap_metric_lines),
                 "detail": (
                     f"{pcap_indexed_file_count:,} PCAP files in ingest index · "
                     f"{pcap_indexed_day_count:,} indexed file-days · "

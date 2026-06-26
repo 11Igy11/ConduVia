@@ -512,6 +512,10 @@ class DatasetController(QObject):
         self._defer_import_finalize = False
         self._pending_import_banner_message = ""
         self._clear_import_status()
+        pcap_page = getattr(self.app, "pcap_page", None)
+        if pcap_page is not None and getattr(pcap_page, "_pcap_day_groups_raw", None):
+            pcap_page._update_period_gap_banner(list(pcap_page._pcap_day_groups_raw.keys()))
+            pcap_page._sync_period_gap_visibility()
         self._finalize_import_refresh()
 
     def _process_import_json_phase(self, folder: str, scan, plan: dict) -> str | None:
@@ -962,7 +966,7 @@ class DatasetController(QObject):
         date = QDate.fromString(str(value or ""), "yyyy-MM-dd")
         if not date.isValid():
             return str(value or "")
-        return date.toString("dd/MM/yyyy")
+        return date.toString("dd.MM.yyyy")
 
     def _register_project_evidence_source(self, folder: str, scan, *, defer_workspace_sync: bool = False) -> None:
         """Register imported evidence period on the project (same idea as JSON dataset load)."""

@@ -58,6 +58,13 @@ def export_activity_profile_html(
     path.write_text(html_doc, encoding="utf-8")
 
 
+def _metric_value(metric: dict[str, Any]) -> str:
+    lines = metric.get("lines")
+    if lines:
+        return " · ".join(str(line) for line in lines)
+    return str(metric.get("value") or "-")
+
+
 def _metrics_table(profile: dict[str, Any], text: dict[str, str]) -> str:
     metrics = list(profile.get("metrics") or [])
     metrics.extend([
@@ -67,7 +74,7 @@ def _metrics_table(profile: dict[str, Any], text: dict[str, str]) -> str:
     rows = "".join(
         "<tr>"
         f"<td>{html.escape(_metric_label(str(metric.get('label') or ''), text))}</td>"
-        f"<td>{html.escape(str(metric.get('value') or '-'))}</td>"
+        f"<td>{html.escape(_metric_value(metric))}</td>"
         "</tr>"
         for metric in metrics
     )

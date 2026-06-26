@@ -13,6 +13,8 @@ The name honours **Harry Nyquist** (1889–1976), the Swedish-born engineer whos
 
 Investigators face a similar problem. You rarely see an entire communication live and in full; you work from **captured** flows and packets — samples of activity taken at a point in time. ViaNyquist is built around that reality: helping you reconstruct a clear picture of behaviour from the evidence you have, without pretending the capture is more complete than it is.
 
+The same idea extends to the built-in **AI assistant**. You cannot read tens of thousands of flows line by line; the AI should not pretend it has either. Instead, ViaNyquist builds a **structured context** from what you are already viewing — dataset statistics, a selected flow, a finding, a PCAP summary, or the project profile — and asks the model for help in plain language. **Summary** answers *what stands out in this evidence?* **Explain** answers *what does this one record mean, and what should I check next?* Results appear on the **AI output** page (and inline where you triggered them); you can copy them to **Notes**. By default the assistant runs **locally** through **Ollama**, so case data normally stays on your machine.
+
 ViaNyquist does **not** decrypt traffic. For encrypted sessions it shows metadata only: IP addresses, ports, protocols, DNS queries, TLS server names (SNI), timing, and volume. These are investigative indicators, not proof of message content, identity, or intent.
 
 ---
@@ -252,15 +254,65 @@ Findings are stored per project; set the project **active** first.
 
 ## 12. AI output
 
-Central place for the latest AI text. Context line shows source (JSON, PCAP, Profile, Finding, Flow) and project name.
+The **AI output** page (sidebar) is the central place for the latest generated text. A context line at the top shows the source (JSON dataset, PCAP, Profile, Finding, or Flow) and the active project name.
 
-**Add to Notes** copies the text into project notes.
+### Summary vs Explain
 
-AI is triggered from Explore (**Generate AI Summary**, **Explain with AI**), Findings (**Explain with AI**), PCAP (**AI Summary**), and Profile (**AI Profile Summary**).
+ViaNyquist uses two complementary AI actions. Both send **only a focused context** — not your whole case folder — to the configured model.
 
-**Important:** AI output is explanatory only. Verify claims against the data shown in the app. AI must not be treated as legal or technical proof.
+| Action | Typical buttons | What it is for |
+|--------|-----------------|----------------|
+| **Summary** | **Generate AI Summary**, **AI Summary**, **AI Profile Summary** | Overview after loading evidence: main services, endpoints, timing patterns, and stated limitations of the data. |
+| **Explain** | **Explain with AI** | Interpretation of **one selected flow** or **one finding**: what the metadata suggests and what to verify in the tables. |
 
-Configure **Base URL**, **Model**, and **Timeout** under **Settings → AI** (default: local Ollama-compatible API).
+Use **Summary** when you open a new JSON day, PCAP period, or want a case-wide profile narrative. Use **Explain** when you are looking at a single row and want readable guidance before saving a **Finding** or writing **Notes**.
+
+### Where AI is triggered
+
+| Screen | Buttons | Where results appear |
+|--------|---------|----------------------|
+| **JSON → Explore** | **Generate AI Summary**, **Explain with AI** | Summary/Flows area and **AI output** |
+| **PCAP** | **AI Summary** | **AI Summary** tab and **AI output** |
+| **Findings** | **Explain with AI** | **AI output** |
+| **Profile** | **AI Profile Summary** | **AI output** |
+
+**Add to Notes** / **Add AI to Notes** copies the latest AI text into project notes (rich-text editor).
+
+While a request runs, the UI shows a progress message. Large JSON periods or PCAP captures can take several minutes — the **Timeout** in Settings controls the maximum wait.
+
+### Ollama (local AI)
+
+By default ViaNyquist uses **[Ollama](https://ollama.com)** — a free, local AI runtime for Windows, macOS, and Linux. Ollama serves models on your PC at **`http://localhost:11434`**. Inference does not require the internet once the model is downloaded; your evidence is not uploaded to a cloud AI service unless you change the Base URL yourself.
+
+**Typical first-time setup:**
+
+1. Install Ollama from [ollama.com](https://ollama.com). The ViaNyquist installer can optionally install Ollama and download the **llama3** model during setup.
+2. Make sure Ollama is running (system tray icon, or run `ollama serve` in a terminal).
+3. If needed, pull the model manually: `ollama pull llama3` (or another model name you prefer).
+4. In ViaNyquist, open **Settings → AI**, confirm **Base URL** and **Model**, then click **Save**.
+
+Default values match a standard Ollama install:
+
+| Setting | Default | Meaning |
+|---------|---------|---------|
+| **Base URL** | `http://localhost:11434` | Ollama server address |
+| **Model** | `llama3` | Model name (must exist in `ollama list`) |
+| **Timeout** | 600 s | Maximum wait for long summaries |
+
+If AI buttons fail with a connection error, Ollama is usually not running, the model name is wrong, or a firewall is blocking localhost.
+
+You may point **Base URL** at another **Ollama-compatible** `/api/generate` endpoint if your organisation hosts models internally — but only do so if you accept where case context will be sent.
+
+### Limits and good practice
+
+AI output is **explanatory only**. Models can misread sparse data, over-interpret encrypted traffic, or sound confident when the evidence is weak.
+
+- Verify every claim against the flows, tables, charts, and PCAP metadata in the app.
+- Do **not** treat AI text as legal proof, expert testimony, or decrypted message content.
+- Record your own professional conclusions in **Findings** and **Notes**.
+- AI does not replace OSINT lookups, exports, or reading the underlying records.
+
+See also **Settings → AI** and section **19. Limitations and good practice**.
 
 ---
 
@@ -296,7 +348,7 @@ Activity patterns are indicators only — they do not prove who used a device or
 ## 15. Settings
 
 - **Save**, **Reload**
-- **AI** — Base URL, Model, Timeout
+- **AI** — **Base URL**, **Model**, **Timeout** for the local **Ollama** server (defaults: `http://localhost:11434`, `llama3`). See section **12. AI output** for setup and usage.
 - **Appearance** — Dark / Light theme
 - **OSINT** — VirusTotal and Shodan API keys
 - **IMEI TAC database** — **Import TAC CSV…**
@@ -360,17 +412,73 @@ Each project has a workspace under the chosen parent folder. Typical structure:
 
 ## 20. Glossary
 
+Alphabetical list of abbreviations and technical terms you may see in ViaNyquist screens, exports, and reports. Each entry gives the full meaning and how it appears in the application.
+
+### Abbreviations (A–Z)
+
 | Term | Meaning |
 |------|---------|
-| **Flow** | Communication record between source and destination |
-| **JSON dataset** | Indexed network flow export (by calendar day) |
-| **PCAP** | Packet capture file |
-| **Finding** | Investigator-marked important item |
-| **SNI** | TLS server name indicator (visible hostname hint) |
-| **MSISDN** | Mobile subscriber number |
-| **IMSI** | SIM identifier |
-| **IMEI** | Device identifier |
-| **Activity Profile** | Cross-evidence summary for the project |
+| **AH** | **Authentication Header** — IPsec protocol that authenticates IP packets. Shown as a protocol label on flows; it indicates protected traffic, not the application in use. |
+| **AI** | **Artificial Intelligence** — Optional assistant for **Summary** (overview of a dataset, PCAP, or profile) and **Explain** (one flow or finding). Runs locally via **Ollama** by default; configured under **Settings → AI**. Guidance only — not evidence. |
+| **API** | **Application Programming Interface** — Online service access keys used in **Settings → OSINT** (VirusTotal, Shodan) and the AI **Base URL** for the local model server. |
+| **CSV** | **Comma-Separated Values** — Spreadsheet-friendly export format. Available on Listing, Explore flow tables, Registry, PCAP tables, and expand-table dialogs. |
+| **DNS** | **Domain Name System** — Maps host names to IP addresses. Shown in JSON flows, PCAP **Evidence**, and metadata summaries (DNS queries). |
+| **ESP** | **Encapsulating Security Payload** — IPsec protocol that encrypts IP payloads. Listed as a protocol on flows when VPN/tunnel-style traffic is present. |
+| **GeoIP** | **Geographic IP lookup** — Estimates country/region for a public IP. Available from **OSINT** online lookup buttons. |
+| **GRE** | **Generic Routing Encapsulation** — Tunneling protocol that carries one protocol inside another. May appear in the **Protocol** column of flow data. |
+| **HTML** | **HyperText Markup Language** — Rich report format for exports (Listing, Registry, PCAP, Profile) and the built-in user manual opened by **Help**. |
+| **HTTP** | **HyperText Transfer Protocol** — Cleartext web traffic. ViaNyquist can show HTTP host names, headers, and sample payloads in PCAP when encryption is not used. |
+| **HTTPS** | **HyperText Transfer Protocol Secure** — HTTP encrypted with TLS. Message content is not visible; only metadata (IPs, ports, timing, TLS SNI) is shown. |
+| **ICMP** | **Internet Control Message Protocol** — Network diagnostic and control messages (for example reachability checks). Appears in protocol statistics and PCAP overviews. |
+| **ICMPv6** | **Internet Control Message Protocol version 6** — IPv6 equivalent of ICMP for diagnostics and neighbour discovery. |
+| **ID** | **Identifier** — Internal record number for a flow row, finding, or dataset entry in tables and exports. |
+| **IGMP** | **Internet Group Management Protocol** — Multicast group membership signalling. May appear as a rare protocol label in flow data. |
+| **IMEI** | **International Mobile Equipment Identity** — Unique mobile device number (15 digits). Entered in the project dialog; used for case context and OSINT pivots. |
+| **IMSI** | **International Mobile Subscriber Identity** — SIM card identifier (up to 15 digits). Stored per project subject and shown in case summaries. |
+| **IP** | **Internet Protocol** — Network addresses (**Source IP**, **Destination IP**, **Device IP**) that identify endpoints in JSON flows and PCAP analysis. |
+| **IPsec** | **Internet Protocol Security** — Suite of protocols (ESP, AH) for encrypting or authenticating IP traffic. ViaNyquist shows protocol labels, not decrypted content. |
+| **IPv4** | **Internet Protocol version 4** — Classic dotted-decimal addresses (for example `192.0.2.1`). Used throughout Explore, Listing, and PCAP views. |
+| **IPv6** | **Internet Protocol version 6** — Longer hexadecimal addresses for modern networks. Handled the same way as IPv4 in tables and exports. |
+| **JSON** | **JavaScript Object Notation** — Text file format for imported **flow datasets**, indexed by calendar day per project. Loaded in **JSON → Explore / Registry / Listing**. |
+| **LIID** | **Lawful Interception ID** — Reference identifier from intercept/case metadata in some operator exports. Shown on the Registry header when present in the dataset. |
+| **LLMNR** | **Link-Local Multicast Name Resolution** — Windows-style local name lookup on the LAN. PCAP may list LLMNR queries alongside mDNS. |
+| **MAC** | **Media Access Control address** — Hardware address of a network interface (`Source MAC`, `Destination MAC` in Listing and Registry). |
+| **mDNS** | **multicast DNS** — Local network name resolution (often `.local` hosts). Detected in PCAP artefacts and metadata counters. |
+| **MSISDN** | **Mobile Station International Subscriber Directory Number** — Subscriber telephone number in international format. Entered as **Mobile / MSISDN** in project settings. |
+| **NBNS** | **NetBIOS Name Service** — Legacy Windows name resolution on local networks. PCAP may show NBNS/NetBIOS queries as artefacts. |
+| **NetBIOS** | **Network Basic Input/Output System** — Legacy Windows networking layer. Port 137 traffic may be labelled NetBIOS in PCAP hints. |
+| **OIB** | **Personal identification number (Osobni identifikacijski broj)** — Croatian 11-digit personal ID with checksum. Validated when entered in the project dialog and Repository search. |
+| **Ollama** | **Local AI runtime** — Serves language models on your PC (default `http://localhost:11434`). ViaNyquist sends structured case context to Ollama’s `/api/generate` endpoint; install from [ollama.com](https://ollama.com) or via the ViaNyquist installer option. |
+| **OSINT** | **Open Source Intelligence** — Module for pivots on identifiers, domains, and IPs using external lookups (WHOIS/RDAP, GeoIP, VirusTotal, Shodan) and the local **Repository**. |
+| **OSPF** | **Open Shortest Path First** — Routing protocol used between network devices. Appears only as a protocol label if present in captured traffic. |
+| **OUI** | **Organizationally Unique Identifier** — First part of a MAC address identifying the vendor (`Source OUI`, `Destination OUI` in Listing). |
+| **PCAP** | **Packet Capture** — Binary record of network packets (`.pcap` / `.pcapng`). Loaded on the **PCAP** page for metadata, artefacts, and exports. |
+| **QUIC** | **Quick UDP Internet Connections** — Modern UDP-based transport used by HTTP/3. Encrypted payload; ViaNyquist shows metadata only (often labelled QUIC/HTTP3). |
+| **RDAP** | **Registration Data Access Protocol** — Structured successor to WHOIS for domain and IP registration data. Fetched from **OSINT** via the **RDAP** button. |
+| **SCTP** | **Stream Control Transmission Protocol** — Message-oriented transport used by some telecom systems. Shown as a protocol name when present in flows. |
+| **SNI** | **Server Name Indication** — Hostname sent during a TLS handshake. Visible even when HTTPS content is encrypted; shown as **TLS SNI** in PCAP and flow fields. |
+| **SSDP** | **Simple Service Discovery Protocol** — Local UPnP/device discovery on UDP port 1900. PCAP may list SSDP discovery artefacts. |
+| **TCP** | **Transmission Control Protocol** — Reliable connection-oriented transport (IP protocol 6). Common for web, mail, and many apps; paired with port numbers in flow rows. |
+| **TAC** | **Type Allocation Code** — First eight digits of an IMEI identifying device make/model. Decoded via the **IMEI TAC database** in Settings (bundled or imported CSV). |
+| **TLS** | **Transport Layer Security** — Encrypts HTTPS and many other services. ViaNyquist shows TLS SNI and connection metadata, not decrypted application data. |
+| **UDP** | **User Datagram Protocol** — Connectionless transport (IP protocol 17). Used for DNS, QUIC, VoIP-like patterns, and many short exchanges. |
+| **URL** | **Uniform Resource Locator** — Web address string. External **OSINT** links open investigation URLs in your browser. |
+| **User-Agent** | **HTTP client identifier header** — Names the browser or app in cleartext HTTP. PCAP **Artifacts** may surface User-Agent strings when visible. |
+| **VPN** | **Virtual Private Network** — Encrypted tunnel traffic. Often appears as IPsec/GRE or unknown encrypted flows; content is not readable in ViaNyquist. |
+| **WHOIS** | **Registration lookup service** — Public domain/IP ownership and contact records. Legacy protocol; ViaNyquist fetches equivalent data via **RDAP**. |
+| **XLSX** | **Excel Open XML Spreadsheet** — Microsoft Excel export format (same tables as CSV/HTML exports). |
+| **XMPP** | **Extensible Messaging and Presence Protocol** — Chat/messaging protocol. PCAP port hints may label XMPP/messaging traffic heuristically. |
+
+### ViaNyquist terms
+
+| Term | Meaning |
+|------|---------|
+| **Activity Profile** | Cross-evidence summary for the active project — JSON days, PCAP volume, findings, notes, and behaviour charts on the **Profile** page. |
+| **Finding** | Investigator-marked important flow or item, saved to the project with title, notes, and optional AI explanation. |
+| **Flow** | One communication record between source and destination (IPs, ports, protocol, application, timing, volume). Core unit in **JSON → Explore** and Listing. |
+| **JSON dataset** | Indexed collection of flow JSON files for a project period (by calendar day). Distinct from a single PCAP capture. |
+| **Repository** | Local store of imported leak/breach datasets searched from **OSINT → Repository** (phones, emails, OIB, names, etc.). |
+| **Workspace** | Per-project folder under the parent you choose at creation; holds `datasets/`, `exports/`, `findings/`, `notes/`, and `reports/`. |
 
 ---
 

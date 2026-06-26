@@ -1,4 +1,4 @@
-from PySide6.QtCore import QEvent, QObject, Qt, QDate
+from PySide6.QtCore import QEvent, QObject, Qt, QDate, QSize, QTimer
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QAbstractScrollArea,
@@ -93,7 +93,7 @@ def period_date_edit(value: QDate, minimum: QDate, maximum: QDate) -> QDateEdit:
     """Date picker with a sized calendar popup (matches import evidence dialog)."""
     edit = QDateEdit(value)
     edit.setCalendarPopup(True)
-    edit.setDisplayFormat("dd/MM/yyyy")
+    edit.setDisplayFormat("dd.MM.yyyy")
     edit.setMinimumDate(minimum)
     edit.setMaximumDate(maximum)
     edit.setFixedWidth(220)
@@ -529,7 +529,7 @@ def _dialog_field_group(label_text: str, field: QWidget) -> QWidget:
     host = QWidget()
     host.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Minimum)
     layout = QVBoxLayout(host)
-    layout.setContentsMargins(0, 0, 0, 0)
+    layout.setContentsMargins(0, 0, 0, 6)
     layout.setSpacing(6)
     label = QLabel(label_text)
     label.setObjectName("DialogFieldLabel")
@@ -541,6 +541,7 @@ def _dialog_field_group(label_text: str, field: QWidget) -> QWidget:
 
 def _dialog_line_edit(value: str = "", *, placeholder: str = "") -> QLineEdit:
     edit = QLineEdit()
+    edit.setObjectName("DialogField")
     edit.setText(value)
     edit.setPlaceholderText(placeholder)
     edit.setFixedHeight(DIALOG_FIELD_HEIGHT)
@@ -551,6 +552,7 @@ def _dialog_line_edit(value: str = "", *, placeholder: str = "") -> QLineEdit:
 
 def _dialog_multiline_edit(value: str = "", *, placeholder: str = "", height: int = 72) -> QPlainTextEdit:
     edit = QPlainTextEdit()
+    edit.setObjectName("DialogField")
     edit.setPlainText(value)
     edit.setPlaceholderText(placeholder)
     edit.setFixedHeight(height)
@@ -567,17 +569,36 @@ class _DialogMultiValueEditor(QWidget):
         *,
         initial_values: list[str] | None = None,
         placeholder: str = "",
+        on_layout_changed: Callable[[], None] | None = None,
     ) -> None:
         super().__init__(parent)
         self.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Minimum)
         self._placeholder = placeholder
+        self._on_layout_changed = on_layout_changed
         self._layout = QVBoxLayout(self)
         self._layout.setContentsMargins(0, 0, 0, 0)
-        self._layout.setSpacing(6)
+        self._layout.setSpacing(8)
         self._values = list(initial_values or [""])
         if not self._values:
             self._values = [""]
         self._render()
+
+    def _row_height(self) -> int:
+        return DIALOG_FIELD_HEIGHT
+
+    def _notify_layout_changed(self) -> None:
+        self.updateGeometry()
+        if self._on_layout_changed is not None:
+            self._on_layout_changed()
+
+    def minimumSizeHint(self) -> QSize:
+        rows = max(1, self._layout.count())
+        spacing = self._layout.spacing()
+        height = rows * self._row_height() + max(0, rows - 1) * spacing
+        return QSize(super().minimumSizeHint().width(), height)
+
+    def sizeHint(self) -> QSize:
+        return self.minimumSizeHint()
 
     def _current_values(self) -> list[str]:
         values: list[str] = []
@@ -600,6 +621,8 @@ class _DialogMultiValueEditor(QWidget):
         self._clear_rows()
         for index, value in enumerate(self._values):
             host = QWidget()
+            host.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+            host.setFixedHeight(self._row_height())
             row = QHBoxLayout(host)
             row.setContentsMargins(0, 0, 0, 0)
             row.setSpacing(8)
@@ -609,6 +632,7 @@ class _DialogMultiValueEditor(QWidget):
             if len(self._values) > 1:
                 btn_remove = QPushButton("−")
                 style_inline_picker_button(btn_remove)
+                btn_remove.setFixedSize(self._row_height(), self._row_height())
                 btn_remove.setToolTip("Remove value")
                 btn_remove.clicked.connect(lambda _checked=False, row_index=index: self._remove_at(row_index))
                 row.addWidget(btn_remove)
@@ -616,6 +640,7 @@ class _DialogMultiValueEditor(QWidget):
             if index == len(self._values) - 1:
                 btn_add = QPushButton("+")
                 style_inline_picker_button(btn_add)
+                btn_add.setFixedSize(self._row_height(), self._row_height())
                 btn_add.setToolTip("Add value")
                 btn_add.clicked.connect(self._add_row)
                 row.addWidget(btn_add)
@@ -629,7 +654,7 @@ class _DialogMultiValueEditor(QWidget):
                 if edit is not None:
                     edit.setFocus()
 
-        self.updateGeometry()
+        self._notify_layout_changed()
 
     def _add_row(self) -> None:
         self._values = self._current_values()
@@ -664,20 +689,25 @@ def _prepare_dialog_scroll_content(content: QWidget) -> None:
 
 
 class _DialogScrollSync(QObject):
-    """Keep scroll content width in sync with the dialog without touching deleted C++ objects."""
+    """Keep scroll content sized to its contents; width tracks the viewport."""
 
     def __init__(self, dlg: QDialog, scroll: QScrollArea, content: QWidget) -> None:
         super().__init__(dlg)
         self._scroll = scroll
         self._content = content
         dlg.installEventFilter(self)
+        content.installEventFilter(self)
 
     def eventFilter(self, obj, event) -> bool:
         if not _dialog_scroll_targets_alive(self._scroll, self._content):
             return False
-        if obj is self.parent() and event.type() == QEvent.Type.Resize:
-            self.sync()
+        if event.type() in {QEvent.Type.Resize, QEvent.Type.LayoutRequest}:
+            if obj is self.parent() or obj is self._content:
+                self._schedule_sync()
         return False
+
+    def _schedule_sync(self) -> None:
+        QTimer.singleShot(0, self.sync)
 
     def sync(self) -> None:
         if not _dialog_scroll_targets_alive(self._scroll, self._content):
@@ -692,6 +722,7 @@ class _DialogScrollSync(QObject):
         width = max(viewport.width(), self._content.sizeHint().width())
         height = max(self._content.sizeHint().height(), self._content.minimumSizeHint().height())
         if width > 0 and height > 0:
+            self._content.setMinimumSize(width, height)
             self._content.resize(width, height)
 
 
@@ -747,12 +778,19 @@ def project_details_dialog(
     content_layout.setSpacing(14)
 
     fields: dict[str, QLineEdit | QPlainTextEdit | _DialogMultiValueEditor] = {}
+    scroll_sync_ref: list[_DialogScrollSync | None] = [None]
+
+    def _refresh_dialog_scroll() -> None:
+        sync = scroll_sync_ref[0]
+        if sync is not None:
+            sync.sync()
 
     project_panel, project_layout = _dialog_panel("Project")
     edit_name = _dialog_line_edit(getattr(project, "name", "") or "")
     project_layout.addWidget(_dialog_field_group("Project name", edit_name))
 
     edit_desc = QPlainTextEdit()
+    edit_desc.setObjectName("DialogField")
     edit_desc.setPlainText(getattr(project, "description", "") or "")
     edit_desc.setFixedHeight(96)
     edit_desc.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
@@ -768,6 +806,7 @@ def project_details_dialog(
     workspace_row.addWidget(edit_parent, 1)
     workspace_row.addWidget(btn_browse, 0, Qt.AlignVCenter)
     workspace_host = QWidget()
+    workspace_host.setFixedHeight(DIALOG_FIELD_HEIGHT)
     workspace_host.setLayout(workspace_row)
     project_layout.addWidget(_dialog_field_group("Workspace parent", workspace_host))
     content_layout.addWidget(project_panel)
@@ -780,7 +819,7 @@ def project_details_dialog(
     ]
     grid = QGridLayout()
     grid.setHorizontalSpacing(14)
-    grid.setVerticalSpacing(10)
+    grid.setVerticalSpacing(12)
     for index, (key, label, attr) in enumerate(identifier_specs):
         edit = _dialog_line_edit(getattr(project, attr or key, "") or "")
         fields[key] = edit
@@ -795,7 +834,11 @@ def project_details_dialog(
     ]
     for key, label, attr, kind in multi_identifier_specs:
         initial = identifier_values_for_editor(getattr(project, attr or key, "") or "", kind=kind)
-        editor = _DialogMultiValueEditor(initial_values=initial, placeholder=f"Enter {kind}")
+        editor = _DialogMultiValueEditor(
+            initial_values=initial,
+            placeholder=f"Enter {kind}",
+            on_layout_changed=_refresh_dialog_scroll,
+        )
         fields[key] = editor
         subject_layout.addWidget(_dialog_field_group(label, editor))
 
@@ -839,8 +882,10 @@ def project_details_dialog(
         row = QHBoxLayout()
         row.setSpacing(8)
         edit = QLineEdit()
+        edit.setObjectName("DialogField")
         edit.setText(initial)
         edit.setPlaceholderText(placeholder)
+        edit.setMinimumHeight(DIALOG_FIELD_HEIGHT)
         edit.setFixedHeight(DIALOG_FIELD_HEIGHT)
         fields[key] = edit
         btn_pick = QPushButton(f"… ({len(values)})" if values else "…")
@@ -878,12 +923,14 @@ def project_details_dialog(
     )
 
     edit_valid_from = QLineEdit()
+    edit_valid_from.setObjectName("DialogField")
     edit_valid_from.setPlaceholderText("Order valid from")
     edit_valid_from.setFixedHeight(DIALOG_FIELD_HEIGHT)
     edit_valid_from.setText(format_order_datetime(merged_bt, missing=""))
     fields["order_validity_bt"] = edit_valid_from
 
     edit_valid_to = QLineEdit()
+    edit_valid_to.setObjectName("DialogField")
     edit_valid_to.setPlaceholderText("Order valid to")
     edit_valid_to.setFixedHeight(DIALOG_FIELD_HEIGHT)
     edit_valid_to.setText(format_order_datetime(merged_et, missing=""))
@@ -925,6 +972,8 @@ def project_details_dialog(
     content_layout.addWidget(metadata_panel)
 
     scroll_sync = _install_dialog_scroll(scroll, content, dlg)
+    scroll_sync_ref[0] = scroll_sync
+    scroll_sync.sync()
     scroll.setMinimumHeight(480)
     layout.addWidget(scroll, 1)
 
