@@ -5,6 +5,11 @@ from typing import Any
 from core.evidence_policy import format_period_day_label
 from core.formatters import human_bytes
 
+PERIOD_COMPARISON_CHART_FOOTER = (
+    "Bar height uses the larger daily volume (bytes). "
+    "JSON flow counts and PCAP packet counts are different units and are shown separately."
+)
+
 
 def build_period_comparison_rows(
     json_day_rows: list[dict[str, Any]] | None,
@@ -30,8 +35,10 @@ def build_period_comparison_rows(
         pcap_packets = int(pcap_row.get("count") or 0)
         json_bytes = int(json_row.get("bytes") or 0)
         pcap_bytes = int(pcap_row.get("bytes") or 0)
-        delta_pct = _volume_delta_pct(json_bytes, pcap_bytes)
+        delta_pct = volume_delta_pct(json_bytes, pcap_bytes)
         chart_volume = max(json_bytes, pcap_bytes)
+        json_volume_label = human_bytes(json_bytes, precision=2)
+        pcap_volume_label = human_bytes(pcap_bytes, precision=2)
         rows.append({
             "label": format_period_day_label(day),
             "date": day,
@@ -40,26 +47,42 @@ def build_period_comparison_rows(
             "pcap_packets": pcap_packets,
             "json_bytes": json_bytes,
             "pcap_bytes": pcap_bytes,
-            "json_mb_label": human_bytes(json_bytes, precision=2),
-            "pcap_mb_label": human_bytes(pcap_bytes, precision=2),
+            "json_flows_label": f"{json_flows:,}",
+            "json_volume_label": json_volume_label,
+            "pcap_packets_label": f"{pcap_packets:,}",
+            "pcap_volume_label": pcap_volume_label,
+            "json_mb_label": json_volume_label,
+            "pcap_mb_label": pcap_volume_label,
+            "volume_compare_label": f"JSON {json_volume_label} · PCAP {pcap_volume_label}",
             "delta_pct": delta_pct,
+            "delta_vol_label": f"{delta_pct:+.1f}%" if delta_pct is not None else "—",
             "detail": (
-                f"JSON {json_flows:,} flows / {human_bytes(json_bytes, precision=2)} | "
-                f"PCAP {pcap_packets:,} pkt / {human_bytes(pcap_bytes, precision=2)}"
+                f"JSON {json_flows:,} flows / {json_volume_label} | "
+                f"PCAP {pcap_packets:,} pkt / {pcap_volume_label}"
                 + (f" | Δvol {delta_pct:+.1f}%" if delta_pct is not None else "")
             ),
-            "status": _comparison_status(json_flows, pcap_packets, json_bytes, pcap_bytes, delta_pct),
+            "tooltip": (
+                f"{format_period_day_label(day)}\n"
+                f"JSON: {json_flows:,} flows, {json_volume_label}\n"
+                f"PCAP: {pcap_packets:,} packets, {pcap_volume_label}\n"
+                + (
+                    f"Volume delta (PCAP vs JSON): {delta_pct:+.1f}%"
+                    if delta_pct is not None
+                    else "Volume delta: not available (missing bytes on one side)"
+                )
+            ),
+            "status": comparison_status(json_flows, pcap_packets, json_bytes, pcap_bytes, delta_pct),
         })
     return rows
 
 
-def _volume_delta_pct(json_bytes: int, pcap_bytes: int) -> float | None:
+def volume_delta_pct(json_bytes: int, pcap_bytes: int) -> float | None:
     if json_bytes <= 0 or pcap_bytes <= 0:
         return None
     return round(((pcap_bytes - json_bytes) / json_bytes) * 100.0, 1)
 
 
-def _comparison_status(
+def comparison_status(
     json_flows: int,
     pcap_packets: int,
     json_bytes: int,
@@ -77,3 +100,8 @@ def _comparison_status(
     if pcap_packets and not json_flows:
         return "PCAP only"
     return "No data"
+
+
+# Backwards-compatible aliases for internal callers/tests.
+_volume_delta_pct = volume_delta_pct
+_comparison_status = comparison_status

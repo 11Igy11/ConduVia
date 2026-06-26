@@ -23,6 +23,7 @@ from core.analysis_limits import (
     PROFILE_CHART_PREVIEW_ROWS,
 )
 from core.behavior_profile import build_flow_behavior_profile
+from core.period_comparison import PERIOD_COMPARISON_CHART_FOOTER
 from core.limit_notices import profile_skipped_json_notice
 from core.db import get_project, get_project_behavior_profile
 from core.exporters.profile_exporter import export_activity_profile_html
@@ -323,9 +324,9 @@ class ActivityProfilePage(QWidget):
             max_rows=PROFILE_CHART_PREVIEW_ROWS,
         )
         self.period_compare_chart = BarChartWidget(
-            "JSON vs PCAP by day (top by volume)",
+            "JSON vs PCAP by day (volume)",
             value_key="count",
-            value_label_key="detail",
+            value_label_key="volume_compare_label",
             label_width=110,
             max_rows=PROFILE_CHART_PREVIEW_ROWS,
             stacked_labels=True,
@@ -786,6 +787,7 @@ class ActivityProfilePage(QWidget):
         self.period_compare_chart.set_rows(
             _top_volume_day_rows(profile.get("period_comparison_rows") or []),
             empty_text="Load JSON and save PCAP periods to compare daily volume.",
+            footer_text=PERIOD_COMPARISON_CHART_FOOTER if profile.get("period_comparison_rows") else "",
         )
         self._update_profile_expand_buttons(profile)
 
@@ -953,11 +955,12 @@ class ActivityProfilePage(QWidget):
         if key == "period_comparison_rows":
             columns = [
                 ("label", "Day"),
-                ("json_mb_label", "JSON"),
-                ("pcap_mb_label", "PCAP"),
-                ("delta_pct", "Δ vol %"),
+                ("json_flows_label", "JSON flows"),
+                ("json_volume_label", "JSON volume"),
+                ("pcap_packets_label", "PCAP packets"),
+                ("pcap_volume_label", "PCAP volume"),
+                ("delta_vol_label", "Δ vol %"),
                 ("status", "Status"),
-                ("detail", "Detail"),
             ]
         elif key == "pcap_day_rows":
             columns = [("label", "Day"), ("count", "Packets"), ("bytes_label", "Volume"), ("detail", "Detail")]
