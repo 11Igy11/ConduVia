@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from core.evidence_policy import format_period_day_label, period_group_label
+from core.evidence_policy import format_period_day_label
 from core.formatters import human_bytes
 from core.pcap_analyzer import PcapSummary, build_investigator_view
 from core.pcap_period import _iso_day_from_path, resolve_period_day
@@ -13,7 +13,7 @@ from core.period_gaps import (
     normalize_period_day,
     summarize_partial_months,
 )
-from core.period_groups import is_range_period_key, month_key
+from core.period_groups import is_range_period_key, month_key, period_group_label
 from core.period_selector import (
     PeriodSelectorState,
     build_period_combo_entries,
