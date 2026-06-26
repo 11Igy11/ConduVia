@@ -83,6 +83,7 @@ from core.pcap_analyzer import (
     build_investigator_view,
     merge_pcap_summaries,
 )
+from core.pcap_batch import batch_progress_ui_interval, format_batch_status_text
 from core.pcap_period import aggregate_hash_for_paths, capture_span_note, resolve_period_day, _iso_day_from_path
 from core.protocols import format_ip_proto
 from core.workspace import workspace_export_path
@@ -105,6 +106,7 @@ from ui.explore_widgets import AITextWorker, CopyableTableView
 from ui.font_utils import apply_named_style, refresh_widget_style
 from ui.thread_utils import stop_qthread
 from ui.worker_runner import WorkerRunner
+from ui.pcap_batch_runner import PcapBatchRunner
 from ui.workers.pcap_workers import PcapBatchWorker, PcapWorker
 
 
@@ -146,10 +148,7 @@ class PcapPage(QWidget):
         self.summary: PcapSummary | None = None
         self._thread: QThread | None = None
         self._worker: PcapWorker | None = None
-        self._batch_thread: QThread | None = None
-        self._batch_worker: PcapBatchWorker | None = None
-        self._ai_runner = WorkerRunner(self._thread_parent())
-        self._saved_source_id: int | None = None
+        self._batch_runner = PcapBatchRunner(self._thread_parent())
         self._pcap_queue: list[str] = []
         self._pcap_queue_auto_save = False
         self._pcap_queue_auto_process = False
@@ -160,7 +159,8 @@ class PcapPage(QWidget):
         self._pcap_batch_last_ui_ts = 0.0
         self._batch_finish_guard = False
         self._project_batch_refresh_running = False
-        self._batch_faulthandler_cancel = None
+        self._ai_runner = WorkerRunner(self._thread_parent())
+        self._saved_source_id: int | None = None
         self._pcap_day_groups_raw: dict[str, list[str]] = {}
         self._pcap_day_groups: dict[str, list[str]] = {}
         self._pcap_period_granularity = "day"
@@ -1154,7 +1154,7 @@ class PcapPage(QWidget):
         return f"{self._format_pcap_time(start)} - {self._format_pcap_time(end)}"
 
     def open_pcap_dialog(self):
-        if self._pcap_queue and self._thread is None and self._batch_thread is None:
+        if self._pcap_queue and self._thread is None and not self._batch_runner.is_running():
             self._load_next_queued_pcap()
             return
 
@@ -1287,7 +1287,7 @@ class PcapPage(QWidget):
         return dict(sorted(daily.items(), key=lambda pair: (pair[0] == "undated", pair[0]), reverse=True))
 
     def _start_auto_pcap_batch(self, paths: list[str], *, auto_save: bool) -> None:
-        if self._thread is not None or self._batch_thread is not None:
+        if self._thread is not None or self._batch_runner.is_running():
             self._info("PCAP", "PCAP analysis is already running.")
             return
 
@@ -1322,23 +1322,20 @@ class PcapPage(QWidget):
         self._set_stats_style("PcapLoadingStatus")
         self._update_batch_status()
         self._show_period_load_progress(paths, label="Auto analyzing PCAP batch...", total=batch_total)
-        self._start_batch_faulthandler_watch()
 
-        self._batch_thread = QThread(self._thread_parent())
-        self._batch_worker = PcapBatchWorker(
+        worker = PcapBatchWorker(
             paths,
             project_id=project_id,
             auto_save=auto_save,
             day_groups=batch_day_groups or None,
         )
-        self._batch_worker.moveToThread(self._batch_thread)
-        self._batch_thread.started.connect(self._batch_worker.run)
-        self._batch_worker.progress.connect(self._on_batch_progress, Qt.QueuedConnection)
-        self._batch_worker.finished.connect(self._on_batch_finished, Qt.QueuedConnection)
-        self._batch_worker.finished.connect(self._batch_thread.quit)
-        self._batch_worker.finished.connect(self._batch_worker.deleteLater)
-        self._batch_thread.finished.connect(self._cleanup_batch_thread)
-        self._batch_thread.start()
+        self._batch_runner.start(
+            worker,
+            thread_parent=self._thread_parent(),
+            progress_slot=self._on_batch_progress,
+            finished_slot=self._on_batch_finished,
+            cleanup_slot=self._cleanup_batch_thread,
+        )
 
     def _load_next_queued_pcap(self) -> None:
         if not self._pcap_queue:
@@ -1575,7 +1572,7 @@ class PcapPage(QWidget):
         elif self._pcap_period_granularity == "range":
             self._pcap_period_range_start = ""
             self._pcap_period_range_end = ""
-        if self._thread is not None or self._batch_thread is not None:
+        if self._thread is not None or self._batch_runner.is_running():
             self.cmb_pcap_period_mode.blockSignals(True)
             revert_index = self.cmb_pcap_period_mode.findData(self._pcap_period_granularity or "day")
             if revert_index >= 0:
@@ -1594,7 +1591,7 @@ class PcapPage(QWidget):
         project_id = self._current_project_id()
         if project_id is None:
             return
-        if self._pcap_day_groups_raw or self._thread is not None or self._batch_thread is not None:
+        if self._pcap_day_groups_raw or self._thread is not None or self._batch_runner.is_running():
             return
         controller = getattr(self.app, "dataset_controller", None)
         if controller is not None:
@@ -1606,7 +1603,7 @@ class PcapPage(QWidget):
         batch_processed = int(getattr(self, "_pcap_batch_processed", 0) or 0)
         queue = list(getattr(self, "_pcap_queue", None) or [])
         has_batch = bool(queue) or (
-            batch_total > 0 and (batch_processed < batch_total or self._batch_thread is not None)
+            batch_total > 0 and (batch_processed < batch_total or self._batch_runner.is_running())
         )
         sync_period_selector_panel(
             has_periods=has_periods,
@@ -1626,7 +1623,7 @@ class PcapPage(QWidget):
     def load_active_period(self, *, prefer_saved: bool = False) -> None:
         if not self._pcap_day_groups:
             return
-        if self._thread is not None or self._batch_thread is not None:
+        if self._thread is not None or self._batch_runner.is_running():
             return
         day = str(self._pcap_active_day or self.cmb_pcap_day.currentData() or "")
         if not day:
@@ -1640,7 +1637,7 @@ class PcapPage(QWidget):
             self._try_load_saved_pcap_period(day)
 
     def refresh_current_view(self) -> None:
-        if self._thread is not None or self._batch_thread is not None:
+        if self._thread is not None or self._batch_runner.is_running():
             return
         if self.summary:
             self._render_loaded_summary(self.summary)
@@ -1651,8 +1648,8 @@ class PcapPage(QWidget):
 
     def clear_project_view(self) -> None:
         """Reset PCAP page when project/dataset context is cleared."""
-        if self._batch_worker is not None:
-            self._batch_worker.request_stop()
+        if self._batch_runner.worker is not None:
+            self._batch_runner.request_stop()
         self._pcap_queue = []
         self._pcap_queue_auto_save = False
         self._pcap_queue_auto_process = False
@@ -1868,7 +1865,7 @@ class PcapPage(QWidget):
     def _on_pcap_day_changed(self, index: int) -> None:
         if index < 0 or not self._pcap_day_groups:
             return
-        if self._thread is not None or self._batch_thread is not None:
+        if self._thread is not None or self._batch_runner.is_running():
             return
         day = str(self.cmb_pcap_day.itemData(index) or "")
         if not day:
@@ -2028,7 +2025,7 @@ class PcapPage(QWidget):
         self._worker.finished.connect(self._worker.deleteLater)
         self._worker.error.connect(self._worker.deleteLater)
         self._thread.finished.connect(self._cleanup_thread)
-        self._start_batch_faulthandler_watch()
+        self._batch_runner.start_crash_watch()
         self._thread.start()
 
     def _on_loaded(self, summary: PcapSummary):
@@ -2108,14 +2105,14 @@ class PcapPage(QWidget):
     def _update_reanalyze_button_state(self) -> None:
         if not hasattr(self, "btn_reanalyze_period"):
             return
-        busy = self._thread is not None or self._batch_thread is not None
+        busy = self._thread is not None or self._batch_runner.is_running()
         day = str(self._pcap_active_day or self.cmb_pcap_day.currentData() or "")
         has_day_paths = bool(self._pcap_day_groups.get(day, [])) if day else bool(self._pcap_day_groups)
         has_summary = bool(getattr(self, "summary", None))
         self.btn_reanalyze_period.setEnabled(not busy and (has_day_paths or has_summary))
 
     def reanalyze_current_period(self) -> None:
-        if self._thread is not None or self._batch_thread is not None:
+        if self._thread is not None or self._batch_runner.is_running():
             self._info("PCAP", "PCAP analysis is already running.")
             return
 
@@ -2141,7 +2138,7 @@ class PcapPage(QWidget):
             self._start_period_reanalyze(paths, day=day, label=label)
 
     def _start_period_reanalyze(self, paths: list[str], *, day: str = "", label: str = "") -> None:
-        if self._thread is not None or self._batch_thread is not None:
+        if self._thread is not None or self._batch_runner.is_running():
             self._info("PCAP", "PCAP analysis is already running.")
             return
 
@@ -2181,24 +2178,21 @@ class PcapPage(QWidget):
             label=period_label,
             total=len(clean_paths),
         )
-        self._start_batch_faulthandler_watch()
 
         day_groups = {day: clean_paths} if day else None
-        self._batch_thread = QThread(self._thread_parent())
-        self._batch_worker = PcapBatchWorker(
+        worker = PcapBatchWorker(
             clean_paths,
             project_id=None,
             auto_save=False,
             day_groups=day_groups,
         )
-        self._batch_worker.moveToThread(self._batch_thread)
-        self._batch_thread.started.connect(self._batch_worker.run)
-        self._batch_worker.progress.connect(self._on_batch_progress, Qt.QueuedConnection)
-        self._batch_worker.finished.connect(self._on_batch_finished, Qt.QueuedConnection)
-        self._batch_worker.finished.connect(self._batch_thread.quit)
-        self._batch_worker.finished.connect(self._batch_worker.deleteLater)
-        self._batch_thread.finished.connect(self._cleanup_batch_thread)
-        self._batch_thread.start()
+        self._batch_runner.start(
+            worker,
+            thread_parent=self._thread_parent(),
+            progress_slot=self._on_batch_progress,
+            finished_slot=self._on_batch_finished,
+            cleanup_slot=self._cleanup_batch_thread,
+        )
 
     def _export_full_metadata(self, kind: str) -> None:
         if not getattr(self, "summary", None):
@@ -2668,16 +2662,6 @@ class PcapPage(QWidget):
             self._mark_current_ingest("failed", message)
         self._update_batch_status(error_text=message)
 
-    def _batch_progress_ui_interval(self, total: int) -> float:
-        count = max(0, int(total or 0))
-        if count >= 1000:
-            return 1.0
-        if count >= 200:
-            return 0.5
-        if count >= 50:
-            return 0.25
-        return 0.15
-
     def _on_batch_progress(self, processed: int, total: int, failed: int, current_file: str) -> None:
         self._pcap_batch_processed = processed
         self._pcap_batch_total = total
@@ -2685,7 +2669,7 @@ class PcapPage(QWidget):
         if current_file:
             self._pcap_batch_current_label = current_file
         now = time.monotonic()
-        interval = self._batch_progress_ui_interval(total)
+        interval = batch_progress_ui_interval(total)
         if (
             processed <= 1
             or processed >= total
@@ -2799,7 +2783,7 @@ class PcapPage(QWidget):
                     pass
 
     def _cleanup_thread(self):
-        self._stop_batch_faulthandler_watch()
+        self._batch_runner.stop_crash_watch()
         self._close_period_load_progress()
         self.btn_open.setEnabled(True)
         self._update_open_button_text()
@@ -2813,38 +2797,7 @@ class PcapPage(QWidget):
         if self._pcap_queue_auto_process and self._pcap_queue:
             QTimer.singleShot(100, self._load_next_queued_pcap)
 
-    def _start_batch_faulthandler_watch(self) -> None:
-        import faulthandler
-
-        from ui.crash_logging import _TeeTextIO, _open_crash_log_handles
-
-        self._stop_batch_faulthandler_watch()
-        try:
-            handles = _open_crash_log_handles()
-            if not handles:
-                return
-            tee = _TeeTextIO(handles)
-            self._batch_faulthandler_cancel = faulthandler.dump_traceback_later(
-                45,
-                repeat=True,
-                file=tee,
-            )
-        except Exception:
-            pass
-
-    def _stop_batch_faulthandler_watch(self) -> None:
-        cancel = getattr(self, "_batch_faulthandler_cancel", None)
-        self._batch_faulthandler_cancel = None
-        if cancel is not None:
-            try:
-                cancel()
-            except Exception:
-                pass
-
-    def _cleanup_batch_thread(self):
-        self._stop_batch_faulthandler_watch()
-        self._batch_worker = None
-        self._batch_thread = None
+    def _cleanup_batch_thread(self) -> None:
         self._update_reanalyze_button_state()
         self._sync_period_selector_panel()
         if self._pcap_day_groups_raw:
@@ -2884,34 +2837,22 @@ class PcapPage(QWidget):
         if not hasattr(self, "batch_status_panel"):
             return
 
-        batch_total = int(self._pcap_batch_total or 0)
-        batch_processed = int(self._pcap_batch_processed or 0)
-        has_batch = bool(self._pcap_queue) or (
-            batch_total > 0 and (batch_processed < batch_total or self._batch_thread is not None)
+        status_text = format_batch_status_text(
+            queue_auto_process=self._pcap_queue_auto_process,
+            batch_running=self._batch_runner.is_running(),
+            queue_length=len(self._pcap_queue),
+            batch_processed=int(self._pcap_batch_processed or 0),
+            batch_total=int(self._pcap_batch_total or 0),
+            batch_failed=int(self._pcap_batch_failed or 0),
+            error_text=error_text,
+            context_day=self._batch_context_label(current_file),
+            hide_individual_names=self._hide_individual_pcap_names(),
         )
-        if not has_batch:
+        if status_text is None:
             self._sync_period_selector_panel()
             return
 
-        if self._pcap_queue_auto_process or self._batch_thread is not None:
-            remaining = max(0, int(self._pcap_batch_total) - int(self._pcap_batch_processed))
-        else:
-            remaining = len(self._pcap_queue)
-        mode = "Auto batch" if self._pcap_queue_auto_process else "Manual queue"
-        if not self._hide_individual_pcap_names():
-            context_day = self._batch_context_label(current_file)
-            if context_day:
-                mode = f"{mode} | {context_day}"
-        parts = [
-            f"{mode}: {self._pcap_batch_processed:,} / {self._pcap_batch_total:,} processed",
-            f"{remaining:,} remaining",
-        ]
-        if self._pcap_batch_failed:
-            parts.append(f"{self._pcap_batch_failed:,} failed")
-        if error_text:
-            parts.append(f"last error: {error_text[:160]}")
-
-        self.lbl_batch_status.setText(" | ".join(parts))
+        self.lbl_batch_status.setText(status_text)
         self._sync_period_selector_panel()
 
     def _mark_current_ingest(self, status: str, message: str = "") -> None:
@@ -3507,13 +3448,9 @@ class PcapPage(QWidget):
             self.app.notes_controller.refresh_activity_ui()
 
     def shutdown_background_tasks(self, wait_ms: int = 5000) -> None:
-        self._stop_batch_faulthandler_watch()
-        if self._batch_worker is not None:
-            self._batch_worker.request_stop()
+        self._batch_runner.stop(wait_ms=wait_ms)
+        self._batch_runner.stop_crash_watch()
         self._ai_runner.stop(wait_ms=wait_ms)
-        for thread_name in ("_thread", "_batch_thread"):
-            thread = getattr(self, thread_name, None)
-            stop_qthread(thread, wait_ms=wait_ms)
-            setattr(self, thread_name, None)
+        stop_qthread(self._thread, wait_ms=wait_ms)
+        self._thread = None
         self._worker = None
-        self._batch_worker = None
