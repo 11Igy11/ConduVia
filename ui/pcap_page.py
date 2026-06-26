@@ -1234,6 +1234,9 @@ class PcapPage(QWidget):
     def _thread_parent(self) -> QObject:
         return self.app if self.app is not None else self
 
+    def batch_is_running(self) -> bool:
+        return self._batch_runner.is_running()
+
     def _raw_daily_day_groups(self) -> dict[str, list[str]]:
         raw = {
             str(day): [str(path) for path in (paths or []) if str(path or "").strip()]

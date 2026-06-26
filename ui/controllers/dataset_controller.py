@@ -170,7 +170,7 @@ class DatasetController(QObject):
         if self.behavior_index_running():
             return True
         pcap_page = getattr(self.app, "pcap_page", None)
-        if pcap_page is not None and getattr(pcap_page, "_batch_thread", None) is not None:
+        if pcap_page is not None and pcap_page.batch_is_running():
             return True
         return False
 
@@ -2196,7 +2196,7 @@ class DatasetController(QObject):
         pcap_page._sync_period_selector_panel()
         pcap_page._update_period_gap_banner(list(by_day.keys()))
         if getattr(pcap_page, "summary", None) is None and hasattr(pcap_page, "lbl_stats"):
-            if pcap_page._batch_thread is not None:
+            if pcap_page.batch_is_running():
                 return
             total_files = sum(len(paths) for paths in by_day.values())
             saved_only = sum(1 for paths in by_day.values() if not paths)
