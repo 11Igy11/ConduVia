@@ -49,11 +49,6 @@ from ui.dataset_header_layout import (
     DATASET_HEADER_MARGINS,
     DATASET_HEADER_SPACING,
     DATASET_PAGE_SPACING,
-    DATASET_PERIOD_ROW_SPACING,
-    DATASET_PERIOD_ROW_TOP_MARGIN,
-    PERIOD_COMBO_DAY_MIN_WIDTH,
-    PERIOD_COMBO_MODE_MIN_WIDTH,
-    PERIOD_CONTROL_HEIGHT,
 )
 from core.formatters import format_duration_compact_ms, format_pcap_datetime, human_bytes
 from core.evidence_policy import format_period_day_label, period_combo_label
@@ -66,11 +61,19 @@ from core.period_gaps import (
 )
 from core.period_groups import is_range_period_key, month_key, period_group_label
 from core.period_selector import (
-    PERIOD_MODE_OPTIONS,
     PeriodSelectorState,
     build_period_combo_entries,
     month_view_available,
     rebuild_period_selector,
+)
+from ui.period_selector_panel import (
+    build_period_selector_row,
+    make_period_day_combo,
+    make_period_label,
+    make_period_mode_combo,
+    make_pick_range_button,
+    sync_period_selector_panel,
+    sync_pick_range_button,
 )
 from core.limit_notices import pcap_flow_cap_notice
 from core.pcap_analyzer import (
@@ -205,23 +208,10 @@ class PcapPage(QWidget):
         self.lbl_stats.setObjectName("HeaderStatLabel")
         self.lbl_stats.setWordWrap(False)
 
-        self.lbl_pcap_day = QLabel("Period:")
-        self.lbl_pcap_day.setObjectName("HeaderStatLabel")
-        self.lbl_pcap_day.setVisible(False)
-        self.cmb_pcap_day = QComboBox()
-        self.cmb_pcap_day.setMinimumWidth(PERIOD_COMBO_DAY_MIN_WIDTH)
-        self.cmb_pcap_day.setObjectName("CompactControl")
-        self.cmb_pcap_day.setFixedHeight(PERIOD_CONTROL_HEIGHT)
-        self.cmb_pcap_day.setVisible(False)
-        self.cmb_pcap_period_mode = QComboBox()
-        self.cmb_pcap_period_mode.setMinimumWidth(PERIOD_COMBO_MODE_MIN_WIDTH)
-        self.cmb_pcap_period_mode.setObjectName("CompactControl")
-        self.cmb_pcap_period_mode.setFixedHeight(PERIOD_CONTROL_HEIGHT)
-        for label, value in PERIOD_MODE_OPTIONS:
-            self.cmb_pcap_period_mode.addItem(label, value)
-        self.cmb_pcap_period_mode.setVisible(False)
-        self.btn_pcap_pick_range = make_action_button("Pick range…")
-        self.btn_pcap_pick_range.hide()
+        self.lbl_pcap_day = make_period_label(header)
+        self.cmb_pcap_day = make_period_day_combo(header)
+        self.cmb_pcap_period_mode = make_period_mode_combo(header)
+        self.btn_pcap_pick_range = make_pick_range_button(header)
         self.btn_reanalyze_period = make_action_button("Re-analyze Period", enabled=False)
         self.btn_reanalyze_period.setToolTip(
             "Re-run PCAP analysis for the selected period from source files."
@@ -233,17 +223,14 @@ class PcapPage(QWidget):
         header_bottom.setContentsMargins(0, 0, 0, 0)
         header_bottom.addWidget(self.lbl_stats, 1)
 
-        self.pcap_period_row = QWidget()
-        pcap_period_layout = QHBoxLayout(self.pcap_period_row)
-        pcap_period_layout.setContentsMargins(0, DATASET_PERIOD_ROW_TOP_MARGIN, 0, 0)
-        pcap_period_layout.setSpacing(DATASET_PERIOD_ROW_SPACING)
-        pcap_period_layout.addWidget(self.lbl_pcap_day)
-        pcap_period_layout.addWidget(self.cmb_pcap_day)
-        pcap_period_layout.addWidget(self.cmb_pcap_period_mode)
-        pcap_period_layout.addWidget(self.btn_pcap_pick_range)
-        pcap_period_layout.addWidget(self.btn_reanalyze_period)
-        pcap_period_layout.addStretch(1)
-        self.pcap_period_row.setVisible(False)
+        self.pcap_period_row = build_period_selector_row(
+            header,
+            period_label=self.lbl_pcap_day,
+            day_combo=self.cmb_pcap_day,
+            mode_combo=self.cmb_pcap_period_mode,
+            pick_range_button=self.btn_pcap_pick_range,
+            trailing_widgets=[self.btn_reanalyze_period],
+        )
 
         self.lbl_pcap_meta = QLabel("")
         self.lbl_pcap_meta.setObjectName("HeaderStatLabel")
@@ -1552,10 +1539,11 @@ class PcapPage(QWidget):
         return True
 
     def _sync_pcap_range_button(self) -> None:
-        if not hasattr(self, "btn_pcap_pick_range"):
-            return
-        visible = self._pcap_period_granularity == "range" and bool(self._pcap_day_groups_raw)
-        self.btn_pcap_pick_range.setVisible(visible)
+        sync_pick_range_button(
+            getattr(self, "btn_pcap_pick_range", None),
+            granularity=self._pcap_period_granularity,
+            has_periods=bool(self._pcap_day_groups_raw),
+        )
 
     def _on_pcap_period_mode_changed(self, index: int) -> None:
         if index < 0:
@@ -1620,18 +1608,18 @@ class PcapPage(QWidget):
         has_batch = bool(queue) or (
             batch_total > 0 and (batch_processed < batch_total or self._batch_thread is not None)
         )
-        if hasattr(self, "lbl_pcap_day"):
-            self.lbl_pcap_day.setVisible(has_periods)
-        if hasattr(self, "cmb_pcap_period_mode"):
-            self.cmb_pcap_period_mode.setVisible(has_periods)
-        if hasattr(self, "cmb_pcap_day"):
-            self.cmb_pcap_day.setVisible(has_periods)
-        if hasattr(self, "btn_pcap_pick_range"):
-            self.btn_pcap_pick_range.setVisible(has_periods and self._pcap_period_granularity == "range")
-        if hasattr(self, "btn_reanalyze_period"):
-            self.btn_reanalyze_period.setVisible(has_periods)
-        if hasattr(self, "pcap_period_row"):
-            self.pcap_period_row.setVisible(has_periods)
+        sync_period_selector_panel(
+            has_periods=has_periods,
+            granularity=self._pcap_period_granularity,
+            period_label=getattr(self, "lbl_pcap_day", None),
+            day_combo=getattr(self, "cmb_pcap_day", None),
+            mode_combo=getattr(self, "cmb_pcap_period_mode", None),
+            pick_range_button=getattr(self, "btn_pcap_pick_range", None),
+            period_row=getattr(self, "pcap_period_row", None),
+            trailing_widgets={
+                self.btn_reanalyze_period: has_periods,
+            } if hasattr(self, "btn_reanalyze_period") else None,
+        )
         if hasattr(self, "batch_status_panel"):
             self.batch_status_panel.setVisible(has_batch)
 

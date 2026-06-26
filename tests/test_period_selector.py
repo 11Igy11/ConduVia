@@ -87,5 +87,13 @@ class PeriodSelectorTests(unittest.TestCase):
         self.assertTrue(month_view_available(full))
 
 
+    def test_pick_range_button_visible_only_in_range_mode(self):
+        from core.period_selector import pick_range_button_visible
+
+        self.assertTrue(pick_range_button_visible(granularity="range", has_periods=True))
+        self.assertFalse(pick_range_button_visible(granularity="day", has_periods=True))
+        self.assertFalse(pick_range_button_visible(granularity="range", has_periods=False))
+
+
 if __name__ == "__main__":
     unittest.main()
