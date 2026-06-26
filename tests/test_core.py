@@ -2144,6 +2144,9 @@ class ProfileComparisonTests(unittest.TestCase):
         self.assertEqual(len(rows), 3)
         self.assertEqual(rows[0]["date"], "2026-01-01")
         self.assertEqual(rows[0]["status"], "Aligned")
+        self.assertEqual(rows[0]["json_flows"], 100)
+        self.assertEqual(rows[0]["pcap_packets"], 95)
+        self.assertEqual(rows[0]["count"], 1_020_000)
         self.assertEqual(rows[1]["status"], "JSON only")
         self.assertEqual(rows[2]["status"], "PCAP only")
 
