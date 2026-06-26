@@ -2229,6 +2229,9 @@ class ProfileComparisonTests(unittest.TestCase):
             )
         self.assertLessEqual(len(acc.flow_map), MAX_PCAP_FLOW_MAP_HARD_CAP)
         self.assertTrue(acc.flows_capped)
+        summary = acc.build_summary(Path("test.pcap"), "PCAP")
+        self.assertTrue(summary.flows_capped)
+        self.assertEqual(summary.flow_map_limit, MAX_PCAP_FLOW_MAP_HARD_CAP)
 
 
 class ProfileReadinessTests(unittest.TestCase):

@@ -1,6 +1,29 @@
 from __future__ import annotations
 
-"""Shared analysis limits. 0 = unlimited (show and store everything)."""
+"""Shared analysis and UI preview limits.
+
+Semantics
+---------
+* **0** on most counters/row limits means *unlimited* for export, tables, and stored output.
+* **Hard caps** (positive constants) still apply during PCAP parsing to avoid OOM; the UI must
+  surface those via ``core.limit_notices`` banners on PCAP / Profile.
+* **Preview caps** (e.g. ``PROFILE_CHART_PREVIEW_ROWS``) only affect embedded charts; expand
+  tables and exports use the full dataset unless another limit applies.
+
+Where limits surface in the UI
+------------------------------
++-------------------------------+--------------------------------+---------------------------+
+| Constant                      | Meaning when 0                 | User-visible when capped  |
++===============================+================================+===========================+
+| MAX_PCAP_FLOWS                | All flows in output            | PCAP header + Summary     |
+| MAX_PCAP_FLOW_MAP_HARD_CAP    | N/A (always 75k safety)        | PCAP header + Summary     |
+| MAX_PCAP_READABLE_SAMPLES     | All readable payload samples   | PCAP Summary limitations  |
+| MAX_BEHAVIOR_INDEX_JSON_FILES | N/A (50k in behavior index)    | Profile limit banner      |
+| MAX_BEHAVIOR_*_ROWS           | Full behavior tables           | Expand table only         |
+| PROFILE_CHART_PREVIEW_ROWS    | N/A (embedded preview = 5)     | Expand table tooltip      |
+| MAX_EVIDENCE_SNAPSHOT_ITEMS   | N/A (50k query cap)            | Internal / OSINT snapshot |
++-------------------------------+--------------------------------+---------------------------+
+"""
 
 # PCAP analysis engine — 0 keeps every flow, sample, and metadata row in output
 MAX_PCAP_FLOWS = 0
@@ -42,6 +65,7 @@ MAX_BEHAVIOR_SERVICE_ROWS = 0
 MAX_BEHAVIOR_DOMAIN_ROWS = 0
 MAX_PROFILE_ACTIVITY_EVENTS = 0
 MAX_PROFILE_TIMELINE_LINES = 0
+MAX_BEHAVIOR_INDEX_JSON_FILES = 50_000
 
 # Evidence queries — single cap for snapshot/index queries (0 = unlimited in slice helpers only)
 MAX_EVIDENCE_SNAPSHOT_ITEMS = 50000

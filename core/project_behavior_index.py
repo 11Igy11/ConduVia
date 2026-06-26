@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Callable
 
 from core.behavior_profile import BehaviorProfileAccumulator
+from core.analysis_limits import MAX_BEHAVIOR_INDEX_JSON_FILES
 from core.db import (
     DEFAULT_DB_PATH,
     get_project_behavior_profile,
@@ -17,7 +18,6 @@ from core.project_datasets import selected_ingest_items_for_source
 
 ProgressCallback = Callable[[int, int, str], None]
 
-MAX_BEHAVIOR_INDEX_JSON_FILES = 50000
 MAX_INGEST_ITEMS_FOR_DATE_RANGE = 50000
 
 def build_project_behavior_index(
