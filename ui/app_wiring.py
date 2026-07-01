@@ -80,6 +80,9 @@ def wire_app_ui(app: App) -> None:
     app.btn_osint_decode_imei.clicked.connect(app.osint_ui_controller.decode_imei)
     app.btn_osint_decode_operator.clicked.connect(app.osint_ui_controller.decode_operator)
     app.btn_osint_notes.clicked.connect(app.osint_ui_controller.add_detail_to_notes)
+    app.btn_osint_export_html.clicked.connect(lambda: app.osint_ui_controller.export_results("html"))
+    app.btn_osint_export_csv.clicked.connect(lambda: app.osint_ui_controller.export_results("csv"))
+    app.btn_osint_export_xlsx.clicked.connect(lambda: app.osint_ui_controller.export_results("xlsx"))
     app.txt_osint_detail.customContextMenuRequested.connect(
         app.osint_ui_controller.show_results_menu
     )

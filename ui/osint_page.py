@@ -163,11 +163,17 @@ def build_osint_page(app: App) -> QWidget:
     actions = QHBoxLayout()
     actions.setSpacing(6)
     app.btn_osint_notes = _btn("Save to Notes")
+    app.btn_osint_export_html = _btn("Export HTML")
+    app.btn_osint_export_csv = _btn("Export CSV")
+    app.btn_osint_export_xlsx = _btn("Export Excel")
     app.btn_osint_history = _btn("History")
     app.btn_osint_flows = _btn("Flows")
     app.btn_osint_pcap = _btn("PCAP")
     for b in (
         app.btn_osint_notes,
+        app.btn_osint_export_html,
+        app.btn_osint_export_csv,
+        app.btn_osint_export_xlsx,
         app.btn_osint_history,
         app.btn_osint_flows,
         app.btn_osint_pcap,

@@ -814,6 +814,66 @@ class OsintUIController(QObject):
         for name, button in mapping.items():
             button.setEnabled(name in allowed and not busy)
 
+    def export_results(self, export_format: str) -> None:
+        from PySide6.QtWidgets import QFileDialog
+
+        from core.db import get_project
+        from core.exporters.osint_exporter import export_osint_results
+        from ui.table_export import table_export_default_path
+
+        text = self.app.txt_osint_detail.toPlainText().strip()
+        if not text:
+            self.app._message_dialog("OSINT export", "There are no OSINT results to export yet.", width=420)
+            return
+
+        selected = self._selected or {}
+        kind = str(selected.get("kind") or "")
+        value = str(selected.get("value") or "").strip()
+        suffix_map = {"html": "html", "csv": "csv", "xlsx": "xlsx"}
+        suffix = suffix_map.get(export_format)
+        if suffix is None:
+            return
+
+        default_path = table_export_default_path(
+            f"osint_{value or kind or 'results'}",
+            suffix,
+            project_id=self.app.current_project_id,
+            category="json",
+        )
+        filter_map = {
+            "html": "HTML files (*.html)",
+            "csv": "CSV files (*.csv)",
+            "xlsx": "Excel files (*.xlsx)",
+        }
+        path, ok = QFileDialog.getSaveFileName(
+            self.app,
+            f"Export OSINT results ({suffix.upper()})",
+            default_path,
+            filter_map[export_format],
+        )
+        if not ok or not path:
+            return
+
+        project_id = self.app.current_project_id
+        project = get_project(project_id) if project_id is not None else None
+        entity_label = self._identifier_type_label(selected) if kind == "identifier" else kind.title()
+        try:
+            export_osint_results(
+                path,
+                export_format,
+                entity_kind=kind,
+                entity_label=entity_label,
+                entity_value=value,
+                results_text=text,
+                project=project,
+                project_name=self.app.current_project_name,
+                source_label=value,
+            )
+        except Exception as exc:
+            self.app._message_dialog("OSINT export", "Failed to export OSINT results.", str(exc), width=520)
+            return
+        self.app._message_dialog("OSINT export", f"Exported OSINT results to:\n{path}", width=520)
+
     def show_lookup_history(self) -> None:
         project_id = self.app.current_project_id
         selected = self._selected or {}
