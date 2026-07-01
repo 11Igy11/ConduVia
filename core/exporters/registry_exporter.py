@@ -7,6 +7,7 @@ from typing import Any
 
 from core.db import Project
 from core.analysis_limits import EMBEDDED_SUMMARY_TOP_N
+from core.case_metadata import LAWFUL_INTERCEPTION_DATES_LABEL
 from core.exporters.case_context import build_case_context, case_context_table_html
 from core.exporters.template_utils import logo_data_uri
 from core.flow_stats import build_daily_activity_rows
@@ -464,7 +465,7 @@ def _report_text() -> dict[str, str]:
         "apps": "Apps",
         "files": "Files",
         "target": "Target",
-        "order_validity": "Order validity",
+        "order_validity": LAWFUL_INTERCEPTION_DATES_LABEL,
         "total_flows": "Total flows",
         "unique_src_ip": "Unique src IP",
         "unique_dst_ip": "Unique dst IP",

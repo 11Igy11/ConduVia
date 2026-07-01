@@ -189,6 +189,8 @@ class ProjectsUIController:
             return
 
         from core.case_metadata import (
+            EARLIER_LAWFUL_INTERCEPTION_DATES_LABEL,
+            LAWFUL_INTERCEPTION_DATES_ACTIVE_LABEL,
             format_active_order_validity,
             format_klasa_all,
             format_order_validity_history,
@@ -208,9 +210,9 @@ class ProjectsUIController:
         info.append(f"Identifiers: {project_identifiers_text(p)}")
         info.append(f"Klasa (all): {klasa_all}")
         info.append(f"Urbroj (all): {urbroj_all}")
-        info.append(f"Order validity (active): {validity_active}")
+        info.append(f"{LAWFUL_INTERCEPTION_DATES_ACTIVE_LABEL}: {validity_active}")
         if validity_history:
-            info.append(f"Earlier validity periods: {validity_history}")
+            info.append(f"{EARLIER_LAWFUL_INTERCEPTION_DATES_LABEL}: {validity_history}")
         if p.subject_oib:
             info.append(f"OIB: {p.subject_oib}")
         info.append("")
@@ -755,6 +757,8 @@ class ProjectsUIController:
 
     def _fill_project_selection_panel(self, project, *, active: bool) -> None:
         from core.case_metadata import (
+            EARLIER_LAWFUL_INTERCEPTION_DATES_LABEL,
+            LAWFUL_INTERCEPTION_DATES_ACTIVE_LABEL,
             format_active_order_validity,
             format_klasa_all,
             format_order_validity_history,
@@ -773,10 +777,10 @@ class ProjectsUIController:
             f"Identifiers: {project_identifiers_text(project)}",
             f"Klasa (all): {klasa_all}",
             f"Urbroj (all): {urbroj_all}",
-            f"Order validity (active): {validity_active}",
+            f"{LAWFUL_INTERCEPTION_DATES_ACTIVE_LABEL}: {validity_active}",
         ]
         if validity_history:
-            info.append(f"Earlier validity periods: {validity_history}")
+            info.append(f"{EARLIER_LAWFUL_INTERCEPTION_DATES_LABEL}: {validity_history}")
         if project.subject_oib:
             info.append(f"OIB: {project.subject_oib}")
         info.append("")

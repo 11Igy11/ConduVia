@@ -23,6 +23,7 @@ from core.project_identity import project_identifiers_text, subject_display_labe
 from core.project_readiness import evaluate_profile_readiness
 from core.case_metadata import (
     format_active_order_validity,
+    LAWFUL_INTERCEPTION_DATES_ACTIVE_LABEL,
     format_klasa_summary,
     format_urbroj_summary,
     load_case_metadata,
@@ -120,7 +121,7 @@ def build_project_activity_profile(
         f"- Target fallback: {target_display_label(project)}",
         f"- Klasa: {format_klasa_summary(case_metadata)}",
         f"- Urbroj: {format_urbroj_summary(case_metadata)}",
-        f"- Order validity (active): {format_active_order_validity(case_metadata)}",
+        f"- {LAWFUL_INTERCEPTION_DATES_ACTIVE_LABEL}: {format_active_order_validity(case_metadata)}",
         f"- JSON datasets: {dataset_count:,} files / {json_file_day_count:,} indexed days / {json_days_label}",
         f"- PCAP evidence: {pcap_indexed_file_count:,} indexed files / {pcap_indexed_day_count:,} indexed days / {pcap_day_count:,} saved days",
         f"- Findings: {len(findings)}",

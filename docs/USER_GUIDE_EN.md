@@ -86,13 +86,13 @@ Select a project to preview details on the right. **Set active** makes it the wo
 **Case order metadata**
 
 - **Klasa**, **Urbroj** — with **…** picker if saved values exist.
-- **Order validity** — from / to dates; **…** opens saved validity periods.
+- **Lawful interception dates** — from / to dates; **…** opens saved interception periods.
 
 After creating a project you may be asked **Open dataset** to load evidence immediately.
 
 ### 4.4 Project details panel
 
-Shows ID, subject, identifiers, Klasa/Urbroj, order validity, description, workspace path, and timestamps.
+Shows ID, subject, identifiers, Klasa/Urbroj, lawful interception dates, description, workspace path, and timestamps.
 
 ### 4.5 Recent cards (bottom)
 

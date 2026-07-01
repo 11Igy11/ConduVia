@@ -9,6 +9,11 @@ from core.db import DEFAULT_DB_PATH, get_project, update_project_case_metadata
 from core.formatters import format_flow_datetime
 from core.timeutils import LOCAL_TZ, parse_timestamp
 
+LAWFUL_INTERCEPTION_DATES_LABEL = "Lawful interception dates"
+LAWFUL_INTERCEPTION_DATES_ACTIVE_LABEL = f"{LAWFUL_INTERCEPTION_DATES_LABEL} (active)"
+EARLIER_LAWFUL_INTERCEPTION_DATES_LABEL = "Earlier lawful interception dates"
+LAWFUL_INTERCEPTION_PERIOD_PICKER_TITLE = "Lawful interception periods"
+
 
 def _now_iso() -> str:
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")

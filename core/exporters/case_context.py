@@ -74,7 +74,7 @@ def case_export_metadata_rows(context: dict[str, str]) -> list[tuple[str, str]]:
         ("Known IP", "known_ip"),
         ("Klasa", "klasa"),
         ("Urbroj", "urbroj"),
-        ("Order Validity", "order_validity"),
+        ("Lawful interception dates", "order_validity"),
         ("Dataset Target", "dataset_target"),
     ):
         value = str(context.get(key) or "").strip()
@@ -103,7 +103,7 @@ def context_cards_html(
     if context.get("known_ip") and context.get("known_ip") != "-":
         fields.append(("Known IP", context.get("known_ip") or "-"))
 
-    for label, key in (("Klasa", "klasa"), ("Urbroj", "urbroj"), ("Order Validity", "order_validity")):
+    for label, key in (("Klasa", "klasa"), ("Urbroj", "urbroj"), ("Lawful interception dates", "order_validity")):
         value = str(context.get(key) or "").strip()
         if value and value != "-":
             fields.append((label, value))

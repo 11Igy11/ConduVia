@@ -797,6 +797,8 @@ class RegistryPage(QWidget):
         self._compare_result = None
 
     def _render_meta(self):
+        from core.case_metadata import LAWFUL_INTERCEPTION_DATES_LABEL
+
         if not self._folder:
             self._render_empty()
             return
@@ -828,7 +830,7 @@ class RegistryPage(QWidget):
             chip("LIID", liid),
         ]
         if bt or et:
-            chips.append(chip("Order validity", f"{_fmt_dt_short(bt)} → {_fmt_dt_short(et)}"))
+            chips.append(chip(LAWFUL_INTERCEPTION_DATES_LABEL, f"{_fmt_dt_short(bt)} → {_fmt_dt_short(et)}"))
 
         self.lbl_meta_chips.setText(
             "  |  ".join(
@@ -838,7 +840,7 @@ class RegistryPage(QWidget):
                     f"Target: {f'{target} ({targettype})' if target or targettype else '-'}",
                     f"LIID: {liid or '-'}",
                     (
-                        f"Order validity: {_fmt_dt_short(bt)} -> {_fmt_dt_short(et)}"
+                        f"{LAWFUL_INTERCEPTION_DATES_LABEL}: {_fmt_dt_short(bt)} -> {_fmt_dt_short(et)}"
                         if bt or et
                         else ""
                     ),

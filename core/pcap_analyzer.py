@@ -1145,31 +1145,41 @@ def _device_side_summary_text(summary: PcapSummary) -> str:
     ips = _device_side_ips(summary)
     source_count = len(getattr(summary, "source_paths", None) or [])
     if not ips:
-        return "Device-side addresses were not clearly identified in this view."
+        return "No clear subscriber-side address stood out in this view."
     if len(ips) == 1 and source_count <= 1:
-        return f"Traffic in this view is mainly associated with {ips[0]}."
+        return f"Most traffic in this capture is associated with {ips[0]}."
     if len(ips) == 1:
         return (
-            f"Traffic in this merged view is mainly associated with {ips[0]}. "
-            "Mobile or CGNAT networks may use different addresses on other days."
+            f"Most traffic in this merged view is associated with {ips[0]}. "
+            "The same device may show a different address on other days."
+        )
+    if len(ips) <= 4:
+        joined = ", ".join(ips)
+        return (
+            f"Traffic in this view uses {len(ips)} subscriber-side addresses ({joined}). "
+            "Treat these as indicators for this period, not as a permanent device ID."
         )
     examples = ", ".join(ips[:3])
     return (
-        f"Traffic spans {len(ips):,} device-side addresses in this period"
-        f"{f', including {examples}' if examples else ''}. "
-        "A single IP should not be treated as a stable device identifier across days."
+        f"In this period, traffic was seen from {len(ips):,} different subscriber-side addresses"
+        f"{f' (for example {examples})' if examples else ''}. "
+        "On mobile or carrier networks the handset often receives a new address each day, "
+        "so focus on services, timing and volume rather than one fixed IP across the case."
     )
 
 
 def _device_side_key_points(summary: PcapSummary) -> list[str]:
     ips = _device_side_ips(summary)
     if not ips:
-        return ["Device-side IPs (this view): not identified"]
+        return ["Subscriber-side addresses: not clearly identified in this view"]
     if len(ips) == 1:
-        return [f"Device-side IP (this view): {ips[0]}"]
-    points = [f"Device-side IPs (this period): {len(ips):,} distinct"]
-    points.append(f"Examples: {', '.join(ips[:3])}")
-    return points
+        return [f"Main subscriber-side address in this view: {ips[0]}"]
+    if len(ips) <= 4:
+        return [f"Subscriber-side addresses in this view: {', '.join(ips)}"]
+    return [
+        f"Subscriber-side addresses in this period: {len(ips):,} "
+        "(multiple addresses per day are common on mobile networks)"
+    ]
 
 
 def _plain_summary(
@@ -1190,9 +1200,9 @@ def _plain_summary(
         credential_text = "Potential credential-like plaintext was observed and should be reviewed carefully."
 
     return (
-        f"The capture covers {duration}. {device_text} "
-        f"Visible metadata points mainly to {top_services}.{encrypted_text} "
-        f"{credential_text} Review the Evidence tab for the exact visible records."
+        f"This capture covers {duration}. {device_text} "
+        f"The strongest visible service indicators are {top_services}.{encrypted_text} "
+        f"{credential_text} Use the Evidence tab for DNS names, TLS hosts and sample payloads."
     )
 
 

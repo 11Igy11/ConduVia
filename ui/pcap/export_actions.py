@@ -395,16 +395,19 @@ class PcapExportMixin:
         ]
         for point in investigator.get("key_points") or []:
             lines.append(f"- {point}")
-        if self.summary.communication_rows:
+        comm_rows = list(self.summary.communication_rows or [])
+        if comm_rows:
             lines.extend([
                 "",
-                "Communication highlights:",
+                "Communication highlights (top 5):",
             ])
-            for row in self.summary.communication_rows or []:
+            for row in comm_rows[:5]:
                 lines.append(
                     f"- {row.get('service')}: {row.get('activity_type')} "
                     f"({row.get('confidence')} confidence) - {row.get('evidence')}"
                 )
+            if len(comm_rows) > 5:
+                lines.append(f"- … and {len(comm_rows) - 5:,} more indicators in the Communications tab")
         lines.extend([
             "",
             "Artifact categories:",

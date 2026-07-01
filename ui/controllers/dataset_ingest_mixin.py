@@ -106,7 +106,7 @@ def _json_order_metadata_line(meta: dict | None) -> str:
     bt = str(meta.get("bt") or "")
     et = str(meta.get("et") or "")
     target_label = _format_dataset_target(target, target_type)
-    from core.case_metadata import format_order_datetime
+    from core.case_metadata import LAWFUL_INTERCEPTION_DATES_LABEL, format_order_datetime
 
     if bt or et:
         validity = f"{format_order_datetime(bt, missing='-')} -> {format_order_datetime(et, missing='-')}"
@@ -114,7 +114,7 @@ def _json_order_metadata_line(meta: dict | None) -> str:
         validity = "-"
     return (
         f"Klasa: {klasa}   |   Urbroj: {urbroj}   |   Target: {target_label}   |   "
-        f"LIID: {liid}   |   Order validity: {validity}"
+        f"LIID: {liid}   |   {LAWFUL_INTERCEPTION_DATES_LABEL}: {validity}"
     )
 
 class DatasetIngestMixin:

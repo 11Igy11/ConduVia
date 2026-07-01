@@ -855,6 +855,8 @@ def project_details_dialog(
     metadata_panel, metadata_layout = _dialog_panel("Case order metadata")
 
     from core.case_metadata import (
+        LAWFUL_INTERCEPTION_DATES_LABEL,
+        LAWFUL_INTERCEPTION_PERIOD_PICKER_TITLE,
         active_klasa_value,
         active_urbroj_value,
         format_order_datetime,
@@ -925,14 +927,14 @@ def project_details_dialog(
 
     edit_valid_from = QLineEdit()
     edit_valid_from.setObjectName("DialogField")
-    edit_valid_from.setPlaceholderText("Order valid from")
+    edit_valid_from.setPlaceholderText("Valid from")
     edit_valid_from.setFixedHeight(DIALOG_FIELD_HEIGHT)
     edit_valid_from.setText(format_order_datetime(merged_bt, missing=""))
     fields["order_validity_bt"] = edit_valid_from
 
     edit_valid_to = QLineEdit()
     edit_valid_to.setObjectName("DialogField")
-    edit_valid_to.setPlaceholderText("Order valid to")
+    edit_valid_to.setPlaceholderText("Valid to")
     edit_valid_to.setFixedHeight(DIALOG_FIELD_HEIGHT)
     edit_valid_to.setText(format_order_datetime(merged_et, missing=""))
     fields["order_validity_et"] = edit_valid_to
@@ -955,7 +957,7 @@ def project_details_dialog(
 
         pick_rows_dialog(
             dlg,
-            "Order validity periods",
+            LAWFUL_INTERCEPTION_PERIOD_PICKER_TITLE,
             [
                 ("label", "Period"),
                 ("from", "From"),
@@ -969,7 +971,7 @@ def project_details_dialog(
 
     btn_periods.clicked.connect(show_validity_periods)
     validity_row.addWidget(btn_periods)
-    metadata_layout.addWidget(_dialog_field_group("Order validity", _wrap_layout(validity_row)))
+    metadata_layout.addWidget(_dialog_field_group(LAWFUL_INTERCEPTION_DATES_LABEL, _wrap_layout(validity_row)))
     content_layout.addWidget(metadata_panel)
 
     scroll_sync = _install_dialog_scroll(scroll, content, dlg)

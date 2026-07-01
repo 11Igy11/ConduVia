@@ -101,7 +101,7 @@ def _operational_summary(summary_lines: Any) -> str:
             continue
         if lowered.startswith("- urbroj:"):
             continue
-        if lowered.startswith("- order validity"):
+        if lowered.startswith("- lawful interception dates"):
             continue
         lines.append(line)
     return "\n".join(lines) or "-"
