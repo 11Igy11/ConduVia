@@ -98,6 +98,8 @@ class PcapAnalysisMixin:
         return self.app if self.app is not None else self
 
     def batch_is_running(self) -> bool:
+        if self._thread is not None:
+            return True
         return self._batch_runner.is_running()
 
     def _start_auto_pcap_batch(self, paths: list[str], *, auto_save: bool) -> None:
@@ -566,6 +568,19 @@ class PcapAnalysisMixin:
             return
         project_id = self._current_project_id()
         if project_id is None:
+            return
+        controller = getattr(self.app, "dataset_controller", None) if self.app else None
+        if controller is not None and (
+            getattr(controller, "_import_finalize_pending", False)
+            or getattr(controller, "_import_finalize_running", False)
+        ):
+            return
+        QTimer.singleShot(0, lambda pid=project_id: self._run_project_batch_refresh(pid))
+
+    def _run_project_batch_refresh(self, project_id: int | None) -> None:
+        if project_id is None or project_id != self._current_project_id():
+            return
+        if self._project_batch_refresh_running:
             return
         self._project_batch_refresh_running = True
         try:

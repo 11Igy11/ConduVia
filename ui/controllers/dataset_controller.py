@@ -90,6 +90,20 @@ from ui.workers.dataset_workers import (
 _JSON_ALL_FILES_TOKEN = "__all__"
 
 
+def _day_groups_equal(
+    left: dict[str, list[str]] | None,
+    right: dict[str, list[str]] | None,
+) -> bool:
+    left = left or {}
+    right = right or {}
+    if set(left) != set(right):
+        return False
+    for day in left:
+        if list(left.get(day) or []) != list(right.get(day) or []):
+            return False
+    return True
+
+
 def _format_dataset_target(target: str, target_type: str) -> str:
     from core.osint.imsi import format_identifier_display
 
@@ -161,6 +175,9 @@ class DatasetController(DatasetLoadMixin, DatasetIngestMixin, QObject):
         self._import_finalize_completed = False
         self._import_finalize_pending = False
         self._pcap_ingest_day_groups_cache: dict[int, dict[str, list[str]]] = {}
+        self._json_ingest_day_groups_cache: dict[int, dict[str, list[str]]] = {}
+        self._deferred_sync_timer: QTimer | None = None
+        self._deferred_sync_project_id: int | None = None
 
     def behavior_index_running(self) -> bool:
         return self._behavior_index_thread is not None
@@ -175,8 +192,11 @@ class DatasetController(DatasetLoadMixin, DatasetIngestMixin, QObject):
         if self.behavior_index_running():
             return True
         pcap_page = getattr(self.app, "pcap_page", None)
-        if pcap_page is not None and pcap_page.batch_is_running():
-            return True
+        if pcap_page is not None:
+            if pcap_page.batch_is_running():
+                return True
+            if getattr(pcap_page, "_thread", None) is not None:
+                return True
         return False
 
     def _thread_is_running(self, thread: QThread | None) -> bool:
@@ -813,6 +833,21 @@ class DatasetController(DatasetLoadMixin, DatasetIngestMixin, QObject):
 
     def deferred_sync_project_periods(self, project_id: int | None) -> None:
         """Populate JSON/PCAP period selectors without loading flows or PCAP analysis."""
+        if project_id is None:
+            return
+        self._deferred_sync_project_id = int(project_id)
+        timer = self._deferred_sync_timer
+        if timer is None:
+            timer = QTimer(self)
+            timer.setSingleShot(True)
+            timer.timeout.connect(self._run_deferred_sync_project_periods)
+            self._deferred_sync_timer = timer
+        if timer.isActive():
+            timer.stop()
+        timer.start(50)
+
+    def _run_deferred_sync_project_periods(self) -> None:
+        project_id = self._deferred_sync_project_id
         if project_id is None or self.app.current_project_id != project_id:
             return
         self.sync_json_periods_from_project(project_id)
@@ -843,9 +878,13 @@ class DatasetController(DatasetLoadMixin, DatasetIngestMixin, QObject):
             self._clear_json_day_groups()
             return
 
-        by_day = self._json_day_groups_from_ingest(project_id)
+        by_day = self._cached_json_day_groups(project_id)
         if not by_day:
             self._clear_json_day_groups()
+            return
+
+        if _day_groups_equal(self._json_day_groups_raw, by_day):
+            self._sync_json_period_selector_panel()
             return
 
         source_root = ""
@@ -870,6 +909,14 @@ class DatasetController(DatasetLoadMixin, DatasetIngestMixin, QObject):
         if hasattr(self.app, "lbl_stats"):
             self.app.explore_ui_controller.set_json_stats_text(indexed_msg, include_counts=False)
 
+    def _cached_json_day_groups(self, project_id: int) -> dict[str, list[str]]:
+        cached = self._json_ingest_day_groups_cache.get(int(project_id))
+        if cached is not None:
+            return dict(cached)
+        by_day = self._json_day_groups_from_ingest(project_id)
+        self._json_ingest_day_groups_cache[int(project_id)] = dict(by_day)
+        return by_day
+
     def _cached_pcap_day_groups(self, project_id: int) -> dict[str, list[str]]:
         from core.project_evidence import pcap_day_groups_from_ingest
 
@@ -880,11 +927,16 @@ class DatasetController(DatasetLoadMixin, DatasetIngestMixin, QObject):
         self._pcap_ingest_day_groups_cache[int(project_id)] = dict(by_day)
         return by_day
 
-    def _invalidate_pcap_ingest_day_groups_cache(self, project_id: int | None = None) -> None:
+    def _invalidate_ingest_day_groups_cache(self, project_id: int | None = None) -> None:
         if project_id is None:
             self._pcap_ingest_day_groups_cache.clear()
+            self._json_ingest_day_groups_cache.clear()
             return
         self._pcap_ingest_day_groups_cache.pop(int(project_id), None)
+        self._json_ingest_day_groups_cache.pop(int(project_id), None)
+
+    def _invalidate_pcap_ingest_day_groups_cache(self, project_id: int | None = None) -> None:
+        self._invalidate_ingest_day_groups_cache(project_id)
 
     def sync_pcap_periods_from_project(self, project_id: int | None) -> None:
         """Restore PCAP period selector from ingest index (lightweight, no auto-load)."""
@@ -898,6 +950,10 @@ class DatasetController(DatasetLoadMixin, DatasetIngestMixin, QObject):
         by_day = self._cached_pcap_day_groups(project_id)
         if not by_day:
             pcap_page._clear_day_groups()
+            return
+
+        if _day_groups_equal(getattr(pcap_page, "_pcap_day_groups_raw", {}), by_day):
+            pcap_page._sync_period_selector_panel()
             return
 
         pcap_page._set_day_groups(by_day, allow_empty_days=True)
@@ -1049,7 +1105,7 @@ class DatasetController(DatasetLoadMixin, DatasetIngestMixin, QObject):
         self._import_plan = None
         self._pending_import_banner_message = ""
         self._clear_import_status()
-        self._invalidate_pcap_ingest_day_groups_cache()
+        self._invalidate_ingest_day_groups_cache()
 
     def clear_context(self) -> None:
         self.reset_dataset_views()
