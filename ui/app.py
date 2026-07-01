@@ -527,6 +527,49 @@ class App(QWidget):
             text_edit=getattr(self, "txt_ai_hub", None),
             add_notes_button=getattr(self, "btn_ai_hub_add_notes", None),
         )
+        project_id = self.current_project_id
+        if project_id is not None and (text or "").strip():
+            try:
+                from core.db import save_ai_output
+
+                save_ai_output(
+                    int(project_id),
+                    source=source,
+                    title=title,
+                    body_text=text,
+                )
+            except Exception:
+                pass
+        self.go_to_ai()
+
+    def show_ai_output_history(self) -> None:
+        from ui.ai_output import open_ai_history_dialog
+
+        open_ai_history_dialog(self)
+
+    def load_ai_output_record(self, output_id: int) -> None:
+        from core.db import get_ai_output
+
+        record = get_ai_output(int(output_id))
+        if record is None:
+            self._message_dialog("AI history", "That saved AI output is no longer available.", width=440)
+            return
+        if self.current_project_id is not None and int(record.get("project_id") or 0) != int(self.current_project_id):
+            self._message_dialog("AI history", "That AI output belongs to a different project.", width=440)
+            return
+        self._ai_output_state = build_ai_output_state(
+            str(record.get("source") or ""),
+            str(record.get("title") or ""),
+            str(record.get("body_text") or ""),
+        )
+        render_ai_output_hub(
+            state=self._ai_output_state,
+            project_name=self.current_project_name,
+            title_label=getattr(self, "lbl_ai_hub_title", None),
+            context_label=getattr(self, "lbl_ai_hub_context", None),
+            text_edit=getattr(self, "txt_ai_hub", None),
+            add_notes_button=getattr(self, "btn_ai_hub_add_notes", None),
+        )
         self.go_to_ai()
 
     def add_ai_hub_to_notes(self):

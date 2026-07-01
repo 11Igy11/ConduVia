@@ -69,6 +69,15 @@ class IngestItem:
     created_at: str
     updated_at: str
 
+@dataclass
+class AiOutput:
+    id: int
+    project_id: int
+    source: str
+    title: str
+    body_text: str
+    created_at: str
+
 @contextmanager
 def _connect(db_path: Path):
     db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -302,6 +311,20 @@ def init_db(db_path: Path = DEFAULT_DB_PATH) -> None:
             """
         )
 
+        con.execute(
+            """
+            CREATE TABLE IF NOT EXISTS ai_outputs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_id INTEGER NOT NULL,
+                source TEXT NOT NULL DEFAULT '',
+                title TEXT NOT NULL DEFAULT '',
+                body_text TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
+            );
+            """
+        )
+
         # --- Indexes (performance) ---
         con.execute("CREATE INDEX IF NOT EXISTS idx_datasets_project_loaded ON datasets(project_id, loaded_at);")
         con.execute("CREATE INDEX IF NOT EXISTS idx_pcap_sources_project_created ON pcap_sources(project_id, created_at);")
@@ -311,6 +334,9 @@ def init_db(db_path: Path = DEFAULT_DB_PATH) -> None:
         con.execute("CREATE INDEX IF NOT EXISTS idx_ingest_items_project_status ON ingest_items(project_id, status, file_type);")
         con.execute(
             "CREATE INDEX IF NOT EXISTS idx_osint_lookups_entity ON osint_lookups(project_id, entity_kind, entity_value, enricher);"
+        )
+        con.execute(
+            "CREATE INDEX IF NOT EXISTS idx_ai_outputs_project_created ON ai_outputs(project_id, created_at DESC);"
         )
 
 # ---------------- App settings ----------------
@@ -1703,3 +1729,85 @@ def list_osint_lookups(
             }
         )
     return results
+
+
+def save_ai_output(
+    project_id: int,
+    *,
+    source: str = "",
+    title: str = "",
+    body_text: str = "",
+    db_path: Path = DEFAULT_DB_PATH,
+) -> int:
+    body = (body_text or "").strip()
+    if not body:
+        return 0
+    with _connect(db_path) as con:
+        cur = con.execute(
+            """
+            INSERT INTO ai_outputs (project_id, source, title, body_text)
+            VALUES (?, ?, ?, ?);
+            """,
+            (
+                int(project_id),
+                str(source or "").strip(),
+                str(title or "AI Summary").strip() or "AI Summary",
+                body,
+            ),
+        )
+        return int(cur.lastrowid or 0)
+
+
+def list_ai_outputs(
+    project_id: int,
+    *,
+    limit: int = 100,
+    db_path: Path = DEFAULT_DB_PATH,
+) -> list[dict]:
+    with _connect(db_path) as con:
+        rows = con.execute(
+            """
+            SELECT id, project_id, source, title, body_text, created_at
+            FROM ai_outputs
+            WHERE project_id = ?
+            ORDER BY id DESC
+            LIMIT ?;
+            """,
+            (int(project_id), int(limit)),
+        ).fetchall()
+
+    results: list[dict] = []
+    for row in rows:
+        results.append(
+            {
+                "id": int(row["id"]),
+                "project_id": int(row["project_id"]),
+                "source": str(row["source"] or ""),
+                "title": str(row["title"] or ""),
+                "body_text": str(row["body_text"] or ""),
+                "created_at": str(row["created_at"] or ""),
+            }
+        )
+    return results
+
+
+def get_ai_output(output_id: int, db_path: Path = DEFAULT_DB_PATH) -> dict | None:
+    with _connect(db_path) as con:
+        row = con.execute(
+            """
+            SELECT id, project_id, source, title, body_text, created_at
+            FROM ai_outputs
+            WHERE id = ?;
+            """,
+            (int(output_id),),
+        ).fetchone()
+    if row is None:
+        return None
+    return {
+        "id": int(row["id"]),
+        "project_id": int(row["project_id"]),
+        "source": str(row["source"] or ""),
+        "title": str(row["title"] or ""),
+        "body_text": str(row["body_text"] or ""),
+        "created_at": str(row["created_at"] or ""),
+    }
