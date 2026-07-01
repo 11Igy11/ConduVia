@@ -116,6 +116,8 @@ class PcapPage(PcapInvestigatorMixin, PcapPeriodMixin, PcapAnalysisMixin, PcapEx
         self.btn_add_notes = make_action_button("Add to Notes", enabled=False)
         self.btn_mark_finding = make_action_button("Mark as Finding", enabled=False)
         self.btn_mark_finding.setToolTip("Save the loaded PCAP period/day as a project finding.")
+        self.btn_go_to_findings = make_action_button("Go to Findings", enabled=False)
+        self.btn_go_to_findings.setToolTip("Open project findings filtered to PCAP entries")
         self.btn_export = make_action_button("Export Summary", enabled=False)
         top.addWidget(self.lbl_title)
         top.addStretch()
@@ -124,6 +126,7 @@ class PcapPage(PcapInvestigatorMixin, PcapPeriodMixin, PcapAnalysisMixin, PcapEx
         top.addWidget(self.btn_ai_summary)
         top.addWidget(self.btn_add_notes)
         top.addWidget(self.btn_mark_finding)
+        top.addWidget(self.btn_go_to_findings)
         top.addWidget(self.btn_export)
 
         self.lbl_file = QLabel("No PCAP loaded")
@@ -230,6 +233,7 @@ class PcapPage(PcapInvestigatorMixin, PcapPeriodMixin, PcapAnalysisMixin, PcapEx
         self.btn_ai_summary.clicked.connect(self.generate_ai_summary)
         self.btn_add_notes.clicked.connect(self.add_summary_to_notes)
         self.btn_mark_finding.clicked.connect(self._mark_pcap_period_as_finding)
+        self.btn_go_to_findings.clicked.connect(self._open_project_findings)
         self.btn_export.clicked.connect(self.export_summary)
         self.btn_reanalyze_period.clicked.connect(self.reanalyze_current_period)
         self.cmb_pcap_day.currentIndexChanged.connect(self._on_pcap_day_changed)
@@ -248,33 +252,13 @@ class PcapPage(PcapInvestigatorMixin, PcapPeriodMixin, PcapAnalysisMixin, PcapEx
         self.summary_tabs.addTab(self._build_overview_tab(), "Overview")
         self.ai_summary_tab = self._build_ai_tab()
         self.summary_tabs.addTab(self.ai_summary_tab, "AI Summary")
-        self._wire_summary_findings_link()
         layout.addWidget(self.summary_tabs)
         return page
 
-    def _wire_summary_findings_link(self) -> None:
-        row = QHBoxLayout()
-        row.setContentsMargins(0, 0, 8, 0)
-        row.setSpacing(6)
-        self.btn_pcap_findings = make_action_button("Findings (0)", toolbar=True, enabled=False)
-        self.btn_pcap_findings.setToolTip("Open project findings (PCAP entries are pre-filtered when opened from here)")
-        self.btn_pcap_findings.clicked.connect(self._open_project_findings)
-        row.addWidget(self.btn_pcap_findings)
-        host = QWidget()
-        host.setObjectName("PcapTabActions")
-        host.setLayout(row)
-        host.setFixedHeight(32)
-        self.summary_tabs.setCornerWidget(host, Qt.TopRightCorner)
-
     def refresh_findings_link(self) -> None:
-        if not hasattr(self, "btn_pcap_findings"):
-            return
-        project_id = self._current_project_id()
-        count = 0
-        if project_id is not None and self.app is not None and hasattr(self.app, "findings_controller"):
-            count = self.app.findings_controller.project_finding_count()
-        self.btn_pcap_findings.setText(f"Findings ({count:,})")
-        self.btn_pcap_findings.setEnabled(project_id is not None)
+        enabled = self._current_project_id() is not None
+        if hasattr(self, "btn_go_to_findings"):
+            self.btn_go_to_findings.setEnabled(enabled)
 
     def _open_project_findings(self) -> None:
         if self.app is None:
@@ -1174,6 +1158,7 @@ class PcapPage(PcapInvestigatorMixin, PcapPeriodMixin, PcapAnalysisMixin, PcapEx
             (getattr(self, "btn_ai_summary", None), False),
             (getattr(self, "btn_add_notes", None), False),
             (getattr(self, "btn_mark_finding", None), False),
+            (getattr(self, "btn_go_to_findings", None), False),
             (getattr(self, "btn_mark_communication_finding", None), False),
             (getattr(self, "btn_export_full_dns", None), False),
             (getattr(self, "btn_export_full_tls", None), False),

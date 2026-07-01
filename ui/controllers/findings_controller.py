@@ -118,19 +118,10 @@ class FindingsController:
             "tags": normalize_tags(str(values.get("tags") or "")),
         }
 
-    def _after_finding_created(self, *, from_pcap: bool) -> None:
+    def _after_finding_created(self) -> None:
         app = self.app
         self.refresh_ui()
         app.notes_controller.refresh_activity_ui()
-
-        choice = app._choice_dialog(
-            "Finding saved",
-            "The finding was added to the project.",
-            ["Continue", "Open in Findings"],
-            width=420,
-        )
-        if choice == "Open in Findings":
-            app.go_to_findings(pcap_filter=from_pcap, from_pcap=from_pcap)
 
     def apply_filter(self) -> None:
         app = self.app
@@ -206,7 +197,7 @@ class FindingsController:
             app._message_dialog("Findings", "Failed to create finding.", str(e), width=460)
             return
 
-        self._after_finding_created(from_pcap=False)
+        self._after_finding_created()
 
     def mark_pcap_period_as_finding(self) -> None:
         app = self.app
@@ -297,7 +288,7 @@ class FindingsController:
             app._message_dialog("Findings", "Failed to create finding.", str(e), width=460)
             return
 
-        self._after_finding_created(from_pcap=True)
+        self._after_finding_created()
 
     def mark_pcap_as_finding(self) -> None:
         """Backward-compatible alias for the PCAP header period action."""
