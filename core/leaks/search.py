@@ -303,3 +303,34 @@ def find_repository_hits(
         if total:
             return total, summary, record_ids
     return find_hits(text, kind=None, db_path=db_path)
+
+
+def fetch_records_by_ids(
+    record_ids: list[int],
+    *,
+    limit: int = 200,
+    offset: int = 0,
+    db_path: Path = LEAKS_DB_PATH,
+) -> tuple[list[sqlite3.Row], int]:
+    """Load repository rows for explicit hit record ids (OSINT / Profile pivots)."""
+    ids = sorted({int(value) for value in record_ids if int(value) > 0})
+    if not ids:
+        return [], 0
+    placeholders = ",".join("?" * len(ids))
+    params = list(ids)
+    from core.leaks.db import _connect
+
+    with _connect(db_path) as con:
+        total = len(ids)
+        rows = con.execute(
+            f"""
+            SELECT lr.*, d.name AS dataset_name, d.source_note AS dataset_note
+            FROM leak_records lr
+            JOIN datasets d ON d.id = lr.dataset_id
+            WHERE lr.id IN ({placeholders})
+            ORDER BY lr.id
+            LIMIT ? OFFSET ?;
+            """,
+            params + [int(limit), int(offset)],
+        ).fetchall()
+        return rows, total

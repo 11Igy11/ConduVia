@@ -93,6 +93,7 @@ class LeaksViewerDialog(QDialog):
         self._total = 0
         self._rows: list = []
         self._columns: list[tuple[str, str]] = list(_DEFAULT_COLUMNS)
+        self._pinned_record_ids: list[int] = []
 
         root = QHBoxLayout(self)
         root.setContentsMargins(14, 14, 14, 14)
@@ -210,7 +211,7 @@ class LeaksViewerDialog(QDialog):
         self._debounce.timeout.connect(lambda: self._run_search(reset=True))
         self.edit_search.textChanged.connect(lambda *_: self._debounce.start())
 
-        self.btn_search.clicked.connect(lambda: self._run_search(reset=True))
+        self.btn_search.clicked.connect(self._on_search_clicked)
         self.btn_clear.clicked.connect(self._clear)
         self.btn_prev.clicked.connect(self._prev_page)
         self.btn_next.clicked.connect(self._next_page)
@@ -226,6 +227,7 @@ class LeaksViewerDialog(QDialog):
         self._run_search(reset=True)
 
     def _on_dataset_changed(self) -> None:
+        self._pinned_record_ids = []
         self._update_dataset_label()
         self._update_visible_columns()
         self._run_search(reset=True)
@@ -317,6 +319,20 @@ class LeaksViewerDialog(QDialog):
             return None
         return item.data(Qt.UserRole)
 
+    def set_pinned_record_ids(self, record_ids: list[int] | None) -> None:
+        self._pinned_record_ids = [int(value) for value in (record_ids or []) if int(value) > 0]
+        if self._pinned_record_ids:
+            self.edit_search.clear()
+            if self.list_datasets.count() > 0:
+                self.list_datasets.setCurrentRow(0)
+            self._update_dataset_label()
+            self._update_visible_columns()
+            self._run_search(reset=True)
+
+    def _on_search_clicked(self) -> None:
+        self._pinned_record_ids = []
+        self._run_search(reset=True)
+
     # --------------------------------------------------------------- search
     def _run_search(self, *, reset: bool) -> None:
         if reset:
@@ -329,16 +345,25 @@ class LeaksViewerDialog(QDialog):
             self.btn_prev.setEnabled(False)
             self.btn_next.setEnabled(False)
             return
-        text = self.edit_search.text().strip()
-        dataset_id = self._selected_dataset_id()
         try:
-            rows, total = search_records(
-                None,
-                text,
-                dataset_id=dataset_id,
-                limit=PAGE_SIZE,
-                offset=self._offset,
-            )
+            if self._pinned_record_ids:
+                from core.leaks.search import fetch_records_by_ids
+
+                rows, total = fetch_records_by_ids(
+                    self._pinned_record_ids,
+                    limit=PAGE_SIZE,
+                    offset=self._offset,
+                )
+            else:
+                text = self.edit_search.text().strip()
+                dataset_id = self._selected_dataset_id()
+                rows, total = search_records(
+                    None,
+                    text,
+                    dataset_id=dataset_id,
+                    limit=PAGE_SIZE,
+                    offset=self._offset,
+                )
         except Exception as exc:
             self.lbl_page.setText(f"Error: {exc}")
             return

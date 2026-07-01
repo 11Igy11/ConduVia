@@ -492,14 +492,22 @@ class App(QWidget):
         else:
             viewer.refresh_datasets()
         query = str(search_text or "").strip()
-        if query:
+        pinned_ids = [int(value) for value in (record_ids or []) if int(value) > 0]
+        viewer._pinned_record_ids = []
+        if pinned_ids:
+            viewer.set_pinned_record_ids(pinned_ids)
+        elif query:
             viewer.edit_search.setText(query)
-        elif record_ids:
-            viewer.edit_search.clear()
+            if viewer.list_datasets.count() > 0:
+                viewer.list_datasets.setCurrentRow(0)
+                viewer._update_dataset_label()
+                viewer._update_visible_columns()
+            viewer._run_search(reset=True)
         viewer.show()
         viewer.raise_()
         viewer.activateWindow()
-        viewer._run_search(reset=True)
+        if not pinned_ids and not query:
+            viewer._run_search(reset=True)
 
     def apply_theme(self, theme: str | None) -> None:
         qapp = QApplication.instance()

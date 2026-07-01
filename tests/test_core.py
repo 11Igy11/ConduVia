@@ -1483,6 +1483,22 @@ class OsintTests(unittest.TestCase):
         thread.join(timeout=2.0)
         self.assertEqual(seen, ["before", "after"])
 
+    def test_build_osint_export_rows_includes_results(self):
+        from core.exporters.osint_exporter import build_osint_export_rows
+
+        headers, rows = build_osint_export_rows(
+            entity_kind="identifier",
+            entity_label="MSISDN",
+            entity_value="+385991234567",
+            results_text="dns [ok]\nexample.com A 93.184.216.34",
+            exported_at="01.01.2026 12:00",
+        )
+        self.assertEqual(headers, ["Field", "Value"])
+        joined = "\n".join(" | ".join(row) for row in rows)
+        self.assertIn("MSISDN", joined)
+        self.assertIn("+385991234567", joined)
+        self.assertIn("dns [ok]", joined)
+
     def test_osint_settings_roundtrip(self):
         settings = OsintSettings(virustotal_api_key="vt-key", shodan_api_key="sh-key")
         restored = OsintSettings.from_mapping(settings.to_mapping())
