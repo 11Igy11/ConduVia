@@ -136,18 +136,14 @@ class DatasetIngestMixin:
             return
 
         self._scan_purpose = purpose
-        title = "Import evidence folder" if purpose == "import" else "Scan dataset folder"
-        self._scan_progress = QProgressDialog("Scanning evidence folder...", None, 0, 0, self.app)
-        self._scan_progress.setWindowTitle(title)
-        self._scan_progress.setWindowModality(Qt.NonModal)
-        self._scan_progress.setMinimumDuration(0)
-        self._scan_progress.setCancelButton(None)
-        self._scan_progress.setMinimumWidth(460)
-        self._scan_progress.show()
+        if purpose == "import":
+            self.begin_import_session(folder)
+            self.update_import_progress(phase="Scanning evidence folder...", indeterminate=True)
 
         def _kickoff_scan() -> None:
             self._scan_thread = QThread(self.app)
-            self._scan_worker = CaseScanWorker(folder)
+            pause_gate = self.import_pause_gate() if purpose == "import" else None
+            self._scan_worker = CaseScanWorker(folder, pause_gate=pause_gate)
             self._scan_worker.moveToThread(self._scan_thread)
             self._scan_thread.started.connect(self._scan_worker.run)
             self._scan_worker.finished.connect(self._on_folder_scan_finished, Qt.QueuedConnection)
@@ -164,18 +160,19 @@ class DatasetIngestMixin:
     def _cleanup_scan_thread(self) -> None:
         self._scan_thread = None
         self._scan_worker = None
-        self._close_scan_progress()
 
     def _on_folder_scan_error(self, message: str) -> None:
-        self._close_scan_progress()
+        if self.import_session_active():
+            self.end_import_session()
         self.app._message_dialog("Dataset folder", "Failed to scan selected folder.", message, width=520)
 
     def _on_folder_scan_finished(self, scan) -> None:
         folder = str(getattr(scan, "root", "") or "")
         purpose = self._scan_purpose
         self._scan_purpose = "import"
-        self._close_scan_progress()
         if not folder:
+            if purpose == "import":
+                self.end_import_session()
             return
         QTimer.singleShot(0, lambda f=folder, s=scan, p=purpose: self._after_folder_scan(f, s, p))
 
@@ -186,6 +183,8 @@ class DatasetIngestMixin:
 
         scoped = self._select_case_ingest_scope(scan)
         if scoped is None:
+            if self.import_session_active():
+                self.end_import_session()
             return
         self._start_folder_ingest(folder, scoped, purpose="import")
 
@@ -196,31 +195,37 @@ class DatasetIngestMixin:
 
         project_id = getattr(self.app, "current_project_id", None)
         if project_id is None:
+            if purpose == "import":
+                self.end_import_session()
             return
 
-        self.reset_dataset_views()
+        self.reset_dataset_views(preserve_import_session=(purpose == "import"))
 
         total_files = len(scan.json_files or []) + len(scan.pcap_files or [])
+        json_count = len(scan.json_files or [])
+        pcap_count = len(scan.pcap_files or [])
         self._pending_ingest_scan = scan
         self._pending_ingest_folder = folder
         self._ingest_purpose = purpose
 
-        self._ingest_progress = QProgressDialog(
-            f"Indexing {total_files:,} evidence files...",
-            None,
-            0,
-            0,
-            self.app,
-        )
-        self._ingest_progress.setWindowTitle("Index evidence")
-        self._ingest_progress.setWindowModality(Qt.NonModal)
-        self._ingest_progress.setMinimumDuration(0)
-        self._ingest_progress.setCancelButton(None)
-        self._ingest_progress.setMinimumWidth(460)
-        self._ingest_progress.show()
+        if purpose == "import":
+            if not self.import_session_active():
+                self.begin_import_session(folder)
+            self.update_import_progress(
+                phase=f"Indexing {total_files:,} evidence files...",
+                json_note=f"JSON: {json_count:,} files indexed" if json_count else "",
+                pcap_note=f"PCAP: {pcap_count:,} files queued" if pcap_count else "",
+                indeterminate=True,
+            )
 
+        pause_gate = self.import_pause_gate() if purpose == "import" else None
         self._ingest_thread = QThread(self.app)
-        self._ingest_worker = FolderIngestWorker(project_id, folder, scan)
+        self._ingest_worker = FolderIngestWorker(
+            project_id,
+            folder,
+            scan,
+            pause_gate=pause_gate,
+        )
         self._ingest_worker.moveToThread(self._ingest_thread)
         self._ingest_thread.started.connect(self._ingest_worker.run)
         self._ingest_worker.finished.connect(self._on_folder_ingest_finished, Qt.QueuedConnection)
@@ -235,21 +240,22 @@ class DatasetIngestMixin:
     def _cleanup_ingest_thread(self) -> None:
         self._ingest_thread = None
         self._ingest_worker = None
-        self._close_ingest_progress()
 
     def _on_folder_ingest_error(self, message: str) -> None:
-        self._close_ingest_progress()
         self._pending_ingest_scan = None
         self._pending_ingest_folder = ""
+        if self.import_session_active():
+            self.end_import_session()
         self.app._message_dialog("Dataset folder", "Failed to index evidence files.", message, width=520)
 
     def _on_folder_ingest_finished(self, scan) -> None:
         folder = self._pending_ingest_folder
         purpose = getattr(self, "_ingest_purpose", "import")
-        self._close_ingest_progress()
         self._pending_ingest_scan = None
         self._pending_ingest_folder = ""
         if not folder:
+            if purpose == "import":
+                self.end_import_session()
             return
         QTimer.singleShot(0, lambda f=folder, s=scan, p=purpose: self._after_folder_ingest(f, s, p))
 
@@ -286,10 +292,14 @@ class DatasetIngestMixin:
             "json_load_started": False,
         }
         self._import_finalize_running = True
-        self._show_import_status("Preparing imported evidence…")
+        self.update_import_progress(phase="Preparing imported evidence...", indeterminate=True)
         QTimer.singleShot(0, self._import_process_tick)
 
     def _import_process_tick(self) -> None:
+        if self.import_session_active() and self._import_pause_gate.is_paused():
+            self._refresh_import_progress_dialog()
+            QTimer.singleShot(400, self._import_process_tick)
+            return
         plan = self._import_plan
         if not plan:
             return
@@ -311,7 +321,7 @@ class DatasetIngestMixin:
                 return
 
             if phase == "json":
-                self._show_import_status("Configuring JSON periods…")
+                self.update_import_progress(phase="Configuring JSON periods...", indeterminate=True)
                 opened = self._process_import_json_phase(folder, scan, plan)
                 if opened:
                     plan["opened"] = opened
@@ -323,7 +333,7 @@ class DatasetIngestMixin:
                 return
 
             if phase == "pcap":
-                self._show_import_status("Opening PCAP evidence…")
+                self.update_import_progress(phase="Opening PCAP evidence...", indeterminate=True)
                 if plan.get("pcap_files") and hasattr(self.app, "pcap_page"):
                     if plan.get("json_load_started") and self._thread_is_running(self._load_thread):
                         self._pending_pcap_after_json = (folder, scan)
@@ -350,17 +360,19 @@ class DatasetIngestMixin:
         self._import_plan = None
         self._import_finalize_running = False
         if getattr(self, "_import_finalize_pending", False):
-            self._show_import_status(
-                self._pending_import_banner_message
-                or "PCAP batch analysis running — see the PCAP page for progress."
+            self.update_import_progress(
+                phase="PCAP analysis",
+                detail=self._pending_import_banner_message
+                or "Batch PCAP analysis running. Progress updates appear here.",
+                indeterminate=True,
             )
             return
-        self._clear_import_status()
         self._import_finalize_completed = True
         project_id = getattr(self.app, "current_project_id", None)
         if project_id is not None and not getattr(self, "_import_finalize_pending", False):
             self.deferred_sync_project_periods(project_id)
         self._finalize_import_refresh()
+        self.end_import_session()
 
     def complete_deferred_import_finalize(self) -> None:
         if getattr(self, "_import_finalize_completed", False):
@@ -371,12 +383,12 @@ class DatasetIngestMixin:
         self._import_finalize_pending = False
         self._defer_import_finalize = False
         self._pending_import_banner_message = ""
-        self._clear_import_status()
         project_id = getattr(self.app, "current_project_id", None)
         self._invalidate_pcap_ingest_day_groups_cache(project_id)
         if project_id is not None:
             self.deferred_sync_project_periods(project_id)
         self._finalize_import_refresh()
+        self.end_import_session()
 
     def _process_import_json_phase(self, folder: str, scan, plan: dict) -> str | None:
         json_files = list(plan.get("json_files") or [])

@@ -139,11 +139,17 @@ class PcapAnalysisMixin:
         self._update_batch_status()
         self._show_period_load_progress(paths, label="Auto analyzing PCAP batch...", total=batch_total)
 
+        controller = getattr(self.app, "dataset_controller", None) if self.app else None
         worker = PcapBatchWorker(
             paths,
             project_id=project_id,
             auto_save=auto_save,
             day_groups=batch_day_groups or None,
+            pause_gate=(
+                controller.import_pause_gate()
+                if controller is not None and controller.import_session_active()
+                else None
+            ),
         )
         started = self._batch_runner.start(
             worker,

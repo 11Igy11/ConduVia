@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from ui.controllers.dataset_ingest_mixin import DatasetIngestMixin
 from ui.controllers.dataset_load_mixin import DatasetLoadMixin
+from ui.controllers.import_progress_mixin import ImportProgressMixin
 from pathlib import Path
 
 from PySide6.QtCore import QDate, QObject, Qt, QThread, QTimer, Signal, Slot
@@ -136,7 +137,7 @@ def _json_order_metadata_line(meta: dict | None) -> str:
     )
 
 
-class DatasetController(DatasetLoadMixin, DatasetIngestMixin, QObject):
+class DatasetController(DatasetLoadMixin, DatasetIngestMixin, ImportProgressMixin, QObject):
     def __init__(self, app):
         super().__init__(app)
         self.app = app
@@ -178,6 +179,7 @@ class DatasetController(DatasetLoadMixin, DatasetIngestMixin, QObject):
         self._json_ingest_day_groups_cache: dict[int, dict[str, list[str]]] = {}
         self._deferred_sync_timer: QTimer | None = None
         self._deferred_sync_project_id: int | None = None
+        self._init_import_progress_state()
 
     def behavior_index_running(self) -> bool:
         return self._behavior_index_thread is not None
@@ -1087,8 +1089,10 @@ class DatasetController(DatasetLoadMixin, DatasetIngestMixin, QObject):
             except Exception:
                 pass
 
-    def reset_dataset_views(self) -> None:
+    def reset_dataset_views(self, *, preserve_import_session: bool = False) -> None:
         """Full dataset reset including period selectors (project change / new import)."""
+        if not preserve_import_session:
+            self.end_import_session()
         self._reset_import_finalize_state()
         self.reset_loaded_flow_views()
         self._clear_json_day_groups()

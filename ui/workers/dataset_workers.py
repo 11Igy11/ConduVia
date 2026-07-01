@@ -8,8 +8,10 @@ from PySide6.QtCore import QObject, Signal, Slot
 
 from core.case_ingest import scan_case_source
 from core.db import mark_ingest_items_batch, upsert_ingest_items
+from core.import_pause import ImportPauseGate
 from core.loader import load_folder_recursive, load_json_file
 from core.parser import extract_dataset_meta
+from core.import_pause import ImportPauseGate
 from core.project_behavior_index import build_project_behavior_index
 
 
@@ -26,6 +28,7 @@ class DatasetLoadWorker(QObject):
         previous_path: str = "",
         project_id: int | None = None,
         files: list[str] | None = None,
+        pause_gate: ImportPauseGate | None = None,
     ):
         super().__init__()
         self.mode = mode
@@ -33,10 +36,18 @@ class DatasetLoadWorker(QObject):
         self.previous_path = previous_path
         self.project_id = project_id
         self.files = files or []
+        self.pause_gate = pause_gate
+
+    def _wait_if_paused(self) -> bool:
+        if self.pause_gate is None:
+            return True
+        return self.pause_gate.wait_if_paused()
 
     @Slot()
     def run(self):
         try:
+            if not self._wait_if_paused():
+                raise RuntimeError("JSON load paused and stopped.")
             previous_flows = self._load_previous_flows()
 
             if self.mode == "folder":
@@ -51,6 +62,8 @@ class DatasetLoadWorker(QObject):
                 if total:
                     self.progress.emit(0, total, "Starting...")
                 for idx, fp in enumerate(files):
+                    if not self._wait_if_paused():
+                        break
                     flows.extend(load_json_file(fp, debug=False))
                     self.progress.emit(idx + 1, total, fp.name)
                 dataset_label = f"Dataset selection: {self.path}"
@@ -140,13 +153,21 @@ class CaseScanWorker(QObject):
     finished = Signal(object)
     error = Signal(str)
 
-    def __init__(self, folder: str):
+    def __init__(self, folder: str, *, pause_gate: ImportPauseGate | None = None):
         super().__init__()
         self.folder = folder
+        self.pause_gate = pause_gate
+
+    def _wait_if_paused(self) -> bool:
+        if self.pause_gate is None:
+            return True
+        return self.pause_gate.wait_if_paused()
 
     @Slot()
     def run(self):
         try:
+            if not self._wait_if_paused():
+                raise RuntimeError("Folder scan paused and stopped.")
             self.finished.emit(scan_case_source(self.folder))
         except Exception as exc:
             self.error.emit(str(exc))
@@ -156,15 +177,30 @@ class FolderIngestWorker(QObject):
     finished = Signal(object)
     error = Signal(str)
 
-    def __init__(self, project_id: int, folder: str, scan):
+    def __init__(
+        self,
+        project_id: int,
+        folder: str,
+        scan,
+        *,
+        pause_gate: ImportPauseGate | None = None,
+    ):
         super().__init__()
         self.project_id = project_id
         self.folder = folder
         self.scan = scan
+        self.pause_gate = pause_gate
+
+    def _wait_if_paused(self) -> bool:
+        if self.pause_gate is None:
+            return True
+        return self.pause_gate.wait_if_paused()
 
     @Slot()
     def run(self):
         try:
+            if not self._wait_if_paused():
+                raise RuntimeError("Evidence indexing paused and stopped.")
             json_files = list(self.scan.json_files or [])
             pcap_files = list(self.scan.pcap_files or [])
 
