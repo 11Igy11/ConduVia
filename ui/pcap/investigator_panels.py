@@ -377,20 +377,23 @@ class PcapInvestigatorMixin:
         )
         self._set_table(self.tbl_communications, rows)
         if rows:
-            self.tbl_communications.selectRow(0)
-        else:
-            self.txt_communication_detail.clear()
+            self.tbl_communications.clearSelection()
+        self.txt_communication_detail.clear()
+        self._selected_communication_row = None
 
     def _on_communication_selected(self, current: QModelIndex, previous: QModelIndex | None = None) -> None:
         model = self.tbl_communications.model()
         if not isinstance(model, DictTableModel) or not current.isValid():
+            self._selected_communication_row = None
             self.txt_communication_detail.clear()
             return
         if current.row() < 0 or current.row() >= len(model.rows):
+            self._selected_communication_row = None
             self.txt_communication_detail.clear()
             return
 
         row = model.rows[current.row()]
+        self._selected_communication_row = dict(row)
         self.txt_communication_detail.setPlainText(self._communication_detail_text(row))
 
     def _communication_detail_text(self, row: dict[str, Any]) -> str:

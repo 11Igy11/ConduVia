@@ -132,6 +132,8 @@ class PcapAnalysisMixin:
         if auto_save:
             self._sync_save_period_button(saved=True, hide=True)
         self.btn_add_notes.setEnabled(False)
+        if hasattr(self, "btn_mark_finding"):
+            self.btn_mark_finding.setEnabled(False)
         batch_total = max(int(self._pcap_batch_total or 0), len(paths))
         self.lbl_file.setText(self._active_period_title(file_count=batch_total))
         self.lbl_stats.setText("Auto analyzing PCAP batch...")
@@ -272,6 +274,8 @@ class PcapAnalysisMixin:
         self.btn_ai_summary.setEnabled(True)
         self.btn_ai_summary.setText("AI Summary")
         self.btn_add_notes.setEnabled(True)
+        if hasattr(self, "btn_mark_finding"):
+            self.btn_mark_finding.setEnabled(True)
         if source_count > 1 or self._hide_individual_pcap_names(file_count=source_count):
             self.lbl_file.setText(self._active_period_title(file_count=source_count))
         else:
@@ -357,6 +361,8 @@ class PcapAnalysisMixin:
         self.btn_export.setEnabled(bool(last_summary))
         self.btn_ai_summary.setEnabled(bool(last_summary))
         self.btn_add_notes.setEnabled(bool(last_summary))
+        if hasattr(self, "btn_mark_finding"):
+            self.btn_mark_finding.setEnabled(bool(last_summary))
         self._update_open_button_text()
 
         self._set_stats_style("HeaderStatLabel")

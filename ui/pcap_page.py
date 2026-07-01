@@ -92,6 +92,7 @@ class PcapPage(PcapInvestigatorMixin, PcapPeriodMixin, PcapAnalysisMixin, PcapEx
         self._service_chart_full_rows: list[dict[str, Any]] = []
         self._activity_chart_full_rows: list[dict[str, Any]] = []
         self._all_artifacts: list[dict[str, Any]] = []
+        self._selected_communication_row: dict[str, Any] | None = None
         self._build_ui()
 
     def _build_ui(self):
@@ -113,6 +114,7 @@ class PcapPage(PcapInvestigatorMixin, PcapPeriodMixin, PcapAnalysisMixin, PcapEx
         self.btn_save_project = make_action_button("Save Period to Project", enabled=False)
         self.btn_ai_summary = make_action_button("AI Summary", enabled=False)
         self.btn_add_notes = make_action_button("Add to Notes", enabled=False)
+        self.btn_mark_finding = make_action_button("Mark as Finding", enabled=False)
         self.btn_export = make_action_button("Export Summary", enabled=False)
         top.addWidget(self.lbl_title)
         top.addStretch()
@@ -120,6 +122,7 @@ class PcapPage(PcapInvestigatorMixin, PcapPeriodMixin, PcapAnalysisMixin, PcapEx
         top.addWidget(self.btn_save_project)
         top.addWidget(self.btn_ai_summary)
         top.addWidget(self.btn_add_notes)
+        top.addWidget(self.btn_mark_finding)
         top.addWidget(self.btn_export)
 
         self.lbl_file = QLabel("No PCAP loaded")
@@ -225,6 +228,7 @@ class PcapPage(PcapInvestigatorMixin, PcapPeriodMixin, PcapAnalysisMixin, PcapEx
         self.btn_save_project.clicked.connect(self.save_to_project)
         self.btn_ai_summary.clicked.connect(self.generate_ai_summary)
         self.btn_add_notes.clicked.connect(self.add_summary_to_notes)
+        self.btn_mark_finding.clicked.connect(self._mark_pcap_as_finding)
         self.btn_export.clicked.connect(self.export_summary)
         self.btn_reanalyze_period.clicked.connect(self.reanalyze_current_period)
         self.cmb_pcap_day.currentIndexChanged.connect(self._on_pcap_day_changed)
@@ -995,6 +999,10 @@ class PcapPage(PcapInvestigatorMixin, PcapPeriodMixin, PcapAnalysisMixin, PcapEx
 
 
 
+    def _mark_pcap_as_finding(self) -> None:
+        if self.app is not None and hasattr(self.app, "findings_controller"):
+            self.app.findings_controller.mark_pcap_as_finding()
+
     def refresh_current_view(self) -> None:
         if self._thread is not None or self._batch_runner.is_running():
             return
@@ -1013,6 +1021,7 @@ class PcapPage(PcapInvestigatorMixin, PcapPeriodMixin, PcapAnalysisMixin, PcapEx
         self._pcap_queue_auto_save = False
         self._pcap_queue_auto_process = False
         self.summary = None
+        self._selected_communication_row = None
         self._saved_source_id = None
         self._service_chart_full_rows = []
         self._activity_chart_full_rows = []
@@ -1107,6 +1116,7 @@ class PcapPage(PcapInvestigatorMixin, PcapPeriodMixin, PcapAnalysisMixin, PcapEx
             (getattr(self, "btn_export", None), False),
             (getattr(self, "btn_ai_summary", None), False),
             (getattr(self, "btn_add_notes", None), False),
+            (getattr(self, "btn_mark_finding", None), False),
             (getattr(self, "btn_export_full_dns", None), False),
             (getattr(self, "btn_export_full_tls", None), False),
         ):

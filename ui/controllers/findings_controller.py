@@ -6,6 +6,14 @@ from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QMenu
 
 from core.db import add_finding, delete_finding, get_finding, list_findings, update_finding
+from core.pcap_finding import (
+    communication_finding_note,
+    default_communication_finding_title,
+    default_period_finding_title,
+    flow_from_communication_row,
+    flow_from_pcap_summary,
+    period_finding_note,
+)
 from ui.app_helpers import normalize_tags, status_emoji
 from ui.dialogs import finding_details_dialog
 from ui.explore_widgets import AITextWorker
@@ -150,6 +158,71 @@ class FindingsController:
 
         try:
             add_finding(app.current_project_id, app._current_flow, title=title, note=note, tags=tags)
+        except Exception as e:
+            app._message_dialog("Findings", "Failed to create finding.", str(e), width=460)
+            return
+
+        self.refresh_ui()
+        app.notes_controller.refresh_activity_ui()
+        app.tabs.setCurrentIndex(2)
+
+    def mark_pcap_as_finding(self) -> None:
+        app = self.app
+        pcap_page = getattr(app, "pcap_page", None)
+        if pcap_page is None:
+            return
+
+        if app.current_project_id is None:
+            app._message_dialog("Findings", "Select an active project first (Projects -> Open).", width=460)
+            return
+
+        summary = getattr(pcap_page, "summary", None)
+        if summary is None:
+            app._message_dialog("Findings", "Open a PCAP file first.", width=400)
+            return
+
+        selected_row = getattr(pcap_page, "_selected_communication_row", None)
+        if selected_row:
+            flow = flow_from_communication_row(selected_row)
+            default_title = default_communication_finding_title(selected_row)
+            default_note = communication_finding_note(selected_row)
+        else:
+            period_label = ""
+            if hasattr(pcap_page, "_active_period_title"):
+                period_label = str(pcap_page._active_period_title() or "").strip()
+            flow = flow_from_pcap_summary(summary)
+            default_title = default_period_finding_title(summary, period_label=period_label)
+            file_label = str(summary.file_name or summary.file_path or "").strip()
+            default_note = period_finding_note(
+                summary,
+                period_label=period_label,
+                file_label=file_label,
+            )
+
+        title, ok = app._text_input_dialog("New finding", "Title:", text=default_title, width=480)
+        if not ok:
+            return
+        title = (title or "").strip()
+        if not title:
+            return
+
+        note, ok2 = app._multiline_input_dialog(
+            "New finding",
+            "Note (optional):",
+            text=default_note,
+            width=480,
+            height=260,
+        )
+        if not ok2:
+            note = ""
+
+        tags, ok3 = app._text_input_dialog("New finding", "Tags (comma-separated, optional):", width=440)
+        if not ok3:
+            tags = ""
+        tags = normalize_tags(tags)
+
+        try:
+            add_finding(app.current_project_id, flow, title=title, note=note, tags=tags)
         except Exception as e:
             app._message_dialog("Findings", "Failed to create finding.", str(e), width=460)
             return
