@@ -1048,6 +1048,7 @@ def finding_details_dialog(
     title: str,
     finding: dict[str, Any],
     width: int = DIALOG_FORM_WIDTH,
+    for_edit: bool = True,
 ):
     dlg = QDialog(parent)
     dlg.setWindowTitle(title)
@@ -1056,7 +1057,11 @@ def finding_details_dialog(
     layout = QVBoxLayout(dlg)
     _apply_dialog_layout(layout)
 
-    intro = QLabel("Edit the finding summary, analyst note, status and tags in one place.")
+    if for_edit:
+        intro_text = "Edit the finding summary, analyst note, status and tags in one place."
+    else:
+        intro_text = "Add a title, analyst note and tags for the new finding."
+    intro = QLabel(intro_text)
     intro.setWordWrap(True)
     intro.setTextFormat(Qt.PlainText)
     intro.setObjectName("DialogDetailsLabel")
@@ -1066,13 +1071,15 @@ def finding_details_dialog(
     edit_title = _dialog_line_edit(str(finding.get("title") or ""))
     summary_layout.addWidget(_dialog_field_group("Title", edit_title))
 
-    edit_status = QComboBox()
-    edit_status.addItems(["New", "Investigating", "Confirmed", "False Positive"])
-    current_status = str(finding.get("status") or "New")
-    status_index = max(0, edit_status.findText(current_status))
-    edit_status.setCurrentIndex(status_index)
-    edit_status.setFixedHeight(DIALOG_FIELD_HEIGHT)
-    summary_layout.addWidget(_dialog_field_group("Status", edit_status))
+    edit_status = None
+    if for_edit:
+        edit_status = QComboBox()
+        edit_status.addItems(["New", "Investigating", "Confirmed", "False Positive"])
+        current_status = str(finding.get("status") or "New")
+        status_index = max(0, edit_status.findText(current_status))
+        edit_status.setCurrentIndex(status_index)
+        edit_status.setFixedHeight(DIALOG_FIELD_HEIGHT)
+        summary_layout.addWidget(_dialog_field_group("Status", edit_status))
     layout.addWidget(summary_panel)
 
     details_panel, details_layout = _dialog_panel("Details")
@@ -1087,7 +1094,7 @@ def finding_details_dialog(
     layout.addWidget(details_panel, 1)
 
     buttons = QDialogButtonBox()
-    buttons.addButton("Save", QDialogButtonBox.AcceptRole)
+    buttons.addButton("Save" if for_edit else "Create", QDialogButtonBox.AcceptRole)
     buttons.addButton("Cancel", QDialogButtonBox.RejectRole)
     _style_dialog_buttons(buttons)
     buttons.accepted.connect(dlg.accept)
@@ -1105,10 +1112,25 @@ def finding_details_dialog(
 
     return {
         "title": edit_title.text().strip(),
-        "status": edit_status.currentText().strip(),
+        "status": edit_status.currentText().strip() if edit_status is not None else "New",
         "tags": edit_tags.text().strip(),
         "note": edit_note.toPlainText().strip(),
     }, True
+
+
+def new_finding_dialog(
+    parent,
+    *,
+    defaults: dict[str, Any],
+    width: int = DIALOG_FORM_WIDTH,
+):
+    return finding_details_dialog(
+        parent,
+        title="New finding",
+        finding=defaults,
+        width=width,
+        for_edit=False,
+    )
 
 
 def _wrap_layout(inner: QHBoxLayout) -> QWidget:

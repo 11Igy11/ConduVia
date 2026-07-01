@@ -75,6 +75,43 @@ class App(QWidget):
             if not getattr(controller, "_json_day_groups", None):
                 controller._rebuild_json_period_combo()
 
+    def go_to_findings(self, *, pcap_filter: bool = False, from_pcap: bool = False) -> None:
+        if from_pcap:
+            self._remember_pcap_return_context()
+        self.go_to_json_tab(0)
+        if hasattr(self, "tabs"):
+            self.tabs.setCurrentIndex(getattr(self, "IDX_FINDINGS_TAB", 2))
+        if pcap_filter and hasattr(self, "txt_find_search"):
+            self.txt_find_search.setText("PCAP")
+        if hasattr(self, "findings_controller"):
+            self.findings_controller.apply_filter()
+            self.findings_controller.sync_pcap_back_button()
+
+    def go_back_to_pcap(self) -> None:
+        ctx = getattr(self, "_pcap_return_context", None)
+        self._pcap_return_context = None
+        self.go_page(self.IDX_PCAP, self._nav_pcap)
+        pcap_page = getattr(self, "pcap_page", None)
+        if pcap_page is not None and ctx and hasattr(pcap_page, "summary_tabs"):
+            tab = int(ctx.get("summary_tab", 0))
+            if 0 <= tab < pcap_page.summary_tabs.count():
+                pcap_page.summary_tabs.setCurrentIndex(tab)
+        if pcap_page is not None and hasattr(pcap_page, "refresh_current_view"):
+            pcap_page.refresh_current_view()
+        if hasattr(self, "findings_controller"):
+            self.findings_controller.sync_pcap_back_button()
+            self.findings_controller.refresh_pcap_findings_link()
+
+    def _remember_pcap_return_context(self) -> None:
+        pcap_page = getattr(self, "pcap_page", None)
+        if pcap_page is None:
+            self._pcap_return_context = None
+            return
+        summary_tab = 0
+        if hasattr(pcap_page, "summary_tabs"):
+            summary_tab = pcap_page.summary_tabs.currentIndex()
+        self._pcap_return_context = {"summary_tab": summary_tab}
+
     def _build_sidebar(self) -> QFrame:
         return build_sidebar(self)
 
@@ -280,6 +317,7 @@ class App(QWidget):
         self._ai_worker: AITextWorker | None = None
         self._ai_mode: str | None = None
         self._ai_output_state = AIOutputState()
+        self._pcap_return_context: dict[str, int] | None = None
 
     def _build_osint_page(self) -> QWidget:
         return build_osint_page(self)

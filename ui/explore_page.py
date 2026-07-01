@@ -533,6 +533,7 @@ def build_explore_workspace(app: App) -> tuple[QWidget, QFrame]:
     app.findings_split = app.findings_page.findings_split
 
     app.tabs.addTab(app.findings_page, "Findings")
+    app.IDX_FINDINGS_TAB = 2
 
     explore_ai_actions = QHBoxLayout()
     explore_ai_actions.setContentsMargins(0, 0, 8, 0)

@@ -247,8 +247,42 @@ class PcapPage(PcapInvestigatorMixin, PcapPeriodMixin, PcapAnalysisMixin, PcapEx
         self.summary_tabs.addTab(self._build_overview_tab(), "Overview")
         self.ai_summary_tab = self._build_ai_tab()
         self.summary_tabs.addTab(self.ai_summary_tab, "AI Summary")
+        self._wire_summary_findings_link()
         layout.addWidget(self.summary_tabs)
         return page
+
+    def _wire_summary_findings_link(self) -> None:
+        row = QHBoxLayout()
+        row.setContentsMargins(0, 0, 8, 0)
+        row.setSpacing(6)
+        self.btn_pcap_findings = make_action_button("Findings (0)", toolbar=True, enabled=False)
+        self.btn_pcap_findings.setToolTip("Open project findings (PCAP entries are pre-filtered when opened from here)")
+        self.btn_pcap_findings.clicked.connect(self._open_project_findings)
+        row.addWidget(self.btn_pcap_findings)
+        host = QWidget()
+        host.setObjectName("PcapTabActions")
+        host.setLayout(row)
+        host.setFixedHeight(32)
+        self.summary_tabs.setCornerWidget(host, Qt.TopRightCorner)
+
+    def refresh_findings_link(self) -> None:
+        if not hasattr(self, "btn_pcap_findings"):
+            return
+        project_id = self._current_project_id()
+        count = 0
+        if project_id is not None and self.app is not None and hasattr(self.app, "findings_controller"):
+            count = self.app.findings_controller.project_finding_count()
+        self.btn_pcap_findings.setText(f"Findings ({count:,})")
+        self.btn_pcap_findings.setEnabled(project_id is not None)
+
+    def _open_project_findings(self) -> None:
+        if self.app is None:
+            return
+        if self._current_project_id() is None:
+            self._info("Findings", "Open an active project first.")
+            return
+        if hasattr(self.app, "go_to_findings"):
+            self.app.go_to_findings(pcap_filter=True, from_pcap=True)
 
     def _build_evidence_section(self) -> QWidget:
         page = QWidget()

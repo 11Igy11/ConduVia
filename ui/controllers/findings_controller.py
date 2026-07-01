@@ -15,7 +15,7 @@ from core.pcap_finding import (
     period_finding_note,
 )
 from ui.app_helpers import normalize_tags, status_emoji
-from ui.dialogs import finding_details_dialog
+from ui.dialogs import finding_details_dialog, new_finding_dialog
 from ui.explore_widgets import AITextWorker
 from ui.findings_format import format_finding_detail, update_finding_status
 
@@ -82,10 +82,55 @@ class FindingsController:
             app.findings_page.clear_list()
             app.findings_page.add_list_item("(no active project)", None)
             app.findings_page.clear_detail()
+            self.refresh_pcap_findings_link()
             return
 
         self.load_rows(app.current_project_id)
         self.apply_filter()
+        self.refresh_pcap_findings_link()
+
+    def project_finding_count(self) -> int:
+        if self.app.current_project_id is None:
+            return 0
+        return len(self.load_rows(self.app.current_project_id))
+
+    def refresh_pcap_findings_link(self) -> None:
+        pcap_page = getattr(self.app, "pcap_page", None)
+        if pcap_page is not None and hasattr(pcap_page, "refresh_findings_link"):
+            pcap_page.refresh_findings_link()
+
+    def sync_pcap_back_button(self) -> None:
+        visible = bool(getattr(self.app, "_pcap_return_context", None))
+        btn = getattr(self.app.findings_page, "btn_back_to_pcap", None)
+        if btn is not None:
+            btn.setVisible(visible)
+
+    def _prompt_new_finding(self, *, defaults: dict[str, Any]) -> dict[str, str] | None:
+        values, ok = new_finding_dialog(self.app, defaults=defaults)
+        if not ok or not values:
+            return None
+        title = str(values.get("title") or "").strip()
+        if not title:
+            return None
+        return {
+            "title": title,
+            "note": str(values.get("note") or ""),
+            "tags": normalize_tags(str(values.get("tags") or "")),
+        }
+
+    def _after_finding_created(self, *, from_pcap: bool) -> None:
+        app = self.app
+        self.refresh_ui()
+        app.notes_controller.refresh_activity_ui()
+
+        choice = app._choice_dialog(
+            "Finding saved",
+            "The finding was added to the project.",
+            ["Continue", "Open in Findings"],
+            width=420,
+        )
+        if choice == "Open in Findings":
+            app.go_to_findings(pcap_filter=from_pcap, from_pcap=from_pcap)
 
     def apply_filter(self) -> None:
         app = self.app
@@ -136,35 +181,32 @@ class FindingsController:
             app._message_dialog("Findings", "Select a flow first.", width=400)
             return
 
-        default_title = (
-            f"{app.current_value('src_ip')} -> {app.current_value('dst_ip')} "
-            f"({app.current_value('application_name')})"
+        values = self._prompt_new_finding(
+            defaults={
+                "title": (
+                    f"{app.current_value('src_ip')} -> {app.current_value('dst_ip')} "
+                    f"({app.current_value('application_name')})"
+                ),
+                "note": "",
+                "tags": "",
+            },
         )
-        title, ok = app._text_input_dialog("New finding", "Title:", text=default_title, width=480)
-        if not ok:
+        if not values:
             return
-        title = (title or "").strip()
-        if not title:
-            return
-
-        note, ok2 = app._multiline_input_dialog("New finding", "Note (optional):", width=480, height=260)
-        if not ok2:
-            note = ""
-
-        tags, ok3 = app._text_input_dialog("New finding", "Tags (comma-separated, optional):", width=440)
-        if not ok3:
-            tags = ""
-        tags = normalize_tags(tags)
 
         try:
-            add_finding(app.current_project_id, app._current_flow, title=title, note=note, tags=tags)
+            add_finding(
+                app.current_project_id,
+                app._current_flow,
+                title=values["title"],
+                note=values["note"],
+                tags=values["tags"],
+            )
         except Exception as e:
             app._message_dialog("Findings", "Failed to create finding.", str(e), width=460)
             return
 
-        self.refresh_ui()
-        app.notes_controller.refresh_activity_ui()
-        app.tabs.setCurrentIndex(2)
+        self._after_finding_created(from_pcap=False)
 
     def mark_pcap_as_finding(self) -> None:
         app = self.app
@@ -199,37 +241,29 @@ class FindingsController:
                 file_label=file_label,
             )
 
-        title, ok = app._text_input_dialog("New finding", "Title:", text=default_title, width=480)
-        if not ok:
-            return
-        title = (title or "").strip()
-        if not title:
-            return
-
-        note, ok2 = app._multiline_input_dialog(
-            "New finding",
-            "Note (optional):",
-            text=default_note,
-            width=480,
-            height=260,
+        values = self._prompt_new_finding(
+            defaults={
+                "title": default_title,
+                "note": default_note,
+                "tags": "",
+            },
         )
-        if not ok2:
-            note = ""
-
-        tags, ok3 = app._text_input_dialog("New finding", "Tags (comma-separated, optional):", width=440)
-        if not ok3:
-            tags = ""
-        tags = normalize_tags(tags)
+        if not values:
+            return
 
         try:
-            add_finding(app.current_project_id, flow, title=title, note=note, tags=tags)
+            add_finding(
+                app.current_project_id,
+                flow,
+                title=values["title"],
+                note=values["note"],
+                tags=values["tags"],
+            )
         except Exception as e:
             app._message_dialog("Findings", "Failed to create finding.", str(e), width=460)
             return
 
-        self.refresh_ui()
-        app.notes_controller.refresh_activity_ui()
-        app.tabs.setCurrentIndex(2)
+        self._after_finding_created(from_pcap=True)
 
     def explain_selected(self) -> None:
         app = self.app
