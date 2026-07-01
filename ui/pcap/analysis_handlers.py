@@ -194,10 +194,8 @@ class PcapAnalysisMixin:
         self.btn_open.setText("Loading...")
         self.btn_export.setEnabled(False)
         self.btn_ai_summary.setEnabled(False)
-        if hasattr(self, "btn_export_full_dns"):
-            self.btn_export_full_dns.setEnabled(False)
-        if hasattr(self, "btn_export_full_tls"):
-            self.btn_export_full_tls.setEnabled(False)
+        if hasattr(self, "btn_export_metadata"):
+            self.btn_export_metadata.setEnabled(False)
         if hasattr(self, "btn_reanalyze_period"):
             self.btn_reanalyze_period.setEnabled(False)
         self.txt_pcap_ai_summary.clear()
@@ -252,10 +250,8 @@ class PcapAnalysisMixin:
         self.summary = summary
         self._saved_source_id = None
         self.btn_export.setEnabled(True)
-        if hasattr(self, "btn_export_full_dns"):
-            self.btn_export_full_dns.setEnabled(True)
-        if hasattr(self, "btn_export_full_tls"):
-            self.btn_export_full_tls.setEnabled(True)
+        if hasattr(self, "btn_export_metadata"):
+            self.btn_export_metadata.setEnabled(True)
         source_count = len(getattr(summary, "source_paths", None) or [])
         already_saved = self._current_period_already_saved()
         if already_saved:

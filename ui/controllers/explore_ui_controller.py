@@ -1,7 +1,7 @@
-from PySide6.QtWidgets import QMenu
 from ui.explore_widgets import AITextWorker
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QTableView
+from ui.export_menu import popup_export_menu
 from ui.table_export import export_table_dialog
 
 from core.formatters import human_bytes
@@ -298,7 +298,6 @@ class ExploreUIController:
             return
 
         if export_format:
-            flows = self.app.flow_controller.get_all()
             export_table_dialog(
                 self.app,
                 "Flows",
@@ -310,10 +309,17 @@ class ExploreUIController:
             )
             return
 
-        menu = QMenu(self.app.btn_export_flows)
-        for fmt, label in (("csv", "Export CSV"), ("xlsx", "Export Excel"), ("html", "Export HTML")):
-            menu.addAction(label, lambda checked=False, chosen=fmt: self.export_flows_table(chosen))
-        menu.exec(self.app.btn_export_flows.mapToGlobal(self.app.btn_export_flows.rect().bottomLeft()))
+        popup_export_menu(
+            self.app.btn_export_flows,
+            {
+                fmt: (lambda chosen=fmt: self.export_flows_table(chosen))
+                for fmt, _ in (
+                    ("csv", "Export CSV"),
+                    ("xlsx", "Export Excel"),
+                    ("html", "Export HTML"),
+                )
+            },
+        )
 
     def generate_ai_summary(self):
         flows = self.app.flow_controller.get_all()

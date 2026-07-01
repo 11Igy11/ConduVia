@@ -22,8 +22,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ui.buttons import make_action_button, make_dialog_button
 from ui.dict_table_model import DictTableModel
-from ui.buttons import make_action_button
 from ui.explore_widgets import CopyableTableView
 
 ExportFooterFn = Callable[[QHBoxLayout, QTableView], None]
@@ -153,8 +153,7 @@ def open_missing_period_days_dialog(
     if append_export_footer is not None:
         append_export_footer(footer, table)
     footer.addStretch()
-    close_btn = QPushButton("Close")
-    close_btn.setMinimumHeight(42)
+    close_btn = make_dialog_button("Close")
     close_btn.clicked.connect(dlg.accept)
     footer.addWidget(close_btn)
     layout.addLayout(footer)
@@ -208,8 +207,7 @@ def open_dict_table_expand_dialog(
     if append_export_footer is not None:
         append_export_footer(footer, table)
     footer.addStretch()
-    btn_close = QPushButton("Close")
-    btn_close.setMinimumHeight(42)
+    btn_close = make_dialog_button("Close")
     btn_close.clicked.connect(dlg.accept)
     footer.addWidget(btn_close)
     layout.addSpacing(6)
@@ -259,8 +257,7 @@ def open_dict_rows_expand_dialog(
     if append_export_footer is not None:
         append_export_footer(footer, table)
     footer.addStretch()
-    btn_close = QPushButton("Close")
-    btn_close.setMinimumHeight(42)
+    btn_close = make_dialog_button("Close")
     btn_close.clicked.connect(dlg.accept)
     footer.addWidget(btn_close)
     layout.addLayout(footer)
@@ -372,8 +369,7 @@ def open_communication_indicators_dialog(
         btn_mark.clicked.connect(_mark_selected)
         footer.addWidget(btn_mark)
     footer.addStretch()
-    btn_close = QPushButton("Close")
-    btn_close.setMinimumHeight(42)
+    btn_close = make_dialog_button("Close")
     btn_close.clicked.connect(dlg.accept)
     footer.addWidget(btn_close)
     layout.addSpacing(6)

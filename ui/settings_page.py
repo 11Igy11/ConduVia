@@ -27,9 +27,7 @@ SETTINGS_COLUMNS_GAP = 14
 
 
 def _settings_button(text: str, *, destructive: bool = False) -> QPushButton:
-    button = make_action_button(text, destructive=destructive, toolbar=True, tight=True)
-    button.setFixedHeight(DIALOG_FIELD_HEIGHT)
-    return button
+    return make_action_button(text, destructive=destructive, toolbar=True, tight=True)
 
 
 def _settings_line_edit(*, placeholder: str = "", password: bool = False, narrow: bool = False) -> QLineEdit:

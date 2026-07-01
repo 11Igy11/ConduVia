@@ -355,9 +355,7 @@ class App(QWidget):
         self.notes_page = NotesPage(self)
         self.txt_notes = self.notes_page.editor
         self.notes_page.btn_insert_chart.clicked.connect(self.notes_controller.insert_chart)
-        self.notes_page.btn_export_word.clicked.connect(self.notes_controller.export_word)
-        self.notes_page.btn_export_html.clicked.connect(self.notes_controller.export_html)
-        self.notes_page.btn_export_pdf.clicked.connect(self.notes_controller.export_pdf)
+        self.notes_page.btn_export.clicked.connect(self.notes_controller.open_export_menu)
 
         ai_page = build_ai_hub_page(self)
 

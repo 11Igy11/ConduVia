@@ -18,6 +18,8 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+from ui.buttons import make_action_button
+from ui.ui_metrics import ACTION_BUTTON_HEIGHT
 from ui.notes_format import plain_block_to_html
 
 
@@ -91,9 +93,7 @@ class NotesPage(QWidget):
         self.btn_align_justify = self._tool_button("▤", "Justify")
         self.btn_insert_image = self._tool_button("Image", "Insert picture / screenshot")
         self.btn_insert_chart = self._tool_button("Chart", "Insert chart from project profile")
-        self.btn_export_word = self._tool_button("Word", "Export notes to Word document")
-        self.btn_export_html = self._tool_button("HTML", "Export notes to HTML document")
-        self.btn_export_pdf = self._tool_button("PDF", "Export notes to PDF document")
+        self.btn_export = make_action_button("Export", object_name="NotesToolButton")
 
         self.editor = QTextEdit()
         self.editor.setObjectName("NotesEditor")
@@ -144,9 +144,7 @@ class NotesPage(QWidget):
         tools_layout.addWidget(self.btn_insert_chart)
 
         tools_layout.addWidget(self._panel_label("Export"))
-        tools_layout.addWidget(self.btn_export_word)
-        tools_layout.addWidget(self.btn_export_html)
-        tools_layout.addWidget(self.btn_export_pdf)
+        tools_layout.addWidget(self.btn_export)
         tools_layout.addStretch()
 
         body.addWidget(self.editor, 1)
@@ -182,9 +180,7 @@ class NotesPage(QWidget):
             self.btn_align_justify,
             self.btn_insert_image,
             self.btn_insert_chart,
-            self.btn_export_word,
-            self.btn_export_html,
-            self.btn_export_pdf,
+            self.btn_export,
         ):
             widget.setEnabled(active)
         if active:
@@ -221,10 +217,8 @@ class NotesPage(QWidget):
         self.editor.setTextCursor(cursor)
 
     def _tool_button(self, text: str, tooltip: str) -> QPushButton:
-        button = QPushButton(text)
-        button.setToolTip(tooltip)
-        button.setObjectName("NotesToolButton")
-        button.setMinimumHeight(24)
+        button = make_action_button(text, object_name="NotesToolButton", toolbar=True, tight=True, tooltip=tooltip)
+        button.setFixedHeight(ACTION_BUTTON_HEIGHT)
         return button
 
     def _panel_label(self, text: str) -> QLabel:

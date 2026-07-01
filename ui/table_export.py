@@ -11,8 +11,7 @@ from core.exporters.table_exporter import export_table_html
 from core.protocols import format_ip_proto
 from core.workspace import workspace_export_path
 from ui.dialogs import message_dialog
-
-EXPORT_BUTTON_HEIGHT = 42
+from ui.export_menu import connect_table_export_dropdown, make_export_table_button
 
 
 def table_export_data(table: QTableView) -> tuple[list[str], list[list[str]]]:
@@ -147,37 +146,33 @@ def notify_export_error(parent: QWidget, message: str, *, title: str = "Export f
     message_dialog(parent, title, "Export failed.", details=message, width=480)
 
 
-def append_table_export_buttons(
+def append_table_export_dropdown(
     parent: QWidget,
-    footer_layout,
+    footer_layout: QHBoxLayout,
     *,
     title: str,
     table: QTableView,
+    button_text: str = "Export table",
     project_id: int | None = None,
     category: str = "json",
     source_label: str = "",
-) -> None:
-    from ui.buttons import make_action_button
+) -> QWidget:
+    button = make_export_table_button(button_text)
 
-    for export_format, label in (
-        ("csv", "Export CSV"),
-        ("xlsx", "Export Excel"),
-        ("html", "Export HTML"),
-    ):
-        button = make_action_button(label)
-        button.setMinimumHeight(EXPORT_BUTTON_HEIGHT)
-        button.clicked.connect(
-            lambda checked=False, fmt=export_format: export_table_dialog(
-                parent,
-                title,
-                table,
-                fmt,
-                project_id=project_id,
-                category=category,
-                source_label=source_label,
-            )
+    def _export(export_format: str) -> None:
+        export_table_dialog(
+            parent,
+            title,
+            table,
+            export_format,
+            project_id=project_id,
+            category=category,
+            source_label=source_label,
         )
-        footer_layout.addWidget(button)
+
+    connect_table_export_dropdown(button, _export)
+    footer_layout.addWidget(button)
+    return button
 
 
 def append_table_export_footer(
@@ -189,17 +184,23 @@ def append_table_export_footer(
     project_id: int | None = None,
     category: str = "json",
     source_label: str = "",
-) -> None:
-    """Add CSV / Excel / HTML export buttons to a dialog footer row."""
-    append_table_export_buttons(
+    button_text: str = "Export table",
+) -> QWidget:
+    """Add an Export table dropdown to a dialog footer row."""
+    return append_table_export_dropdown(
         parent,
         footer_layout,
         title=title,
         table=table,
+        button_text=button_text,
         project_id=project_id,
         category=category,
         source_label=source_label,
     )
+
+
+# Backward-compatible alias for older imports.
+append_table_export_buttons = append_table_export_dropdown
 
 
 def export_table_dialog(

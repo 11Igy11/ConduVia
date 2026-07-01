@@ -184,9 +184,10 @@ def pick_rows_dialog(
         table.doubleClicked.connect(handle_double_click)
 
     buttons = QDialogButtonBox(QDialogButtonBox.Close)
+    _style_dialog_buttons(buttons)
     buttons.rejected.connect(pick_dlg.reject)
     buttons.accepted.connect(pick_dlg.accept)
-    layout.addWidget(buttons)
+    _add_dialog_buttons(layout, buttons)
     pick_dlg.exec()
 
 
@@ -360,9 +361,9 @@ def choice_dialog(
         if str(choice or "").strip().casefold() != "cancel"
     ]
 
-    actions_row = QHBoxLayout()
-    actions_row.setSpacing(8)
-    actions_row.addStretch(1)
+    footer = QHBoxLayout()
+    footer.setSpacing(8)
+    footer.addStretch(1)
 
     for choice in action_choices:
         btn = make_dialog_button(choice)
@@ -374,18 +375,18 @@ def choice_dialog(
             return handler
 
         btn.clicked.connect(_make_handler())
-        actions_row.addWidget(btn)
+        footer.addWidget(btn)
 
-    actions_row.addStretch(1)
-    layout.addLayout(actions_row)
+    if action_choices:
+        footer.addSpacing(16)
 
-    footer = QHBoxLayout()
-    footer.addStretch(1)
     cancel_btn = make_dialog_button("Cancel")
     cancel_btn.clicked.connect(dlg.reject)
     footer.addWidget(cancel_btn)
+    footer.addStretch(1)
 
-    _add_choice_dialog_footer(layout, footer)
+    layout.addSpacing(12)
+    layout.addLayout(footer)
 
     _fit_compact_dialog(dlg, width)
     ok = dlg.exec() == QDialog.Accepted

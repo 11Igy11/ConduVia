@@ -355,8 +355,7 @@ class PcapPage(PcapInvestigatorMixin, PcapPeriodMixin, PcapAnalysisMixin, PcapEx
         self.txt_communication_detail.setPlaceholderText("Select a communication indicator to see the evidence used for classification.")
         self.txt_communication_detail.hide()
 
-        self.btn_expand_communications = QPushButton("Open full communication table")
-        self.btn_expand_communications.setMinimumHeight(38)
+        self.btn_expand_communications = make_action_button("Open full communication table")
         self.btn_expand_communications.clicked.connect(self._open_communications_dialog)
         self.btn_mark_communication_finding = make_action_button("Mark as Finding", enabled=False)
         self.btn_mark_communication_finding.setToolTip(
@@ -691,14 +690,9 @@ class PcapPage(PcapInvestigatorMixin, PcapPeriodMixin, PcapAnalysisMixin, PcapEx
 
         export_row = QHBoxLayout()
         export_row.setSpacing(10)
-        self.btn_export_full_dns = QPushButton("Export full DNS CSV")
-        self.btn_export_full_dns.setEnabled(False)
-        self.btn_export_full_tls = QPushButton("Export full TLS CSV")
-        self.btn_export_full_tls.setEnabled(False)
-        self.btn_export_full_dns.clicked.connect(lambda: self._export_full_metadata("dns"))
-        self.btn_export_full_tls.clicked.connect(lambda: self._export_full_metadata("tls"))
-        export_row.addWidget(self.btn_export_full_dns)
-        export_row.addWidget(self.btn_export_full_tls)
+        self.btn_export_metadata = make_action_button("Export metadata", enabled=False)
+        self.btn_export_metadata.clicked.connect(self._open_metadata_export_menu)
+        export_row.addWidget(self.btn_export_metadata)
         export_row.addStretch()
         layout.addLayout(export_row)
 
@@ -742,19 +736,17 @@ class PcapPage(PcapInvestigatorMixin, PcapPeriodMixin, PcapAnalysisMixin, PcapEx
         lbl_description.setTextInteractionFlags(Qt.TextSelectableByMouse)
 
         count_label.setMinimumHeight(28)
-        detail_label.setMinimumHeight(36)
+        detail_label.setMinimumHeight(28)
 
         layout.addWidget(lbl_title)
         layout.addWidget(lbl_description)
         layout.addWidget(count_label)
         layout.addWidget(detail_label)
 
-        button.setMinimumHeight(38)
         button_row = QHBoxLayout()
         button_row.setContentsMargins(0, 6, 0, 0)
         button_row.addStretch()
         for extra in extra_buttons or []:
-            extra.setMinimumHeight(38)
             button_row.addWidget(extra)
         button_row.addWidget(button)
         layout.addLayout(button_row)
@@ -1147,8 +1139,7 @@ class PcapPage(PcapInvestigatorMixin, PcapPeriodMixin, PcapAnalysisMixin, PcapEx
             (getattr(self, "btn_mark_finding", None), False),
             (getattr(self, "btn_go_to_findings", None), False),
             (getattr(self, "btn_mark_communication_finding", None), False),
-            (getattr(self, "btn_export_full_dns", None), False),
-            (getattr(self, "btn_export_full_tls", None), False),
+            (getattr(self, "btn_export_metadata", None), False),
         ):
             if button is not None:
                 button.setEnabled(enabled)

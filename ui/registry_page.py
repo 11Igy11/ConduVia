@@ -7,7 +7,7 @@ from core.formatters import bytes_mb_or_b, human_bytes, safe_int, format_short_d
 from core.timeutils import parse_flow_timestamp
 from core.exporters.registry_exporter import export_registry_html
 from ui.table_export import append_table_export_footer
-from ui.buttons import make_action_button
+from ui.buttons import make_action_button, make_dialog_button
 from core.db import get_app_settings, get_project
 from core.workspace import workspace_export_path
 
@@ -1374,8 +1374,7 @@ class RegistryPage(QWidget):
             source_label=str(self._folder or ""),
         )
         footer.addStretch()
-        btn_close = QPushButton("Close")
-        btn_close.setMinimumHeight(42)
+        btn_close = make_dialog_button("Close")
         btn_close.clicked.connect(dlg.accept)
         footer.addWidget(btn_close)
         layout.addSpacing(6)

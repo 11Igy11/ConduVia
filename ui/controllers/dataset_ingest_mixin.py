@@ -685,7 +685,7 @@ class DatasetIngestMixin:
         root.addWidget(detected)
 
         form = QFormLayout()
-        from ui.dialogs import period_date_edit
+        from ui.dialogs import _style_dialog_buttons, period_date_edit
 
         start_edit = period_date_edit(first, first, last)
         end_edit = period_date_edit(last, first, last)
@@ -729,9 +729,7 @@ class DatasetIngestMixin:
         buttons = QDialogButtonBox()
         btn_import = buttons.addButton("Import selected period", QDialogButtonBox.AcceptRole)
         buttons.addButton("Cancel", QDialogButtonBox.RejectRole)
-        for button in buttons.buttons():
-            button.setMinimumHeight(42)
-            button.setMinimumWidth(110)
+        _style_dialog_buttons(buttons)
         buttons.accepted.connect(dlg.accept)
         buttons.rejected.connect(dlg.reject)
         root.addSpacing(6)
