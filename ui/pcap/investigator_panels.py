@@ -5,7 +5,7 @@ from typing import Any
 from PySide6.QtCore import QModelIndex, Qt
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QTableView, QWidget
 
-from core.analysis_limits import PROFILE_CHART_PREVIEW_ROWS
+from core.analysis_limits import PROFILE_CHART_PREVIEW_ROWS, embedded_expand_available, embedded_expand_tooltip
 from core.formatters import format_duration_compact_ms, human_bytes
 from core.pcap_analyzer import PcapSummary
 from core.protocols import format_ip_proto
@@ -68,14 +68,18 @@ class PcapInvestigatorMixin:
         preview = PROFILE_CHART_PREVIEW_ROWS
         service_total = len(service_rows)
         activity_total = len(activity_rows)
-        self.btn_expand_chart_services.setEnabled(service_total > preview)
-        self.btn_expand_chart_activity.setEnabled(activity_total > preview)
-        if service_total > preview:
-            self.btn_expand_chart_services.setToolTip(f"{service_total:,} service groups — chart shows top {preview}.")
+        self.btn_expand_chart_services.setEnabled(embedded_expand_available(service_total))
+        self.btn_expand_chart_activity.setEnabled(embedded_expand_available(activity_total))
+        if embedded_expand_available(service_total):
+            self.btn_expand_chart_services.setToolTip(
+                embedded_expand_tooltip(service_total, preview_rows=preview)
+            )
         else:
             self.btn_expand_chart_services.setToolTip("")
-        if activity_total > preview:
-            self.btn_expand_chart_activity.setToolTip(f"{activity_total:,} buckets — chart shows top {preview} by packets.")
+        if embedded_expand_available(activity_total):
+            self.btn_expand_chart_activity.setToolTip(
+                embedded_expand_tooltip(activity_total, preview_rows=preview)
+            )
         else:
             self.btn_expand_chart_activity.setToolTip("")
 

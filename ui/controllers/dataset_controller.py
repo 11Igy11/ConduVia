@@ -26,6 +26,8 @@ from core.analysis_limits import (
     SUMMARY_CARD_PADDING,
     SUMMARY_CARD_WIDTH,
     SUMMARY_VALUE_COL_WIDTH,
+    embedded_expand_available,
+    embedded_expand_tooltip,
 )
 from core.analyzer import top_applications, top_dst_ips, top_protocols, top_src_ips
 from core.case_ingest import evidence_paths, filter_case_scan, group_evidence_by_date
@@ -158,6 +160,7 @@ class DatasetController(DatasetLoadMixin, DatasetIngestMixin, QObject):
         self._pending_import_banner_message = ""
         self._import_finalize_completed = False
         self._import_finalize_pending = False
+        self._pcap_ingest_day_groups_cache: dict[int, dict[str, list[str]]] = {}
 
     def behavior_index_running(self) -> bool:
         return self._behavior_index_thread is not None
@@ -250,11 +253,9 @@ class DatasetController(DatasetLoadMixin, DatasetIngestMixin, QObject):
                 total = len(top_protocols(flows, limit=100000))
             else:
                 total = len(top_applications(flows, limit=100000))
-            button.setEnabled(total > preview)
-            if total > preview:
-                button.setToolTip(f"{total:,} rows — embedded view shows top {preview}.")
-            else:
-                button.setToolTip("")
+            button.setEnabled(embedded_expand_available(total, preview_rows=preview))
+            tooltip = embedded_expand_tooltip(total, preview_rows=preview)
+            button.setToolTip(tooltip)
 
     def expand_dataset_summary(self, kind: str) -> None:
         flows = self.app.flow_controller.get_all()
@@ -869,10 +870,24 @@ class DatasetController(DatasetLoadMixin, DatasetIngestMixin, QObject):
         if hasattr(self.app, "lbl_stats"):
             self.app.explore_ui_controller.set_json_stats_text(indexed_msg, include_counts=False)
 
-    def sync_pcap_periods_from_project(self, project_id: int | None) -> None:
-        """Restore PCAP period selector from ingest index (lightweight, no auto-load)."""
+    def _cached_pcap_day_groups(self, project_id: int) -> dict[str, list[str]]:
         from core.project_evidence import pcap_day_groups_from_ingest
 
+        cached = self._pcap_ingest_day_groups_cache.get(int(project_id))
+        if cached is not None:
+            return dict(cached)
+        by_day = pcap_day_groups_from_ingest(project_id)
+        self._pcap_ingest_day_groups_cache[int(project_id)] = dict(by_day)
+        return by_day
+
+    def _invalidate_pcap_ingest_day_groups_cache(self, project_id: int | None = None) -> None:
+        if project_id is None:
+            self._pcap_ingest_day_groups_cache.clear()
+            return
+        self._pcap_ingest_day_groups_cache.pop(int(project_id), None)
+
+    def sync_pcap_periods_from_project(self, project_id: int | None) -> None:
+        """Restore PCAP period selector from ingest index (lightweight, no auto-load)."""
         pcap_page = getattr(self.app, "pcap_page", None)
         if pcap_page is None:
             return
@@ -880,7 +895,7 @@ class DatasetController(DatasetLoadMixin, DatasetIngestMixin, QObject):
             pcap_page._clear_day_groups()
             return
 
-        by_day = pcap_day_groups_from_ingest(project_id)
+        by_day = self._cached_pcap_day_groups(project_id)
         if not by_day:
             pcap_page._clear_day_groups()
             return
@@ -1034,9 +1049,11 @@ class DatasetController(DatasetLoadMixin, DatasetIngestMixin, QObject):
         self._import_plan = None
         self._pending_import_banner_message = ""
         self._clear_import_status()
+        self._invalidate_pcap_ingest_day_groups_cache()
 
     def clear_context(self) -> None:
         self.reset_dataset_views()
+
     def shutdown_background_tasks(self, wait_ms: int = 5000) -> None:
         self._close_scan_progress()
         self._close_ingest_progress()

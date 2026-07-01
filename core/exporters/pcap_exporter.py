@@ -67,6 +67,7 @@ def export_pcap_summary_html(
     last_seen = format_flow_datetime(summary.last_seen, milliseconds=True)
     period = f"{first_seen or '-'} - {last_seen or '-'}"
     case_context = build_case_context(project, project_name=project_name)
+    source_summary = _export_source_summary(summary)
 
     hero_cards = "\n".join([
         context_cards_html(case_context, card_class="card", include_dataset_target=False),
@@ -94,7 +95,8 @@ def export_pcap_summary_html(
     html_doc = render_template(template, {
         "LANG": "en",
         "TITLE": text["title"],
-        "FILE_NAME": html.escape(summary.file_name),
+        "FILE_NAME": html.escape(source_summary),
+        "SOURCE_SUMMARY": html.escape(source_summary),
         "EXPORTED_LABEL": text["exported"],
         "EXPORTED_AT": generated_at,
         "SUMMARY_LABEL": text["summary"],
@@ -288,6 +290,24 @@ def _duration_compact(value: Any) -> str:
     return f"{secs}s"
 
 
+def _export_source_summary(summary: PcapSummary) -> str:
+    paths = [
+        str(path)
+        for path in (getattr(summary, "source_paths", None) or [])
+        if str(path or "").strip()
+    ]
+    if not paths and getattr(summary, "file_path", ""):
+        paths = [str(summary.file_path)]
+    count = len(paths)
+    if count == 0:
+        return str(summary.file_name or "PCAP capture")
+    if count == 1:
+        return Path(paths[0]).name
+    preview = ", ".join(Path(path).name for path in paths[:8])
+    suffix = f", +{count - 8} more" if count > 8 else ""
+    return f"{count:,} PCAP files analyzed ({preview}{suffix})"
+
+
 def _report_text() -> dict[str, str]:
     return {
         "title": "ViaNyquist PCAP Report",
@@ -356,4 +376,3 @@ def _report_text() -> dict[str, str]:
         "no_communication_indicators": "No communication indicators.",
         "no_communication_evidence": "No communication evidence details.",
     }
-

@@ -373,6 +373,7 @@ class DatasetIngestMixin:
         self._pending_import_banner_message = ""
         self._clear_import_status()
         project_id = getattr(self.app, "current_project_id", None)
+        self._invalidate_pcap_ingest_day_groups_cache(project_id)
         if project_id is not None:
             self.deferred_sync_project_periods(project_id)
         self._finalize_import_refresh()

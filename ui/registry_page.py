@@ -30,7 +30,7 @@ from ui.registry_widgets import (
     MiniHistogram24Widget,
     registry_chart_palette,
 )
-from core.analysis_limits import EMBEDDED_SUMMARY_TOP_N
+from core.analysis_limits import EMBEDDED_SUMMARY_TOP_N, embedded_expand_available, embedded_expand_tooltip
 
 # ----------------- helpers -----------------
 def _esc(x: Any) -> str:
@@ -1035,13 +1035,10 @@ class RegistryPage(QWidget):
         self._daily_activity_rows = _daily_activity_rows(day_hist, day_bytes)
         self.lbl_day_section.setText(_daily_activity_preview_html(self._daily_activity_rows))
         total_days = len(self._daily_activity_rows)
-        self.btn_expand_daily_activity.setEnabled(total_days > EMBEDDED_SUMMARY_TOP_N)
-        if total_days > EMBEDDED_SUMMARY_TOP_N:
-            self.btn_expand_daily_activity.setToolTip(
-                f"{total_days:,} days in loaded period — preview shows top {EMBEDDED_SUMMARY_TOP_N} by volume."
-            )
-        else:
-            self.btn_expand_daily_activity.setToolTip("")
+        self.btn_expand_daily_activity.setEnabled(embedded_expand_available(total_days))
+        self.btn_expand_daily_activity.setToolTip(
+            embedded_expand_tooltip(total_days, preview_rows=EMBEDDED_SUMMARY_TOP_N)
+        )
 
         self.lbl_hist_title.setText(
             "Hourly pattern (loaded period · by bytes)"
@@ -1208,13 +1205,10 @@ class RegistryPage(QWidget):
 
         self._fit_pairs_height(len(rows))
         total = len(all_rows)
-        self.btn_expand_insights.setEnabled(total > EMBEDDED_SUMMARY_TOP_N)
-        if total > EMBEDDED_SUMMARY_TOP_N:
-            self.btn_expand_insights.setToolTip(
-                f"{total:,} rows in {title} — preview shows top {EMBEDDED_SUMMARY_TOP_N}."
-            )
-        else:
-            self.btn_expand_insights.setToolTip("")
+        self.btn_expand_insights.setEnabled(embedded_expand_available(total))
+        self.btn_expand_insights.setToolTip(
+            embedded_expand_tooltip(total, preview_rows=EMBEDDED_SUMMARY_TOP_N)
+        )
 
     def _expand_insight_current(self) -> None:
         if not self._summary:
