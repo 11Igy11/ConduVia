@@ -106,6 +106,18 @@ class NotesController:
         app._notes_dirty = True
         self.flush()
 
+    def open_export_menu(self) -> None:
+        from ui.export_menu import popup_labeled_menu
+
+        popup_labeled_menu(
+            self.app.notes_page.btn_export,
+            [
+                ("Export Word", self.export_word),
+                ("Export HTML", self.export_html),
+                ("Export PDF", self.export_pdf),
+            ],
+        )
+
     def export_word(self) -> None:
         app = self.app
         result = export_notes_word_action(

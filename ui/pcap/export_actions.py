@@ -116,6 +116,17 @@ class PcapExportMixin:
         except Exception as exc:
             self._error("PCAP export failed", str(exc))
 
+    def _open_metadata_export_menu(self) -> None:
+        from ui.export_menu import popup_labeled_menu
+
+        popup_labeled_menu(
+            self.btn_export_metadata,
+            [
+                ("Export DNS CSV", lambda: self._export_full_metadata("dns")),
+                ("Export TLS CSV", lambda: self._export_full_metadata("tls")),
+            ],
+        )
+
     def export_summary(self):
         if not self.summary:
             self._info("PCAP export", "Open a PCAP file first.")

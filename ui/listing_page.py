@@ -1,6 +1,7 @@
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QFrame, QTableView, QHeaderView, QHBoxLayout, QComboBox, QDialog, QDialogButtonBox, QListWidget, QListWidgetItem, QFileDialog, QInputDialog, QMenu
 from ui.buttons import make_action_button, make_dialog_button
-from ui.dialogs import choice_dialog, message_dialog
+from ui.dialogs import message_dialog
+from ui.export_menu import popup_export_menu
 from PySide6.QtCore import Qt, QAbstractTableModel, QModelIndex
 from core.formatters import (
     format_duration_compact_ms,
@@ -457,7 +458,7 @@ class ListingPage(QWidget):
         self.btn_presets.clicked.connect(self._open_presets_menu)
         self.btn_presets.hide()
 
-        self.btn_export = make_action_button("Export")
+        self.btn_export = make_action_button("Export table")
         self.btn_export.clicked.connect(self._open_export_dialog)
 
         self.view_bar.addWidget(self.lbl_view_mode)
@@ -702,39 +703,26 @@ class ListingPage(QWidget):
             notify_export_empty(self, title="Export")
             return
 
-        format_name = self._choose_export_format()
-        if not format_name:
-            return
-
-        headers, rows = self._get_export_rows()
-
-        if format_name == "csv":
-            self._export_csv(headers, rows)
-            return
-        
-        if format_name == "xlsx":
-            self._export_excel(headers, rows)
-            return
-        
-        if format_name == "html":
-            self._export_html(headers, rows)
-            return
-
-    def _choose_export_format(self):
-        choice = choice_dialog(
-            self,
-            "Export",
-            "Choose export format:",
-            ["CSV", "Excel", "HTML"],
-            width=420,
+        popup_export_menu(
+            self.btn_export,
+            {
+                "csv": self._export_csv_selected,
+                "xlsx": self._export_excel_selected,
+                "html": self._export_html_selected,
+            },
         )
-        if choice == "CSV":
-            return "csv"
-        if choice == "Excel":
-            return "xlsx"
-        if choice == "HTML":
-            return "html"
-        return None
+
+    def _export_csv_selected(self) -> None:
+        headers, rows = self._get_export_rows()
+        self._export_csv(headers, rows)
+
+    def _export_excel_selected(self) -> None:
+        headers, rows = self._get_export_rows()
+        self._export_excel(headers, rows)
+
+    def _export_html_selected(self) -> None:
+        headers, rows = self._get_export_rows()
+        self._export_html(headers, rows)
         
     def _get_export_rows(self):
         headers = []

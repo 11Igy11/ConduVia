@@ -539,10 +539,8 @@ class PcapPeriodMixin:
         )
         self._set_artifact_tables([])
         self.btn_export.setEnabled(False)
-        if hasattr(self, "btn_export_full_dns"):
-            self.btn_export_full_dns.setEnabled(False)
-        if hasattr(self, "btn_export_full_tls"):
-            self.btn_export_full_tls.setEnabled(False)
+        if hasattr(self, "btn_export_metadata"):
+            self.btn_export_metadata.setEnabled(False)
         self.btn_save_project.setText("Saved to Project")
         self.btn_save_project.setEnabled(False)
         self._sync_save_period_button(saved=True)
@@ -756,10 +754,8 @@ class PcapPeriodMixin:
         self.btn_open.setText("Loading...")
         self.btn_export.setEnabled(False)
         self.btn_ai_summary.setEnabled(False)
-        if hasattr(self, "btn_export_full_dns"):
-            self.btn_export_full_dns.setEnabled(False)
-        if hasattr(self, "btn_export_full_tls"):
-            self.btn_export_full_tls.setEnabled(False)
+        if hasattr(self, "btn_export_metadata"):
+            self.btn_export_metadata.setEnabled(False)
         if hasattr(self, "btn_reanalyze_period"):
             self.btn_reanalyze_period.setEnabled(False)
         self.btn_save_project.setEnabled(False)

@@ -393,10 +393,10 @@ QPushButton#RepositoryDangerButton:pressed {
 
 QPushButton#DialogButton,
 QPushButton#DialogInlineButton {
-    padding: 6px 14px;
-    min-width: 84px;
-    min-height: 32px;
-    max-height: 32px;
+    padding: 4px 10px;
+    min-width: 72px;
+    min-height: 28px;
+    max-height: 28px;
     font-size: 12px;
     font-weight: 600;
     border-radius: 8px;
@@ -964,9 +964,10 @@ QMessageBox QLabel {
 }
 
 QMessageBox QPushButton {
-    min-width: 84px;
-    min-height: 32px;
-    padding: 6px 12px;
+    min-width: 72px;
+    min-height: 28px;
+    max-height: 28px;
+    padding: 4px 10px;
 }
 
 QInputDialog {

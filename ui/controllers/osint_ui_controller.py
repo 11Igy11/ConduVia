@@ -814,6 +814,18 @@ class OsintUIController(QObject):
         for name, button in mapping.items():
             button.setEnabled(name in allowed and not busy)
 
+    def open_export_menu(self) -> None:
+        from ui.export_menu import popup_export_menu
+
+        popup_export_menu(
+            self.app.btn_osint_export,
+            {
+                "html": lambda: self.export_results("html"),
+                "csv": lambda: self.export_results("csv"),
+                "xlsx": lambda: self.export_results("xlsx"),
+            },
+        )
+
     def export_results(self, export_format: str) -> None:
         from PySide6.QtWidgets import QFileDialog
 
