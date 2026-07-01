@@ -25,6 +25,7 @@ from core.leaks.encoding import SUPPORTED_ENCODINGS
 from core.leaks.readers import guess_encoding, is_supported, sample_lines
 from core.leaks.schema import DEDICATED_FIELDS
 from ui.leaks_worker import LeakImportWorker
+from ui.buttons import make_action_button, make_dialog_button
 
 _DELIMITERS = [
     (":", "colon  :"),
@@ -69,8 +70,7 @@ class LeaksImportDialog(QDialog):
         file_row = QHBoxLayout()
         self.edit_path = QLineEdit(path)
         self.edit_path.setPlaceholderText("Choose a .txt / .csv / .tsv / .docx file…")
-        btn_browse = QPushButton("Browse…")
-        btn_browse.setObjectName("CompactButton")
+        btn_browse = make_action_button("Browse…", toolbar=True, tight=True)
         btn_browse.clicked.connect(self._browse)
         file_row.addWidget(QLabel("File:"))
         file_row.addWidget(self.edit_path, 1)
@@ -145,10 +145,8 @@ class LeaksImportDialog(QDialog):
 
         buttons = QHBoxLayout()
         buttons.addStretch(1)
-        self.btn_import = QPushButton("Import")
-        self.btn_cancel = QPushButton("Close")
-        self.btn_import.setObjectName("CompactButton")
-        self.btn_cancel.setObjectName("CompactButton")
+        self.btn_import = make_dialog_button("Import")
+        self.btn_cancel = make_dialog_button("Close")
         self.btn_import.clicked.connect(self._start_import)
         self.btn_cancel.clicked.connect(self.reject)
         buttons.addWidget(self.btn_import)

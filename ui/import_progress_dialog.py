@@ -8,10 +8,11 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QProgressBar,
-    QPushButton,
     QVBoxLayout,
     QWidget,
 )
+
+from ui.buttons import make_dialog_button
 
 
 @dataclass
@@ -79,10 +80,8 @@ class ImportProgressDialog(QDialog):
 
         footer = QHBoxLayout()
         footer.addStretch(1)
-        self.btn_pause = QPushButton("Pause")
-        self.btn_pause.setObjectName("DialogButton")
-        self.btn_hide = QPushButton("Hide")
-        self.btn_hide.setObjectName("DialogButton")
+        self.btn_pause = make_dialog_button("Pause")
+        self.btn_hide = make_dialog_button("Hide")
         footer.addWidget(self.btn_pause)
         footer.addWidget(self.btn_hide)
         root.addLayout(footer)

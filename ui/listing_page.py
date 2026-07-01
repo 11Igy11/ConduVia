@@ -1,6 +1,6 @@
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QFrame, QTableView, QHeaderView, QHBoxLayout, QComboBox, QDialog, QDialogButtonBox, QListWidget, QListWidgetItem, QFileDialog, QInputDialog, QMenu
 from ui.buttons import make_action_button, make_dialog_button
-from ui.dialogs import message_dialog
+from ui.dialogs import _style_dialog_buttons, message_dialog
 from ui.export_menu import popup_export_menu
 from PySide6.QtCore import Qt, QAbstractTableModel, QModelIndex
 from core.formatters import (
@@ -308,9 +308,11 @@ class ColumnPickerDialog(QDialog):
         self.buttons = QDialogButtonBox(
             QDialogButtonBox.Ok | QDialogButtonBox.Cancel
         )
+        _style_dialog_buttons(self.buttons)
         self.buttons.accepted.connect(self.accept)
         self.buttons.rejected.connect(self.reject)
 
+        layout.addSpacing(4)
         layout.addWidget(self.buttons)
 
         # ---------- SIGNALS ----------

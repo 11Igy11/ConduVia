@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 from ui.buttons import make_action_button
+from ui.ui_metrics import ACTION_BUTTON_HEIGHT
 from ui.notes_format import plain_block_to_html
 
 
@@ -216,10 +217,8 @@ class NotesPage(QWidget):
         self.editor.setTextCursor(cursor)
 
     def _tool_button(self, text: str, tooltip: str) -> QPushButton:
-        button = QPushButton(text)
-        button.setToolTip(tooltip)
-        button.setObjectName("NotesToolButton")
-        button.setMinimumHeight(24)
+        button = make_action_button(text, object_name="NotesToolButton", toolbar=True, tight=True, tooltip=tooltip)
+        button.setFixedHeight(ACTION_BUTTON_HEIGHT)
         return button
 
     def _panel_label(self, text: str) -> QLabel:

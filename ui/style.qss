@@ -1123,15 +1123,18 @@ QTextEdit#NotesEditor {
 }
 
 QDialog QPushButton {
-    min-width: 84px;
-    min-height: 32px;
-    max-height: 32px;
-    padding: 6px 14px;
+    min-width: 72px;
+    min-height: 28px;
+    max-height: 28px;
+    padding: 4px 10px;
 }
 
 QDialog QPushButton#DialogButton,
 QDialog QPushButton#DialogInlineButton {
     min-width: 32px;
+    min-height: 28px;
+    max-height: 28px;
+    padding: 4px 10px;
 }
 
 QDialog QPushButton#CompactButton,

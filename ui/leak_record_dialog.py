@@ -25,6 +25,7 @@ from core.leaks.db import (
     update_record,
 )
 from core.leaks.schema import DEDICATED_FIELDS, field_label
+from ui.buttons import make_dialog_button
 
 _DEFAULT_TOKENS = [
     "phone", "email", "oib", "fb_id", "first_name", "last_name",
@@ -95,10 +96,8 @@ class LeakRecordDialog(QDialog):
 
         buttons = QHBoxLayout()
         buttons.addStretch(1)
-        self.btn_save = QPushButton("Save")
-        self.btn_cancel = QPushButton("Cancel")
-        self.btn_save.setObjectName("CompactButton")
-        self.btn_cancel.setObjectName("CompactButton")
+        self.btn_save = make_dialog_button("Save")
+        self.btn_cancel = make_dialog_button("Cancel")
         self.btn_save.clicked.connect(self._save)
         self.btn_cancel.clicked.connect(self.reject)
         buttons.addWidget(self.btn_save)
