@@ -75,6 +75,20 @@ MAX_RECENT_UI_ROWS = 500
 PROFILE_CHART_PREVIEW_ROWS = 5
 
 
+def embedded_expand_available(row_count: int, *, preview_rows: int = PROFILE_CHART_PREVIEW_ROWS) -> bool:
+    """Expand/export is available whenever there is at least one row."""
+    return int(row_count or 0) > 0
+
+
+def embedded_expand_tooltip(row_count: int, *, preview_rows: int = PROFILE_CHART_PREVIEW_ROWS) -> str:
+    count = int(row_count or 0)
+    if count <= 0:
+        return ""
+    if count > preview_rows:
+        return f"{count:,} rows available — embedded chart shows top {preview_rows}."
+    return f"{count:,} rows — open the full table to sort or export."
+
+
 def counter_most_common(counter, limit: int):
     if limit <= 0:
         return counter.most_common()

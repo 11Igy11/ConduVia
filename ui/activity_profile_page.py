@@ -21,6 +21,8 @@ from PySide6.QtWidgets import (
 
 from core.analysis_limits import (
     PROFILE_CHART_PREVIEW_ROWS,
+    embedded_expand_available,
+    embedded_expand_tooltip,
 )
 from core.behavior_profile import build_flow_behavior_profile
 from core.period_comparison import PERIOD_COMPARISON_CHART_FOOTER
@@ -916,12 +918,8 @@ class ActivityProfilePage(QWidget):
         preview_limit = PROFILE_CHART_PREVIEW_ROWS
         for chart, count in thresholds.items():
             chart.set_expand_enabled(
-                count > preview_limit,
-                tooltip=(
-                    f"{count:,} rows available — embedded chart shows top {preview_limit}."
-                    if count > preview_limit
-                    else ""
-                ),
+                embedded_expand_available(count, preview_rows=preview_limit),
+                tooltip=embedded_expand_tooltip(count, preview_rows=preview_limit),
             )
 
     def _current_behavior_profile(self) -> dict[str, Any]:

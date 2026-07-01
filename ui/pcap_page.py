@@ -379,8 +379,19 @@ class PcapPage(PcapInvestigatorMixin, PcapPeriodMixin, PcapAnalysisMixin, PcapEx
         self.investigator_card = QFrame()
         self.investigator_card.setObjectName("PcapInvestigatorCard")
         self.investigator_card.setMinimumHeight(165)
-        self.investigator_card.setMaximumHeight(240)
-        card_layout = QVBoxLayout(self.investigator_card)
+        card_outer = QVBoxLayout(self.investigator_card)
+        card_outer.setContentsMargins(0, 0, 0, 0)
+        card_outer.setSpacing(0)
+
+        investigator_scroll = QScrollArea()
+        investigator_scroll.setWidgetResizable(True)
+        investigator_scroll.setFrameShape(QFrame.NoFrame)
+        investigator_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        investigator_scroll.setMinimumHeight(165)
+        investigator_scroll.setMaximumHeight(320)
+
+        investigator_content = QWidget()
+        card_layout = QVBoxLayout(investigator_content)
         card_layout.setContentsMargins(14, 12, 14, 12)
         card_layout.setSpacing(8)
 
@@ -402,6 +413,8 @@ class PcapPage(PcapInvestigatorMixin, PcapPeriodMixin, PcapAnalysisMixin, PcapEx
         card_layout.addWidget(self.lbl_plain_summary)
         card_layout.addWidget(self.lbl_key_points)
         card_layout.addWidget(self.lbl_limitations)
+        investigator_scroll.setWidget(investigator_content)
+        card_outer.addWidget(investigator_scroll)
 
         self.chart_services = BarChartWidget(
             "Visible service groups",
