@@ -36,7 +36,14 @@ def plain_block_to_html(block: str) -> str:
         if body_lines and set(body_lines[-1].strip()) <= {"-"}:
             body_lines.pop()
         body = "\n".join(body_lines).strip()
-        return format_notes_html_block(source=label, title=label, body=body)
+        if " · " in label:
+            source, title = label.split(" · ", 1)
+            source = source.strip()
+            title = title.strip()
+        else:
+            source = label
+            title = label
+        return format_notes_html_block(source=source, title=title, body=body)
 
     ts = datetime.now().strftime("%d.%m.%Y. %H:%M:%S")
     return format_notes_html_block(source=f"Note · {ts}", title="Note", body=text)

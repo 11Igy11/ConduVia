@@ -66,10 +66,10 @@ def build_period_selector_row(
     layout.setContentsMargins(0, DATASET_PERIOD_ROW_TOP_MARGIN, 0, 0)
     layout.setSpacing(DATASET_PERIOD_ROW_SPACING)
     layout.addWidget(period_label)
+    layout.addWidget(mode_combo)
     layout.addWidget(day_combo)
     for widget in middle_widgets:
         layout.addWidget(widget)
-    layout.addWidget(mode_combo)
     layout.addWidget(pick_range_button)
     for widget in trailing_widgets:
         layout.addWidget(widget)

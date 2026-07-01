@@ -1129,57 +1129,23 @@ def _is_messaging_endpoint(host: str, service: str) -> bool:
     return False
 
 
-def _device_side_ips(summary: PcapSummary) -> list[str]:
-    ips: set[str] = set()
-    for flow in summary.flows or []:
-        ip = str(flow.get("src_ip") or "").strip()
-        if ip:
-            ips.add(ip)
-    likely = str(summary.likely_device_ip or "").strip()
-    if likely:
-        ips.add(likely)
-    return sorted(ips)
-
-
-def _device_side_summary_text(summary: PcapSummary) -> str:
-    ips = _device_side_ips(summary)
-    source_count = len(getattr(summary, "source_paths", None) or [])
-    if not ips:
-        return "No clear subscriber-side address stood out in this view."
-    if len(ips) == 1 and source_count <= 1:
-        return f"Most traffic in this capture is associated with {ips[0]}."
-    if len(ips) == 1:
-        return (
-            f"Most traffic in this merged view is associated with {ips[0]}. "
-            "The same device may show a different address on other days."
-        )
-    if len(ips) <= 4:
-        joined = ", ".join(ips)
-        return (
-            f"Traffic in this view uses {len(ips)} subscriber-side addresses ({joined}). "
-            "Treat these as indicators for this period, not as a permanent device ID."
-        )
-    examples = ", ".join(ips[:3])
+def _communication_summary_text(summary: PcapSummary) -> str:
+    rows = list(summary.communication_rows or [])
+    if not rows:
+        return "No communication indicators were classified in this view."
+    services: list[str] = []
+    seen: set[str] = set()
+    for row in rows:
+        service = str(row.get("service") or "").strip()
+        if service and service not in seen:
+            seen.add(service)
+            services.append(service)
+        if len(services) >= 5:
+            break
+    service_text = ", ".join(services) if services else "mixed services"
     return (
-        f"In this period, traffic was seen from {len(ips):,} different subscriber-side addresses"
-        f"{f' (for example {examples})' if examples else ''}. "
-        "On mobile or carrier networks the handset often receives a new address each day, "
-        "so focus on services, timing and volume rather than one fixed IP across the case."
+        f"{len(rows):,} communication indicators were identified, mainly involving {service_text}."
     )
-
-
-def _device_side_key_points(summary: PcapSummary) -> list[str]:
-    ips = _device_side_ips(summary)
-    if not ips:
-        return ["Subscriber-side addresses: not clearly identified in this view"]
-    if len(ips) == 1:
-        return [f"Main subscriber-side address in this view: {ips[0]}"]
-    if len(ips) <= 4:
-        return [f"Subscriber-side addresses in this view: {', '.join(ips)}"]
-    return [
-        f"Subscriber-side addresses in this period: {len(ips):,} "
-        "(multiple addresses per day are common on mobile networks)"
-    ]
 
 
 def _plain_summary(
@@ -1188,35 +1154,44 @@ def _plain_summary(
     visibility_rows: list[dict[str, Any]],
 ) -> str:
     duration = _duration_words(summary.duration_seconds)
-    device_text = _device_side_summary_text(summary)
-    top_services = ", ".join(row["service"] for row in service_rows[:5]) or "no clear service groups"
+    source_count = len(getattr(summary, "source_paths", None) or []) or 1
+    scope = f"{source_count:,} PCAP files" if source_count > 1 else "one PCAP file"
+    comm_text = _communication_summary_text(summary)
+    top_services = ", ".join(row["service"] for row in service_rows[:5]) or "no dominant service groups"
     encrypted = next((row for row in visibility_rows if row["label"].startswith("Encrypted")), None)
     encrypted_text = ""
     if encrypted and encrypted.get("count"):
-        encrypted_text = f" Most traffic indicators are encrypted or metadata-only ({encrypted['count']:,} packets matched common encrypted service ports)."
+        encrypted_text = (
+            f" Most sessions look encrypted or metadata-only "
+            f"({encrypted['count']:,} packets on common encrypted service ports)."
+        )
 
-    credential_text = "No plaintext credentials were observed in this capture."
+    credential_text = "No plaintext credentials were observed in readable samples."
     if any("credential" in str(sample.get("type", "")).lower() for sample in summary.readable_samples):
         credential_text = "Potential credential-like plaintext was observed and should be reviewed carefully."
 
     return (
-        f"This capture covers {duration}. {device_text} "
-        f"The strongest visible service indicators are {top_services}.{encrypted_text} "
-        f"{credential_text} Use the Evidence tab for DNS names, TLS hosts and sample payloads."
+        f"This view covers {duration} across {scope}. "
+        f"{comm_text} "
+        f"Visible metadata groups include {top_services}.{encrypted_text} "
+        f"{credential_text} "
+        f"Open Communications for classified activity and Evidence for DNS, TLS hosts and payloads."
     )
 
 
 def _key_points(summary: PcapSummary, service_rows: list[dict[str, Any]]) -> list[str]:
-    points = list(_device_side_key_points(summary))
-    points.extend([
-        f"Capture period: {_fmt_pcap_dt(summary.first_seen)} to {_fmt_pcap_dt(summary.last_seen)}",
+    points = [
+        f"Capture window: {_fmt_pcap_dt(summary.first_seen)} to {_fmt_pcap_dt(summary.last_seen)}",
         f"Packets: {summary.packet_count:,}; volume: {human_bytes(summary.wire_bytes, precision=2)}",
         f"Visible DNS names: {_visible_count(summary.total_dns_names, len(summary.dns_queries))}; "
         f"TLS SNI hosts: {_visible_count(summary.total_tls_sni_hosts, len(summary.tls_sni))}; "
         f"HTTP hosts: {_visible_count(summary.total_http_hosts, len(summary.http_hosts))}",
-    ])
+    ]
+    comm_count = len(summary.communication_rows or [])
+    if comm_count:
+        points.append(f"Communication indicators: {comm_count:,}")
     if service_rows:
-        points.append("Most visible service groups: " + ", ".join(row["service"] for row in service_rows[:5]))
+        points.append("Top service groups: " + ", ".join(row["service"] for row in service_rows[:5]))
     return points
 
 

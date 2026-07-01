@@ -374,52 +374,56 @@ class PcapExportMixin:
             self.app.go_to_notes()
         self._info("Notes", "PCAP summary added to project notes.")
 
+    def _notes_period_title(self) -> str:
+        day = str(getattr(self, "_pcap_active_day", "") or "")
+        if not day and hasattr(self, "cmb_pcap_day"):
+            day = str(self.cmb_pcap_day.currentData() or "")
+        if day and hasattr(self, "_format_day_label"):
+            from core.period_groups import is_range_period_key
+
+            if not is_range_period_key(day):
+                return self._format_day_label(day)
+        if hasattr(self, "cmb_pcap_day"):
+            label = str(self.cmb_pcap_day.currentText() or "").strip()
+            if label:
+                return label
+        return str(self.summary.file_name or "PCAP period")
+
     def _make_notes_block(self) -> str:
         if not self.summary:
             return ""
 
         investigator = build_investigator_view(self.summary)
-        ts = datetime.now().strftime("%d.%m.%Y. %H:%M:%S")
+        period = self._notes_period_title()
+        source_paths = list(getattr(self.summary, "source_paths", None) or [])
+        file_count = max(1, len(source_paths))
+
         lines = [
-            f"[PCAP summary added: {ts}]",
-            f"File: {self.summary.file_name}",
-            f"Source: {self.summary.file_path}",
-            f"Device IP: {self.summary.likely_device_ip or '-'}",
-            f"Capture period: {self._format_pcap_range(self.summary.first_seen, self.summary.last_seen)}",
-            f"Packets: {self.summary.packet_count:,}",
-            f"Volume: {human_bytes(self.summary.wire_bytes, precision=2)}",
+            f"[PCAP summary · {period}]",
+            f"Files analysed: {file_count:,}",
+            f"Capture window: {self._format_pcap_range(self.summary.first_seen, self.summary.last_seen)}",
+            f"Volume: {self.summary.packet_count:,} packets / {human_bytes(self.summary.wire_bytes, precision=2)}",
             "",
             str(investigator.get("plain_summary") or ""),
-            "",
-            "Key points:",
         ]
-        for point in investigator.get("key_points") or []:
-            lines.append(f"- {point}")
         comm_rows = list(self.summary.communication_rows or [])
         if comm_rows:
             lines.extend([
                 "",
-                "Communication highlights (top 5):",
+                "Top communication indicators:",
             ])
             for row in comm_rows[:5]:
                 lines.append(
                     f"- {row.get('service')}: {row.get('activity_type')} "
-                    f"({row.get('confidence')} confidence) - {row.get('evidence')}"
+                    f"({row.get('confidence')} confidence) — {row.get('evidence')}"
                 )
             if len(comm_rows) > 5:
-                lines.append(f"- … and {len(comm_rows) - 5:,} more indicators in the Communications tab")
-        lines.extend([
-            "",
-            "Artifact categories:",
-        ])
-        for row in self._artifact_category_counts():
-            lines.append(f"- {row['category']}: {row['count']}")
-        lines.extend([
-            "",
-            "Limitations:",
-        ])
-        for item in investigator.get("limitations") or []:
-            lines.append(f"- {item}")
+                lines.append(f"- … {len(comm_rows) - 5:,} more in the Communications tab")
+        limitations = list(investigator.get("limitations") or [])
+        if limitations:
+            lines.extend(["", "Limitations:"])
+            for item in limitations[:3]:
+                lines.append(f"- {item}")
         lines.append("-" * 60)
         return "\n".join(lines) + "\n"
 
