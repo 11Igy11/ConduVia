@@ -134,6 +134,10 @@ class DatasetLoadMixin:
         self._sync_json_gap_visibility()
 
     def _show_dataset_load_progress(self, *, file_count: int, period_label: str = "") -> None:
+        if self.import_session_active():
+            label = period_label or "Loading JSON period..."
+            self.route_json_load_progress(0, file_count if file_count > 1 else 0, label, period_label=label)
+            return
         self._close_dataset_load_progress()
         bar = getattr(self.app, "json_load_progress", None)
         if bar is None:
@@ -155,6 +159,8 @@ class DatasetLoadMixin:
         self._dataset_load_progress = bar
 
     def _on_dataset_load_progress(self, current: int, total: int, file_name: str) -> None:
+        if self.route_json_load_progress(current, total, file_name):
+            return
         bar = self._dataset_load_progress or getattr(self.app, "json_load_progress", None)
         if bar is None:
             return
@@ -378,6 +384,7 @@ class DatasetLoadMixin:
             previous_path=previous_path,
             project_id=self.app.current_project_id,
             files=files,
+            pause_gate=self.import_pause_gate() if self.import_session_active() else None,
         )
 
         self._load_worker.moveToThread(self._load_thread)

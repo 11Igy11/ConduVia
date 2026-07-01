@@ -15,6 +15,7 @@ from core.db import (
     save_pcap_period_summary,
 )
 from core.formatters import human_bytes
+from core.import_pause import ImportPauseGate
 from core.period_groups import is_range_period_key, period_group_label
 from core.pcap_analyzer import (
     PcapSummary,
@@ -60,6 +61,7 @@ class PcapBatchWorker(QObject):
         project_id: int | None = None,
         auto_save: bool = False,
         day_groups: dict[str, list[str]] | None = None,
+        pause_gate: ImportPauseGate | None = None,
     ):
         super().__init__()
         self.paths = [str(path) for path in paths if str(path or "").strip()]
@@ -70,7 +72,13 @@ class PcapBatchWorker(QObject):
             for day, day_paths in (day_groups or {}).items()
             if str(day or "").strip() and day != "undated"
         }
+        self.pause_gate = pause_gate
         self.stop_requested = False
+
+    def _wait_if_paused(self) -> bool:
+        if self.pause_gate is None:
+            return True
+        return self.pause_gate.wait_if_paused()
 
     def request_stop(self) -> None:
         self.stop_requested = True
@@ -90,7 +98,7 @@ class PcapBatchWorker(QObject):
         total = sum(len(paths) for _day, paths in jobs)
 
         for period_day, day_paths in jobs:
-            if self.stop_requested:
+            if self.stop_requested or not self._wait_if_paused():
                 break
             if not day_paths:
                 continue
@@ -99,7 +107,7 @@ class PcapBatchWorker(QObject):
             day_merged: PcapSummary | None = None
 
             for path in day_paths:
-                if self.stop_requested:
+                if self.stop_requested or not self._wait_if_paused():
                     break
 
                 current_name = Path(path).name

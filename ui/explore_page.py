@@ -119,6 +119,9 @@ def build_explore_workspace(app: App) -> tuple[QWidget, QFrame]:
     header_top.setSpacing(4)
 
     header_top.addWidget(app.lbl_project_banner)
+    app.btn_show_import_progress = make_action_button("Show import progress")
+    app.btn_show_import_progress.hide()
+    header_top.addWidget(app.btn_show_import_progress)
     header_top.addStretch()
     header_top.addWidget(QLabel("Page size:"))
     header_top.addWidget(app.cmb_page_size)

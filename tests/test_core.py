@@ -1461,6 +1461,28 @@ class OsintTests(unittest.TestCase):
         self.assertIsNotNone(loaded)
         self.assertIn("DNS and TLS", loaded["body_text"])
 
+    def test_import_pause_gate_blocks_until_resume(self):
+        from core.import_pause import ImportPauseGate
+        import threading
+        import time
+
+        gate = ImportPauseGate()
+        seen: list[str] = []
+
+        def worker() -> None:
+            seen.append("before")
+            gate.wait_if_paused()
+            seen.append("after")
+
+        gate.pause()
+        thread = threading.Thread(target=worker)
+        thread.start()
+        time.sleep(0.05)
+        self.assertEqual(seen, ["before"])
+        gate.resume()
+        thread.join(timeout=2.0)
+        self.assertEqual(seen, ["before", "after"])
+
     def test_osint_settings_roundtrip(self):
         settings = OsintSettings(virustotal_api_key="vt-key", shodan_api_key="sh-key")
         restored = OsintSettings.from_mapping(settings.to_mapping())

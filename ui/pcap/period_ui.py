@@ -648,6 +648,10 @@ class PcapPeriodMixin:
         self._sync_period_gap_visibility()
 
     def _show_period_load_progress(self, paths: list[str], *, label: str = "", total: int = 0) -> None:
+        controller = getattr(self.app, "dataset_controller", None) if self.app else None
+        if controller is not None and controller.import_session_active():
+            controller.route_pcap_batch_progress(0, total or len(paths), current_file=label)
+            return
         if not hasattr(self, "load_progress"):
             return
         text = label or f"Loading {len(paths):,} PCAP files for selected period..."
@@ -667,6 +671,14 @@ class PcapPeriodMixin:
         self._sync_period_gap_visibility()
 
     def _update_period_load_progress(self, current: int, total: int, label: str = "", *, current_file: str = "") -> None:
+        controller = getattr(self.app, "dataset_controller", None) if self.app else None
+        if controller is not None and controller.import_session_active():
+            controller.route_pcap_batch_progress(
+                current,
+                total,
+                current_file=current_file or label,
+            )
+            return
         bar = getattr(self, "load_progress", None)
         if bar is None or bar.isHidden():
             return

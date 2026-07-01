@@ -22,6 +22,7 @@ def wire_app_ui(app: App) -> None:
     app.btn_expand_json_gaps.clicked.connect(app.dataset_controller.open_json_missing_days_dialog)
 
     app.btn_load.clicked.connect(app.dataset_controller.load_dataset_dialog)
+    app.btn_show_import_progress.clicked.connect(app.dataset_controller.show_import_progress_dialog)
     app.btn_ai_summary.clicked.connect(app.explore_ui_controller.generate_ai_summary)
     app.btn_add_ai_to_notes.clicked.connect(app.add_ai_summary_to_notes)
     app.btn_toggle_conv.clicked.connect(app.explore_ui_controller.toggle_conversation)
