@@ -308,6 +308,8 @@ class PcapAnalysisMixin:
         self._set_connections_table(summary)
         self._sync_period_selector_to_summary(summary)
         self._update_reanalyze_button_state()
+        if hasattr(self, "_schedule_investigator_layout_refresh"):
+            self._schedule_investigator_layout_refresh()
 
     def _on_error(self, message: str):
         self._close_period_load_progress()

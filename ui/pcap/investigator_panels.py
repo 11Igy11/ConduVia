@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from PySide6.QtCore import QModelIndex, Qt
+from PySide6.QtCore import QModelIndex, Qt, QTimer
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QTableView, QWidget
 
 from core.analysis_limits import PROFILE_CHART_PREVIEW_ROWS, embedded_expand_available, embedded_expand_tooltip
@@ -82,6 +82,32 @@ class PcapInvestigatorMixin:
             )
         else:
             self.btn_expand_chart_activity.setToolTip("")
+        self._schedule_investigator_layout_refresh()
+
+    def _refresh_investigator_layout(self) -> None:
+        scroll = getattr(self, "summary_scroll", None)
+        for name in (
+            "lbl_plain_summary",
+            "lbl_key_points",
+            "lbl_limitations",
+            "investigator_card",
+            "chart_services",
+            "chart_activity",
+            "visibility_panel",
+        ):
+            widget = getattr(self, name, None)
+            if widget is not None:
+                widget.updateGeometry()
+        if scroll is not None:
+            content = scroll.widget()
+            if content is not None:
+                content.adjustSize()
+            scroll.verticalScrollBar().setValue(0)
+            scroll.viewport().update()
+
+    def _schedule_investigator_layout_refresh(self) -> None:
+        self._refresh_investigator_layout()
+        QTimer.singleShot(0, self._refresh_investigator_layout)
 
     def _expand_service_chart(self) -> None:
         rows = [

@@ -550,6 +550,7 @@ class PcapPeriodMixin:
         self.btn_add_notes.setEnabled(bool(plain))
         if hasattr(self, "btn_mark_finding"):
             self.btn_mark_finding.setEnabled(bool(plain))
+        self._schedule_investigator_layout_refresh()
         self._sync_period_selector_panel()
         self._update_reanalyze_button_state()
 

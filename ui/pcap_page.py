@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
     QProgressBar,
     QPushButton,
     QScrollArea,
+    QSizePolicy,
     QTableView,
     QTabWidget,
     QTextEdit,
@@ -399,30 +400,19 @@ class PcapPage(PcapInvestigatorMixin, PcapPeriodMixin, PcapAnalysisMixin, PcapEx
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.NoFrame)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.summary_scroll = scroll
 
         content = QWidget()
+        content.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Minimum)
         layout = QVBoxLayout(content)
         layout.setContentsMargins(12, 12, 12, 12)
         layout.setSpacing(14)
 
         self.investigator_card = QFrame()
         self.investigator_card.setObjectName("PcapInvestigatorCard")
-        self.investigator_card.setMinimumHeight(165)
         card_outer = QVBoxLayout(self.investigator_card)
-        card_outer.setContentsMargins(0, 0, 0, 0)
-        card_outer.setSpacing(0)
-
-        investigator_scroll = QScrollArea()
-        investigator_scroll.setWidgetResizable(True)
-        investigator_scroll.setFrameShape(QFrame.NoFrame)
-        investigator_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        investigator_scroll.setMinimumHeight(165)
-        investigator_scroll.setMaximumHeight(320)
-
-        investigator_content = QWidget()
-        card_layout = QVBoxLayout(investigator_content)
-        card_layout.setContentsMargins(14, 12, 14, 12)
-        card_layout.setSpacing(8)
+        card_outer.setContentsMargins(14, 12, 14, 12)
+        card_outer.setSpacing(8)
 
         self.lbl_plain_summary = QLabel("Open a PCAP file to see a plain-language investigation view.")
         self.lbl_plain_summary.setObjectName("PcapPlainSummary")
@@ -439,11 +429,9 @@ class PcapPage(PcapInvestigatorMixin, PcapPeriodMixin, PcapAnalysisMixin, PcapEx
         self.lbl_limitations.setWordWrap(True)
         self.lbl_limitations.setTextInteractionFlags(Qt.TextSelectableByMouse)
 
-        card_layout.addWidget(self.lbl_plain_summary)
-        card_layout.addWidget(self.lbl_key_points)
-        card_layout.addWidget(self.lbl_limitations)
-        investigator_scroll.setWidget(investigator_content)
-        card_outer.addWidget(investigator_scroll)
+        card_outer.addWidget(self.lbl_plain_summary)
+        card_outer.addWidget(self.lbl_key_points)
+        card_outer.addWidget(self.lbl_limitations)
 
         self.chart_services = BarChartWidget(
             "Visible service groups",
@@ -509,10 +497,9 @@ class PcapPage(PcapInvestigatorMixin, PcapPeriodMixin, PcapAnalysisMixin, PcapEx
         top.addWidget(services_widget, 1)
         top.addWidget(activity_widget, 1)
 
-        layout.addWidget(self.investigator_card, 0)
-        layout.addLayout(top, 2)
-        layout.addWidget(self.visibility_panel, 1)
-        layout.addStretch()
+        layout.addWidget(self.investigator_card)
+        layout.addLayout(top)
+        layout.addWidget(self.visibility_panel)
 
         scroll.setWidget(content)
         page_layout.addWidget(scroll, 1)
