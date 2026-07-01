@@ -23,6 +23,7 @@ from core.db import (
     list_saved_pcap_period_days,
     create_project,
     file_sha256,
+    get_ai_output,
     get_app_setting,
     get_app_settings,
     get_latest_osint_lookup,
@@ -30,6 +31,7 @@ from core.db import (
     get_project_behavior_profile,
     init_db,
     list_activity,
+    list_ai_outputs,
     list_pcap_sources,
     list_project_pcap_device_ips,
     ingest_status_map,
@@ -38,6 +40,7 @@ from core.db import (
     list_recent_datasets,
     mark_ingest_item,
     save_osint_lookup,
+    save_ai_output,
     save_project_behavior_profile,
     set_app_setting,
     set_project_subject,
@@ -1436,6 +1439,27 @@ class OsintTests(unittest.TestCase):
         self.assertIsNotNone(latest)
         self.assertEqual(latest["summary"], "DNS for example.com")
         self.assertEqual(latest["details"]["A"], ["93.184.216.34"])
+
+    def test_ai_output_history_is_persisted(self):
+        with temporary_directory() as tmp:
+            db_path = Path(tmp) / "ai_history.db"
+            init_db(db_path)
+            project_id = create_project("AI History Case", db_path=db_path)
+            output_id = save_ai_output(
+                project_id,
+                source="PCAP",
+                title="PCAP AI Summary",
+                body_text="Observed DNS and TLS indicators for the selected period.",
+                db_path=db_path,
+            )
+            rows = list_ai_outputs(project_id, db_path=db_path)
+            loaded = get_ai_output(output_id, db_path=db_path)
+
+        self.assertGreater(output_id, 0)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["title"], "PCAP AI Summary")
+        self.assertIsNotNone(loaded)
+        self.assertIn("DNS and TLS", loaded["body_text"])
 
     def test_osint_settings_roundtrip(self):
         settings = OsintSettings(virustotal_api_key="vt-key", shodan_api_key="sh-key")

@@ -25,9 +25,11 @@ def build_ai_hub_page(app: App) -> QWidget:
     ai_title_row = QHBoxLayout()
     app.lbl_ai_hub_title = QLabel("AI Summary")
     app.lbl_ai_hub_title.setObjectName("HeaderProjectLabel")
+    app.btn_ai_hub_history = make_action_button("History")
     app.btn_ai_hub_add_notes = make_action_button("Add to Notes", enabled=False)
     ai_title_row.addWidget(app.lbl_ai_hub_title)
     ai_title_row.addStretch()
+    ai_title_row.addWidget(app.btn_ai_hub_history)
     ai_title_row.addWidget(app.btn_ai_hub_add_notes)
 
     app.lbl_ai_hub_context = QLabel(
@@ -48,4 +50,5 @@ def build_ai_hub_page(app: App) -> QWidget:
     ai_root.addWidget(app.txt_ai_hub, 1)
 
     app.btn_ai_hub_add_notes.clicked.connect(app.add_ai_hub_to_notes)
+    app.btn_ai_hub_history.clicked.connect(app.show_ai_output_history)
     return ai_page
