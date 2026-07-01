@@ -115,6 +115,7 @@ class PcapPage(PcapInvestigatorMixin, PcapPeriodMixin, PcapAnalysisMixin, PcapEx
         self.btn_ai_summary = make_action_button("AI Summary", enabled=False)
         self.btn_add_notes = make_action_button("Add to Notes", enabled=False)
         self.btn_mark_finding = make_action_button("Mark as Finding", enabled=False)
+        self.btn_mark_finding.setToolTip("Save the loaded PCAP period/day as a project finding.")
         self.btn_export = make_action_button("Export Summary", enabled=False)
         top.addWidget(self.lbl_title)
         top.addStretch()
@@ -228,7 +229,7 @@ class PcapPage(PcapInvestigatorMixin, PcapPeriodMixin, PcapAnalysisMixin, PcapEx
         self.btn_save_project.clicked.connect(self.save_to_project)
         self.btn_ai_summary.clicked.connect(self.generate_ai_summary)
         self.btn_add_notes.clicked.connect(self.add_summary_to_notes)
-        self.btn_mark_finding.clicked.connect(self._mark_pcap_as_finding)
+        self.btn_mark_finding.clicked.connect(self._mark_pcap_period_as_finding)
         self.btn_export.clicked.connect(self.export_summary)
         self.btn_reanalyze_period.clicked.connect(self.reanalyze_current_period)
         self.cmb_pcap_day.currentIndexChanged.connect(self._on_pcap_day_changed)
@@ -372,6 +373,11 @@ class PcapPage(PcapInvestigatorMixin, PcapPeriodMixin, PcapAnalysisMixin, PcapEx
         self.btn_expand_communications = QPushButton("Open full communication table")
         self.btn_expand_communications.setMinimumHeight(38)
         self.btn_expand_communications.clicked.connect(self._open_communications_dialog)
+        self.btn_mark_communication_finding = make_action_button("Mark as Finding", enabled=False)
+        self.btn_mark_communication_finding.setToolTip(
+            "Save the selected communication indicator as a finding. Select a row in the full table first."
+        )
+        self.btn_mark_communication_finding.clicked.connect(self._mark_pcap_communication_as_finding)
 
         brief_group = self._group("Investigation brief", self.lbl_highlights_brief)
         brief_group.setMaximumHeight(160)
@@ -390,6 +396,7 @@ class PcapPage(PcapInvestigatorMixin, PcapPeriodMixin, PcapAnalysisMixin, PcapEx
             self.lbl_communication_count,
             self.lbl_communication_breakdown,
             self.btn_expand_communications,
+            extra_buttons=[self.btn_mark_communication_finding],
         )
         layout.addWidget(brief_group)
         layout.addWidget(communication_card, 0)
@@ -745,6 +752,8 @@ class PcapPage(PcapInvestigatorMixin, PcapPeriodMixin, PcapAnalysisMixin, PcapEx
         count_label: QLabel,
         detail_label: QLabel,
         button: QPushButton,
+        *,
+        extra_buttons: list[QPushButton] | None = None,
     ) -> QFrame:
         card = QFrame()
         card.setObjectName("Card")
@@ -773,6 +782,9 @@ class PcapPage(PcapInvestigatorMixin, PcapPeriodMixin, PcapAnalysisMixin, PcapEx
         button_row = QHBoxLayout()
         button_row.setContentsMargins(0, 6, 0, 0)
         button_row.addStretch()
+        for extra in extra_buttons or []:
+            extra.setMinimumHeight(38)
+            button_row.addWidget(extra)
         button_row.addWidget(button)
         layout.addLayout(button_row)
         return card
@@ -1033,9 +1045,19 @@ class PcapPage(PcapInvestigatorMixin, PcapPeriodMixin, PcapAnalysisMixin, PcapEx
 
 
 
-    def _mark_pcap_as_finding(self) -> None:
+    def _mark_pcap_period_as_finding(self) -> None:
         if self.app is not None and hasattr(self.app, "findings_controller"):
-            self.app.findings_controller.mark_pcap_as_finding()
+            self.app.findings_controller.mark_pcap_period_as_finding()
+
+    def _mark_pcap_communication_as_finding(self) -> None:
+        if self.app is not None and hasattr(self.app, "findings_controller"):
+            self.app.findings_controller.mark_pcap_communication_as_finding()
+
+    def _sync_communication_finding_button(self) -> None:
+        if not hasattr(self, "btn_mark_communication_finding"):
+            return
+        enabled = bool(getattr(self, "_selected_communication_row", None)) and self.summary is not None
+        self.btn_mark_communication_finding.setEnabled(enabled)
 
     def refresh_current_view(self) -> None:
         if self._thread is not None or self._batch_runner.is_running():
@@ -1056,6 +1078,7 @@ class PcapPage(PcapInvestigatorMixin, PcapPeriodMixin, PcapAnalysisMixin, PcapEx
         self._pcap_queue_auto_process = False
         self.summary = None
         self._selected_communication_row = None
+        self._sync_communication_finding_button()
         self._saved_source_id = None
         self._service_chart_full_rows = []
         self._activity_chart_full_rows = []
@@ -1151,6 +1174,7 @@ class PcapPage(PcapInvestigatorMixin, PcapPeriodMixin, PcapAnalysisMixin, PcapEx
             (getattr(self, "btn_ai_summary", None), False),
             (getattr(self, "btn_add_notes", None), False),
             (getattr(self, "btn_mark_finding", None), False),
+            (getattr(self, "btn_mark_communication_finding", None), False),
             (getattr(self, "btn_export_full_dns", None), False),
             (getattr(self, "btn_export_full_tls", None), False),
         ):

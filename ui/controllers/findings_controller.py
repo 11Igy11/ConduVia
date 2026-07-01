@@ -208,7 +208,7 @@ class FindingsController:
 
         self._after_finding_created(from_pcap=False)
 
-    def mark_pcap_as_finding(self) -> None:
+    def mark_pcap_period_as_finding(self) -> None:
         app = self.app
         pcap_page = getattr(app, "pcap_page", None)
         if pcap_page is None:
@@ -223,31 +223,65 @@ class FindingsController:
             app._message_dialog("Findings", "Open a PCAP file first.", width=400)
             return
 
-        selected_row = getattr(pcap_page, "_selected_communication_row", None)
-        if selected_row:
-            flow = flow_from_communication_row(selected_row)
-            default_title = default_communication_finding_title(selected_row)
-            default_note = communication_finding_note(selected_row)
-        else:
-            period_label = ""
-            if hasattr(pcap_page, "_active_period_title"):
-                period_label = str(pcap_page._active_period_title() or "").strip()
-            flow = flow_from_pcap_summary(summary)
-            default_title = default_period_finding_title(summary, period_label=period_label)
-            file_label = str(summary.file_name or summary.file_path or "").strip()
-            default_note = period_finding_note(
-                summary,
-                period_label=period_label,
-                file_label=file_label,
-            )
-
-        values = self._prompt_new_finding(
+        period_label = ""
+        if hasattr(pcap_page, "_active_period_title"):
+            period_label = str(pcap_page._active_period_title() or "").strip()
+        flow = flow_from_pcap_summary(summary)
+        default_title = default_period_finding_title(summary, period_label=period_label)
+        file_label = str(summary.file_name or summary.file_path or "").strip()
+        default_note = period_finding_note(
+            summary,
+            period_label=period_label,
+            file_label=file_label,
+        )
+        self._create_pcap_finding(
+            flow=flow,
             defaults={
                 "title": default_title,
                 "note": default_note,
                 "tags": "",
             },
         )
+
+    def mark_pcap_communication_as_finding(self, row: dict[str, Any] | None = None) -> None:
+        app = self.app
+        pcap_page = getattr(app, "pcap_page", None)
+        if pcap_page is None:
+            return
+
+        if app.current_project_id is None:
+            app._message_dialog("Findings", "Select an active project first (Projects -> Open).", width=460)
+            return
+
+        if getattr(pcap_page, "summary", None) is None:
+            app._message_dialog("Findings", "Open a PCAP file first.", width=400)
+            return
+
+        selected_row = row
+        if selected_row is None:
+            selected_row = getattr(pcap_page, "_selected_communication_row", None)
+        if not selected_row:
+            app._message_dialog(
+                "Findings",
+                "Select a communication indicator first.",
+                "Open the full communication table and select a row.",
+                width=480,
+            )
+            return
+
+        flow = flow_from_communication_row(selected_row)
+        self._create_pcap_finding(
+            flow=flow,
+            defaults={
+                "title": default_communication_finding_title(selected_row),
+                "note": communication_finding_note(selected_row),
+                "tags": "",
+            },
+        )
+
+    def _create_pcap_finding(self, *, flow: dict[str, Any], defaults: dict[str, str]) -> None:
+        app = self.app
+        values = self._prompt_new_finding(defaults=defaults)
         if not values:
             return
 
@@ -264,6 +298,10 @@ class FindingsController:
             return
 
         self._after_finding_created(from_pcap=True)
+
+    def mark_pcap_as_finding(self) -> None:
+        """Backward-compatible alias for the PCAP header period action."""
+        self.mark_pcap_period_as_finding()
 
     def explain_selected(self) -> None:
         app = self.app

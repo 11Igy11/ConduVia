@@ -379,21 +379,26 @@ class PcapInvestigatorMixin:
         if rows:
             self.tbl_communications.clearSelection()
         self.txt_communication_detail.clear()
-        self._selected_communication_row = None
+        self._set_selected_communication_row(None)
+
+    def _set_selected_communication_row(self, row: dict[str, Any] | None) -> None:
+        self._selected_communication_row = dict(row) if row else None
+        if hasattr(self, "_sync_communication_finding_button"):
+            self._sync_communication_finding_button()
 
     def _on_communication_selected(self, current: QModelIndex, previous: QModelIndex | None = None) -> None:
         model = self.tbl_communications.model()
         if not isinstance(model, DictTableModel) or not current.isValid():
-            self._selected_communication_row = None
+            self._set_selected_communication_row(None)
             self.txt_communication_detail.clear()
             return
         if current.row() < 0 or current.row() >= len(model.rows):
-            self._selected_communication_row = None
+            self._set_selected_communication_row(None)
             self.txt_communication_detail.clear()
             return
 
         row = model.rows[current.row()]
-        self._selected_communication_row = dict(row)
+        self._set_selected_communication_row(row)
         self.txt_communication_detail.setPlainText(self._communication_detail_text(row))
 
     def _communication_detail_text(self, row: dict[str, Any]) -> str:
@@ -422,6 +427,11 @@ class PcapInvestigatorMixin:
     def _open_communications_dialog(self) -> None:
         model = self.tbl_communications.model()
         rows = list(model.rows) if isinstance(model, DictTableModel) else []
+
+        def _mark_row(row: dict[str, Any]) -> None:
+            if self.app is not None and hasattr(self.app, "findings_controller"):
+                self.app.findings_controller.mark_pcap_communication_as_finding(row)
+
         open_communication_indicators_dialog(
             self,
             rows=rows,
@@ -432,6 +442,8 @@ class PcapInvestigatorMixin:
             append_export_footer=lambda footer, table: self._append_export_footer(
                 footer, title="Communication indicators", table=table
             ),
+            on_mark_finding=_mark_row if self.app is not None else None,
+            on_selection_changed=self._set_selected_communication_row,
         )
 
     def _set_table(self, table: QTableView, rows: list[dict[str, Any]]):
