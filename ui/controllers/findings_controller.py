@@ -6,8 +6,16 @@ from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QMenu
 
 from core.db import add_finding, delete_finding, get_finding, list_findings, update_finding
+from core.pcap_finding import (
+    communication_finding_note,
+    default_communication_finding_title,
+    default_period_finding_title,
+    flow_from_communication_row,
+    flow_from_pcap_summary,
+    period_finding_note,
+)
 from ui.app_helpers import normalize_tags, status_emoji
-from ui.dialogs import finding_details_dialog
+from ui.dialogs import finding_details_dialog, new_finding_dialog
 from ui.explore_widgets import AITextWorker
 from ui.findings_format import format_finding_detail, update_finding_status
 
@@ -74,10 +82,46 @@ class FindingsController:
             app.findings_page.clear_list()
             app.findings_page.add_list_item("(no active project)", None)
             app.findings_page.clear_detail()
+            self.refresh_pcap_findings_link()
             return
 
         self.load_rows(app.current_project_id)
         self.apply_filter()
+        self.refresh_pcap_findings_link()
+
+    def project_finding_count(self) -> int:
+        if self.app.current_project_id is None:
+            return 0
+        return len(self.load_rows(self.app.current_project_id))
+
+    def refresh_pcap_findings_link(self) -> None:
+        pcap_page = getattr(self.app, "pcap_page", None)
+        if pcap_page is not None and hasattr(pcap_page, "refresh_findings_link"):
+            pcap_page.refresh_findings_link()
+
+    def sync_pcap_back_button(self) -> None:
+        visible = bool(getattr(self.app, "_pcap_return_context", None))
+        btn = getattr(self.app.findings_page, "btn_back_to_pcap", None)
+        if btn is not None:
+            btn.setVisible(visible)
+
+    def _prompt_new_finding(self, *, defaults: dict[str, Any]) -> dict[str, str] | None:
+        values, ok = new_finding_dialog(self.app, defaults=defaults)
+        if not ok or not values:
+            return None
+        title = str(values.get("title") or "").strip()
+        if not title:
+            return None
+        return {
+            "title": title,
+            "note": str(values.get("note") or ""),
+            "tags": normalize_tags(str(values.get("tags") or "")),
+        }
+
+    def _after_finding_created(self) -> None:
+        app = self.app
+        self.refresh_ui()
+        app.notes_controller.refresh_activity_ui()
 
     def apply_filter(self) -> None:
         app = self.app
@@ -128,35 +172,127 @@ class FindingsController:
             app._message_dialog("Findings", "Select a flow first.", width=400)
             return
 
-        default_title = (
-            f"{app.current_value('src_ip')} -> {app.current_value('dst_ip')} "
-            f"({app.current_value('application_name')})"
+        values = self._prompt_new_finding(
+            defaults={
+                "title": (
+                    f"{app.current_value('src_ip')} -> {app.current_value('dst_ip')} "
+                    f"({app.current_value('application_name')})"
+                ),
+                "note": "",
+                "tags": "",
+            },
         )
-        title, ok = app._text_input_dialog("New finding", "Title:", text=default_title, width=480)
-        if not ok:
+        if not values:
             return
-        title = (title or "").strip()
-        if not title:
-            return
-
-        note, ok2 = app._multiline_input_dialog("New finding", "Note (optional):", width=480, height=260)
-        if not ok2:
-            note = ""
-
-        tags, ok3 = app._text_input_dialog("New finding", "Tags (comma-separated, optional):", width=440)
-        if not ok3:
-            tags = ""
-        tags = normalize_tags(tags)
 
         try:
-            add_finding(app.current_project_id, app._current_flow, title=title, note=note, tags=tags)
+            add_finding(
+                app.current_project_id,
+                app._current_flow,
+                title=values["title"],
+                note=values["note"],
+                tags=values["tags"],
+            )
         except Exception as e:
             app._message_dialog("Findings", "Failed to create finding.", str(e), width=460)
             return
 
-        self.refresh_ui()
-        app.notes_controller.refresh_activity_ui()
-        app.tabs.setCurrentIndex(2)
+        self._after_finding_created()
+
+    def mark_pcap_period_as_finding(self) -> None:
+        app = self.app
+        pcap_page = getattr(app, "pcap_page", None)
+        if pcap_page is None:
+            return
+
+        if app.current_project_id is None:
+            app._message_dialog("Findings", "Select an active project first (Projects -> Open).", width=460)
+            return
+
+        summary = getattr(pcap_page, "summary", None)
+        if summary is None:
+            app._message_dialog("Findings", "Open a PCAP file first.", width=400)
+            return
+
+        period_label = ""
+        if hasattr(pcap_page, "_active_period_title"):
+            period_label = str(pcap_page._active_period_title() or "").strip()
+        flow = flow_from_pcap_summary(summary)
+        default_title = default_period_finding_title(summary, period_label=period_label)
+        file_label = str(summary.file_name or summary.file_path or "").strip()
+        default_note = period_finding_note(
+            summary,
+            period_label=period_label,
+            file_label=file_label,
+        )
+        self._create_pcap_finding(
+            flow=flow,
+            defaults={
+                "title": default_title,
+                "note": default_note,
+                "tags": "",
+            },
+        )
+
+    def mark_pcap_communication_as_finding(self, row: dict[str, Any] | None = None) -> None:
+        app = self.app
+        pcap_page = getattr(app, "pcap_page", None)
+        if pcap_page is None:
+            return
+
+        if app.current_project_id is None:
+            app._message_dialog("Findings", "Select an active project first (Projects -> Open).", width=460)
+            return
+
+        if getattr(pcap_page, "summary", None) is None:
+            app._message_dialog("Findings", "Open a PCAP file first.", width=400)
+            return
+
+        selected_row = row
+        if selected_row is None:
+            selected_row = getattr(pcap_page, "_selected_communication_row", None)
+        if not selected_row:
+            app._message_dialog(
+                "Findings",
+                "Select a communication indicator first.",
+                "Open the full communication table and select a row.",
+                width=480,
+            )
+            return
+
+        flow = flow_from_communication_row(selected_row)
+        self._create_pcap_finding(
+            flow=flow,
+            defaults={
+                "title": default_communication_finding_title(selected_row),
+                "note": communication_finding_note(selected_row),
+                "tags": "",
+            },
+        )
+
+    def _create_pcap_finding(self, *, flow: dict[str, Any], defaults: dict[str, str]) -> None:
+        app = self.app
+        values = self._prompt_new_finding(defaults=defaults)
+        if not values:
+            return
+
+        try:
+            add_finding(
+                app.current_project_id,
+                flow,
+                title=values["title"],
+                note=values["note"],
+                tags=values["tags"],
+            )
+        except Exception as e:
+            app._message_dialog("Findings", "Failed to create finding.", str(e), width=460)
+            return
+
+        self._after_finding_created()
+
+    def mark_pcap_as_finding(self) -> None:
+        """Backward-compatible alias for the PCAP header period action."""
+        self.mark_pcap_period_as_finding()
 
     def explain_selected(self) -> None:
         app = self.app

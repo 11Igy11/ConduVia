@@ -68,8 +68,10 @@ class ProjectsUIController:
         self.app.dataset_controller.clear_context()
         self.app.current_project_id = None
         self.app.current_project_name = ""
+        self.app._pcap_return_context = None
         self.app.lbl_project_banner.setText("Project: (none)")
         self.app.findings_controller.refresh_ui()
+        self.app.findings_controller.sync_pcap_back_button()
         self.app.notes_controller.refresh_ui()
         self.app.refresh_activity_profile_ui()
 
@@ -443,6 +445,7 @@ class ProjectsUIController:
 
         if project_changed:
             self.app.dataset_controller.clear_context()
+            self.app._pcap_return_context = None
             if hasattr(self.app, "activity_profile_page"):
                 self.app.activity_profile_page.invalidate_project_cache()
         elif self.app.flow_controller.get_all():
@@ -460,6 +463,7 @@ class ProjectsUIController:
             QTimer.singleShot(0, lambda pid=p.id: controller.deferred_sync_project_periods(pid))
 
         self.app.findings_controller.refresh_ui()
+        self.app.findings_controller.sync_pcap_back_button()
         self.app.notes_controller.refresh_ui(refresh_profile=False)
 
         QTimer.singleShot(0, lambda pid=p.id: self._complete_project_activation(pid))

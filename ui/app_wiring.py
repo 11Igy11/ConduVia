@@ -57,6 +57,7 @@ def wire_app_ui(app: App) -> None:
     fc = app.findings_controller
     fp.selectionChanged.connect(fc.on_selected)
     fp.jumpRequested.connect(fc.jump_to_selected)
+    fp.backToPcapRequested.connect(app.go_back_to_pcap)
     fp.editRequested.connect(fc.edit_selected)
     fp.deleteRequested.connect(fc.delete_selected)
     fp.aiRequested.connect(fc.explain_selected)

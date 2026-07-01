@@ -548,6 +548,9 @@ class PcapPeriodMixin:
         self._sync_save_period_button(saved=True)
         self.btn_ai_summary.setEnabled(bool(plain))
         self.btn_add_notes.setEnabled(bool(plain))
+        if hasattr(self, "btn_mark_finding"):
+            self.btn_mark_finding.setEnabled(bool(plain))
+        self._schedule_investigator_layout_refresh()
         self._sync_period_selector_panel()
         self._update_reanalyze_button_state()
 
@@ -761,6 +764,8 @@ class PcapPeriodMixin:
             self.btn_reanalyze_period.setEnabled(False)
         self.btn_save_project.setEnabled(False)
         self.btn_add_notes.setEnabled(False)
+        if hasattr(self, "btn_mark_finding"):
+            self.btn_mark_finding.setEnabled(False)
         self.txt_pcap_ai_summary.clear()
 
         period_label = label or f"{len(clean_paths):,} PCAP files"

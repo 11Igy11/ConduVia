@@ -23,11 +23,14 @@ from PySide6.QtWidgets import (
 )
 
 from ui.dict_table_model import DictTableModel
+from ui.buttons import make_action_button
 from ui.explore_widgets import CopyableTableView
 
 ExportFooterFn = Callable[[QHBoxLayout, QTableView], None]
 DetailTextFn = Callable[[dict[str, Any]], str]
 EmptyMessageFn = Callable[[str, str], None]
+MarkFindingFn = Callable[[dict[str, Any]], None]
+SelectionChangedFn = Callable[[dict[str, Any] | None], None]
 DayLabelFn = Callable[[str], str]
 
 
@@ -273,6 +276,8 @@ def open_communication_indicators_dialog(
     detail_text: DetailTextFn,
     on_empty: EmptyMessageFn | None = None,
     append_export_footer: ExportFooterFn | None = None,
+    on_mark_finding: MarkFindingFn | None = None,
+    on_selection_changed: SelectionChangedFn | None = None,
 ) -> None:
     if not rows:
         if on_empty is not None:
@@ -310,15 +315,25 @@ def open_communication_indicators_dialog(
     detail.setMinimumWidth(320)
     detail.setPlaceholderText("Select a communication indicator to see the evidence used for classification.")
 
-    def update_detail(current: QModelIndex, previous: QModelIndex | None = None) -> None:
+    def selected_row(current: QModelIndex | None = None) -> dict[str, Any] | None:
         table_model = table.model()
-        if not isinstance(table_model, DictTableModel) or not current.isValid():
+        if not isinstance(table_model, DictTableModel):
+            return None
+        index = current if current is not None else table.currentIndex()
+        if not index.isValid() or index.row() < 0 or index.row() >= len(table_model.rows):
+            return None
+        return dict(table_model.rows[index.row()])
+
+    def update_detail(current: QModelIndex, previous: QModelIndex | None = None) -> None:
+        row = selected_row(current)
+        if row is None:
             detail.clear()
-            return
-        if current.row() < 0 or current.row() >= len(table_model.rows):
-            detail.clear()
-            return
-        detail.setPlainText(detail_text(table_model.rows[current.row()]))
+        else:
+            detail.setPlainText(detail_text(row))
+        if on_selection_changed is not None:
+            on_selection_changed(row)
+        if hasattr(parent, "_sync_communication_finding_button"):
+            parent._sync_communication_finding_button()
 
     table.selectionModel().currentRowChanged.connect(update_detail)
 
@@ -335,10 +350,27 @@ def open_communication_indicators_dialog(
     splitter.setCollapsible(1, False)
     layout.addWidget(splitter, 1)
     table.selectRow(0)
+    update_detail(table.currentIndex())
 
     footer = QHBoxLayout()
     if append_export_footer is not None:
         append_export_footer(footer, table)
+    if on_mark_finding is not None:
+        btn_mark = make_action_button("Mark as Finding", enabled=False)
+
+        def _sync_mark_button(current: QModelIndex, previous: QModelIndex | None = None) -> None:
+            btn_mark.setEnabled(selected_row(current) is not None)
+
+        table.selectionModel().currentRowChanged.connect(_sync_mark_button)
+        _sync_mark_button(table.currentIndex())
+
+        def _mark_selected() -> None:
+            row = selected_row()
+            if row is not None:
+                on_mark_finding(row)
+
+        btn_mark.clicked.connect(_mark_selected)
+        footer.addWidget(btn_mark)
     footer.addStretch()
     btn_close = QPushButton("Close")
     btn_close.setMinimumHeight(42)

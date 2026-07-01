@@ -14,6 +14,7 @@ from ui.buttons import make_action_button
 
 class FindingsPage(QWidget):
     jumpRequested = Signal()
+    backToPcapRequested = Signal()
     editRequested = Signal()
     deleteRequested = Signal()
     aiRequested = Signal()
@@ -31,11 +32,15 @@ class FindingsPage(QWidget):
         actions = QHBoxLayout()
         actions.setSpacing(8)
         actions.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        self.btn_back_to_pcap = make_action_button("← Back to PCAP", toolbar=True)
+        self.btn_back_to_pcap.setToolTip("Return to the PCAP analysis you came from")
+        self.btn_back_to_pcap.setVisible(False)
         self.btn_finding_edit = make_action_button("Edit", toolbar=True)
         self.btn_finding_delete = make_action_button("Delete", destructive=True, toolbar=True)
         self.btn_finding_jump = make_action_button("Jump to Flow", toolbar=True)
         self.btn_finding_ai = make_action_button("Explain with AI", toolbar=True)
 
+        actions.addWidget(self.btn_back_to_pcap)
         actions.addWidget(self.btn_finding_edit)
         actions.addWidget(self.btn_finding_delete)
         actions.addWidget(self.btn_finding_jump)
@@ -101,6 +106,7 @@ class FindingsPage(QWidget):
         self._wire_ui()
 
     def _wire_ui(self):
+        self.btn_back_to_pcap.clicked.connect(self.backToPcapRequested.emit)
         self.btn_finding_jump.clicked.connect(self.jumpRequested.emit)
         self.btn_finding_edit.clicked.connect(self.editRequested.emit)
         self.btn_finding_delete.clicked.connect(self.deleteRequested.emit)

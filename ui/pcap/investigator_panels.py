@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from PySide6.QtCore import QModelIndex, Qt
+from PySide6.QtCore import QModelIndex, Qt, QTimer
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QTableView, QWidget
 
 from core.analysis_limits import PROFILE_CHART_PREVIEW_ROWS, embedded_expand_available, embedded_expand_tooltip
@@ -82,6 +82,32 @@ class PcapInvestigatorMixin:
             )
         else:
             self.btn_expand_chart_activity.setToolTip("")
+        self._schedule_investigator_layout_refresh()
+
+    def _refresh_investigator_layout(self) -> None:
+        scroll = getattr(self, "summary_scroll", None)
+        for name in (
+            "lbl_plain_summary",
+            "lbl_key_points",
+            "lbl_limitations",
+            "investigator_card",
+            "chart_services",
+            "chart_activity",
+            "visibility_panel",
+        ):
+            widget = getattr(self, name, None)
+            if widget is not None:
+                widget.updateGeometry()
+        if scroll is not None:
+            content = scroll.widget()
+            if content is not None:
+                content.adjustSize()
+            scroll.verticalScrollBar().setValue(0)
+            scroll.viewport().update()
+
+    def _schedule_investigator_layout_refresh(self) -> None:
+        self._refresh_investigator_layout()
+        QTimer.singleShot(0, self._refresh_investigator_layout)
 
     def _expand_service_chart(self) -> None:
         rows = [
@@ -377,20 +403,28 @@ class PcapInvestigatorMixin:
         )
         self._set_table(self.tbl_communications, rows)
         if rows:
-            self.tbl_communications.selectRow(0)
-        else:
-            self.txt_communication_detail.clear()
+            self.tbl_communications.clearSelection()
+        self.txt_communication_detail.clear()
+        self._set_selected_communication_row(None)
+
+    def _set_selected_communication_row(self, row: dict[str, Any] | None) -> None:
+        self._selected_communication_row = dict(row) if row else None
+        if hasattr(self, "_sync_communication_finding_button"):
+            self._sync_communication_finding_button()
 
     def _on_communication_selected(self, current: QModelIndex, previous: QModelIndex | None = None) -> None:
         model = self.tbl_communications.model()
         if not isinstance(model, DictTableModel) or not current.isValid():
+            self._set_selected_communication_row(None)
             self.txt_communication_detail.clear()
             return
         if current.row() < 0 or current.row() >= len(model.rows):
+            self._set_selected_communication_row(None)
             self.txt_communication_detail.clear()
             return
 
         row = model.rows[current.row()]
+        self._set_selected_communication_row(row)
         self.txt_communication_detail.setPlainText(self._communication_detail_text(row))
 
     def _communication_detail_text(self, row: dict[str, Any]) -> str:
@@ -419,6 +453,11 @@ class PcapInvestigatorMixin:
     def _open_communications_dialog(self) -> None:
         model = self.tbl_communications.model()
         rows = list(model.rows) if isinstance(model, DictTableModel) else []
+
+        def _mark_row(row: dict[str, Any]) -> None:
+            if self.app is not None and hasattr(self.app, "findings_controller"):
+                self.app.findings_controller.mark_pcap_communication_as_finding(row)
+
         open_communication_indicators_dialog(
             self,
             rows=rows,
@@ -429,6 +468,8 @@ class PcapInvestigatorMixin:
             append_export_footer=lambda footer, table: self._append_export_footer(
                 footer, title="Communication indicators", table=table
             ),
+            on_mark_finding=_mark_row if self.app is not None else None,
+            on_selection_changed=self._set_selected_communication_row,
         )
 
     def _set_table(self, table: QTableView, rows: list[dict[str, Any]]):
