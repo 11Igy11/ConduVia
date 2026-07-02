@@ -66,6 +66,12 @@ from core.exporters.registry_exporter import export_registry_html
 from core.exporters.table_exporter import export_table_html
 from core.loader import list_json_files, list_json_files_recursive, load_folder, load_folder_recursive, load_json_file
 from core.parser import extract_dataset_meta
+from core.investigation_snapshot import (
+    InvestigationSnapshot,
+    build_json_snapshot,
+    build_pcap_snapshot,
+    format_snapshot_notes_block,
+)
 from core.pcap_analyzer import (
     METADATA_TOP_DNS_ROWS,
     PcapSummary,
@@ -346,6 +352,49 @@ class BehaviorProfileTests(unittest.TestCase):
         self.assertEqual(statuses[str(two)], "pending")
         self.assertEqual([item.file_name for item in pending], ["two.pcap"])
         self.assertEqual([item.file_name for item in done], ["one.pcap"])
+
+    def test_dataset_target_check_skippable_for_known_source_or_done_ingest(self):
+        from core.dataset_target import dataset_target_check_skippable
+
+        with temporary_directory() as tmp:
+            root = Path(tmp)
+            db_path = root / "dataset-target.db"
+            init_db(db_path)
+            project_id = create_project("Case A", db_path=db_path)
+            one = root / "one.json"
+            two = root / "two.json"
+            one.write_text("[]", encoding="utf-8")
+            two.write_text("[]", encoding="utf-8")
+
+            self.assertFalse(
+                dataset_target_check_skippable(project_id, str(root), [str(one)], db_path=db_path)
+            )
+
+            add_dataset_load(project_id, str(root), db_path=db_path)
+            self.assertTrue(
+                dataset_target_check_skippable(project_id, str(root), [str(one)], db_path=db_path)
+            )
+
+            upsert_ingest_items(
+                project_id,
+                str(root),
+                [
+                    {"file_path": str(one), "file_type": "json", "file_size": one.stat().st_size},
+                    {"file_path": str(two), "file_type": "json", "file_size": two.stat().st_size},
+                ],
+                db_path=db_path,
+            )
+            mark_ingest_item(project_id, str(one), "done", db_path=db_path)
+            mark_ingest_item(project_id, str(two), "done", db_path=db_path)
+
+            self.assertTrue(
+                dataset_target_check_skippable(
+                    project_id,
+                    str(root / "new-folder"),
+                    [str(one), str(two)],
+                    db_path=db_path,
+                )
+            )
 
     def test_project_dataset_loader_aggregates_saved_project_sources(self):
         with temporary_directory() as tmp:
@@ -2592,6 +2641,63 @@ def _ether_ipv4_packet(src_ip: str, dst_ip: str, proto: int, l4: bytes) -> bytes
         + socket.inet_aton(dst_ip)
     )
     return eth + ip + l4
+
+
+class InvestigationSnapshotTests(unittest.TestCase):
+    def test_build_json_snapshot_uses_flow_metrics_without_ips_in_findings(self):
+        flows = [
+            {
+                "src_ip": "10.0.0.2",
+                "dst_ip": "8.8.8.8",
+                "application_name": "WhatsApp",
+                "bidirectional_bytes": 900,
+                "src2dst_bytes": 900,
+                "bidirectional_first_seen_ms": "2024-08-31T22:15:00.000+00:00",
+            },
+            {
+                "src_ip": "10.0.0.2",
+                "dst_ip": "1.1.1.1",
+                "application_name": "DNS",
+                "bidirectional_bytes": 100,
+                "src2dst_bytes": 100,
+                "bidirectional_first_seen_ms": "2024-08-31T22:30:00.000+00:00",
+            },
+        ]
+        snapshot = build_json_snapshot(flows, period_label="31/08/2024")
+        self.assertTrue(snapshot.headline)
+        self.assertTrue(snapshot.findings)
+        joined = " ".join(snapshot.findings)
+        self.assertNotIn("10.0.0.2", joined)
+        self.assertNotIn("8.8.8.8", joined)
+        self.assertIn("WhatsApp", snapshot.apps_line)
+
+    def test_build_pcap_snapshot_prefers_high_confidence_findings(self):
+        with temporary_directory() as tmp:
+            path = Path(tmp) / "sample.pcap"
+            _write_sample_pcap(path)
+            summary = analyze_pcap(path)
+        snapshot = build_pcap_snapshot(summary)
+        self.assertEqual(snapshot.meta.get("source"), "pcap")
+        self.assertTrue(snapshot.headline)
+        self.assertTrue(snapshot.patterns)
+        joined = " ".join(snapshot.findings + [snapshot.headline, snapshot.narrative])
+        self.assertNotIn("192.168.", joined)
+
+    def test_format_snapshot_notes_block(self):
+        snapshot = InvestigationSnapshot(
+            headline="Test headline",
+            findings=["One finding"],
+            patterns=["One pattern"],
+            limitations=["One limitation"],
+        )
+        block = format_snapshot_notes_block(
+            "JSON summary · day",
+            snapshot,
+            stats_lines=["Flows: 10"],
+        )
+        self.assertIn("[JSON summary · day]", block)
+        self.assertIn("Test headline", block)
+        self.assertIn("One finding", block)
 
 
 if __name__ == "__main__":

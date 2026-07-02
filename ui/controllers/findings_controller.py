@@ -305,9 +305,9 @@ class FindingsController:
             app._message_dialog("AI Assistant", "Another AI task is already running.", width=430)
             return
 
-        app.txt_ai_summary.setPlainText("Generating AI finding explanation...")
-        app.tabs.setCurrentIndex(0)
         app.btn_finding_ai.setEnabled(False)
+        if hasattr(app, "txt_ai_hub"):
+            app.txt_ai_hub.setPlainText("Generating AI finding explanation...")
 
         worker = AITextWorker(
             app.ai_service.explain_finding,

@@ -372,9 +372,28 @@ class App(QWidget):
         json_layout = QVBoxLayout(json_page)
         json_layout.setContentsMargins(0, 0, 0, 0)
         json_layout.setSpacing(DATASET_PAGE_SPACING)
+
+        explore_actions = QWidget()
+        explore_actions.setObjectName("ExploreTabActions")
+        explore_actions.setFixedHeight(32)
+        explore_actions_layout = QHBoxLayout(explore_actions)
+        explore_actions_layout.setContentsMargins(0, 0, 8, 0)
+        explore_actions_layout.setSpacing(6)
+        explore_actions_layout.addWidget(self.btn_load)
+        explore_actions_layout.addWidget(self.btn_ai_summary)
+        explore_actions_layout.addWidget(self.btn_add_ai_to_notes)
+
         self.json_tabs = QTabWidget()
+        self.json_tabs.setObjectName("JsonWorkspaceTabs")
         self.json_tabs.setDocumentMode(True)
+        self.json_tabs.setCornerWidget(explore_actions, Qt.TopRightCorner)
         self.json_tabs.addTab(explore_container, "Explore")
+
+        def _sync_json_workspace_actions(index: int) -> None:
+            explore_actions.setVisible(index == 0)
+
+        self.json_tabs.currentChanged.connect(_sync_json_workspace_actions)
+        _sync_json_workspace_actions(0)
 
         self.registry_page = RegistryPage(self)
         self.json_tabs.addTab(self.registry_page, "Registry")
@@ -627,7 +646,11 @@ class App(QWidget):
         return self.notes_controller.append_ai_text(text)
 
     def add_ai_summary_to_notes(self):
-        text = (self.txt_ai_summary.toPlainText() or "").strip()
+        text = ""
+        if hasattr(self, "_ai_output_state"):
+            text = (self._ai_output_state.text or "").strip()
+        if not text and hasattr(self, "txt_ai_hub"):
+            text = (self.txt_ai_hub.toPlainText() or "").strip()
         if not text:
             self._message_dialog("Notes", "There is no AI-generated text to add.", width=440)
             return

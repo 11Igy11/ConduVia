@@ -333,7 +333,8 @@ class ExploreUIController:
             return
 
         self.app.btn_ai_summary.setEnabled(False)
-        self.app.txt_ai_summary.setPlainText("Generating AI summary...")
+        if hasattr(self.app, "txt_ai_hub"):
+            self.app.txt_ai_hub.setPlainText("Generating AI summary...")
         self.app.btn_ai_summary.setText("Generating...")
 
         dataset_path = str(self.app.current_folder) if self.app.current_folder else ""
@@ -365,8 +366,8 @@ class ExploreUIController:
             return
 
         self.app.btn_ai_explain.setEnabled(False)
-        self.app.txt_ai_summary.setPlainText("Generating AI flow explanation...")
-        self.app.tabs.setCurrentIndex(0)
+        if hasattr(self.app, "txt_ai_hub"):
+            self.app.txt_ai_hub.setPlainText("Generating AI flow explanation...")
 
         worker = AITextWorker(
             self.app.ai_service.explain_flow,

@@ -22,6 +22,7 @@ from core.exporters.pcap_exporter import export_pcap_summary_html
 from core.exporters.pcap_metadata_exporter import export_pcap_dns_csv, export_pcap_tls_csv
 from core.formatters import format_pcap_datetime, human_bytes
 from core.osint.public_ips import collect_public_ips_from_pcap_summary, merge_public_ips_into_profile
+from core.investigation_snapshot import build_pcap_snapshot, format_snapshot_notes_block
 from core.pcap_analyzer import build_investigator_view
 from core.pcap_period import aggregate_hash_for_paths, capture_span_note, resolve_period_day
 from core.workspace import workspace_export_path
@@ -393,39 +394,21 @@ class PcapExportMixin:
         if not self.summary:
             return ""
 
-        investigator = build_investigator_view(self.summary)
+        snapshot = build_pcap_snapshot(self.summary)
         period = self._notes_period_title()
         source_paths = list(getattr(self.summary, "source_paths", None) or [])
         file_count = max(1, len(source_paths))
 
-        lines = [
-            f"[PCAP summary · {period}]",
+        stats_lines = [
             f"Files analysed: {file_count:,}",
             f"Capture window: {self._format_pcap_range(self.summary.first_seen, self.summary.last_seen)}",
             f"Volume: {self.summary.packet_count:,} packets / {human_bytes(self.summary.wire_bytes, precision=2)}",
-            "",
-            str(investigator.get("plain_summary") or ""),
         ]
-        comm_rows = list(self.summary.communication_rows or [])
-        if comm_rows:
-            lines.extend([
-                "",
-                "Top communication indicators:",
-            ])
-            for row in comm_rows[:5]:
-                lines.append(
-                    f"- {row.get('service')}: {row.get('activity_type')} "
-                    f"({row.get('confidence')} confidence) — {row.get('evidence')}"
-                )
-            if len(comm_rows) > 5:
-                lines.append(f"- … {len(comm_rows) - 5:,} more in the Communications tab")
-        limitations = list(investigator.get("limitations") or [])
-        if limitations:
-            lines.extend(["", "Limitations:"])
-            for item in limitations[:3]:
-                lines.append(f"- {item}")
-        lines.append("-" * 60)
-        return "\n".join(lines) + "\n"
+        return format_snapshot_notes_block(
+            f"PCAP summary · {period}",
+            snapshot,
+            stats_lines=stats_lines,
+        )
 
     def _artifact_category_counts(self) -> list[dict[str, Any]]:
         if not self.summary:

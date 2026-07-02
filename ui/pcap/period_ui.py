@@ -22,6 +22,7 @@ from core.period_selector import (
 )
 from core.project_evidence import get_saved_pcap_period_source
 from ui.expand_dialogs import open_missing_period_days_dialog
+from ui.dataset_header_layout import DATASET_HEADER_STATUS_TRACK_HEIGHT
 from ui.period_selector_panel import sync_period_selector_panel, sync_pick_range_button
 from ui.workers.pcap_workers import PcapBatchWorker
 
@@ -96,14 +97,12 @@ class PcapPeriodMixin:
         self._sync_period_gap_visibility()
 
     def _sync_period_gap_visibility(self) -> None:
-        # Hide coverage row only while a period is actively being analyzed on the worker thread.
-        # Day groups are known during batch import — keep the gap banner visible like on JSON.
-        loading = self._thread is not None
         if hasattr(self, "lbl_period_gaps"):
-            self.lbl_period_gaps.setVisible(bool(str(self.lbl_period_gaps.text() or "").strip()) and not loading)
+            self.lbl_period_gaps.setVisible(bool(str(self.lbl_period_gaps.text() or "").strip()))
         if hasattr(self, "btn_expand_period_gaps"):
             missing_count = int(self._period_gap_info.get("missing_count") or 0)
-            self.btn_expand_period_gaps.setVisible(missing_count > 0 and not loading)
+            self.btn_expand_period_gaps.setVisible(missing_count > 0)
+        self._sync_pcap_header_chrome()
 
     def _open_missing_days_dialog(self) -> None:
         open_missing_period_days_dialog(
@@ -439,12 +438,6 @@ class PcapPeriodMixin:
 
     def _sync_period_selector_panel(self) -> None:
         has_periods = bool(self._pcap_day_groups_raw or self._pcap_day_groups)
-        batch_total = int(getattr(self, "_pcap_batch_total", 0) or 0)
-        batch_processed = int(getattr(self, "_pcap_batch_processed", 0) or 0)
-        queue = list(getattr(self, "_pcap_queue", None) or [])
-        has_batch = bool(queue) or (
-            batch_total > 0 and (batch_processed < batch_total or self._batch_runner.is_running())
-        )
         sync_period_selector_panel(
             has_periods=has_periods,
             granularity=self._pcap_period_granularity,
@@ -457,8 +450,21 @@ class PcapPeriodMixin:
                 self.btn_reanalyze_period: has_periods,
             } if hasattr(self, "btn_reanalyze_period") else None,
         )
-        if hasattr(self, "batch_status_panel"):
-            self.batch_status_panel.setVisible(has_batch)
+        self._sync_pcap_header_chrome()
+
+    def _sync_pcap_header_chrome(self) -> None:
+        status_active = False
+        if hasattr(self, "lbl_limit_notice") and self.lbl_limit_notice.isVisible():
+            status_active = True
+        if hasattr(self, "lbl_load_progress") and self.lbl_load_progress.isVisible():
+            status_active = True
+        if hasattr(self, "load_progress") and self.load_progress.isVisible():
+            status_active = True
+        if hasattr(self, "pcap_status_track"):
+            self.pcap_status_track.setVisible(status_active)
+            self.pcap_status_track.setFixedHeight(
+                DATASET_HEADER_STATUS_TRACK_HEIGHT if status_active else 0
+            )
 
     def load_active_period(self, *, prefer_saved: bool = False) -> None:
         if not self._pcap_day_groups:

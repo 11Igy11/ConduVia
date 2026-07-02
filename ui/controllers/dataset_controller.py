@@ -31,6 +31,8 @@ from core.analysis_limits import (
     embedded_expand_tooltip,
 )
 from core.analyzer import top_applications, top_dst_ips, top_protocols, top_src_ips
+from core.investigation_snapshot import build_json_snapshot
+from core.evidence_policy import format_period_day_label
 from core.case_ingest import evidence_paths, filter_case_scan, group_evidence_by_date
 from core.db import (
     add_dataset_load,
@@ -161,6 +163,7 @@ class DatasetController(DatasetLoadMixin, DatasetIngestMixin, ImportProgressMixi
         self._json_period_range_end = ""
         self._json_day_source = ""
         self._json_active_day = ""
+        self._json_meta: dict = {}
         self._json_day_switching = False
         self._json_active_file = ""
         self._json_file_switching = False
@@ -242,12 +245,16 @@ class DatasetController(DatasetLoadMixin, DatasetIngestMixin, ImportProgressMixi
         flows = self.app.flow_controller.get_all()
         preview = EMBEDDED_SUMMARY_TOP_N
         rows_by_key = getattr(self.app, "summary_preview_rows", {})
+        snapshot_panel = getattr(self.app, "json_investigation_snapshot", None)
 
         if not flows:
             for rows in rows_by_key.values():
                 self.clear_summary_preview_rows(rows, message="No flows loaded.")
             for button in getattr(self.app, "summary_expand_buttons", {}).values():
                 button.setEnabled(False)
+                button.hide()
+            if snapshot_panel is not None:
+                snapshot_panel.clear()
             return
 
         src_items = top_src_ips(flows, limit=preview)
@@ -275,9 +282,25 @@ class DatasetController(DatasetLoadMixin, DatasetIngestMixin, ImportProgressMixi
                 total = len(top_protocols(flows, limit=100000))
             else:
                 total = len(top_applications(flows, limit=100000))
-            button.setEnabled(embedded_expand_available(total, preview_rows=preview))
+            available = embedded_expand_available(total, preview_rows=preview)
+            button.setVisible(available)
+            button.setEnabled(available)
             tooltip = embedded_expand_tooltip(total, preview_rows=preview)
-            button.setToolTip(tooltip)
+            button.setToolTip(tooltip if available else "")
+
+        active_day = str(getattr(self, "_json_active_day", "") or "")
+        period_mode = str(getattr(self, "_json_period_granularity", "day") or "day")
+        period_label = format_period_day_label(active_day) if active_day else ""
+        meta = dict(getattr(self, "_json_meta", None) or {})
+        if snapshot_panel is not None:
+            snapshot_panel.set_snapshot(
+                build_json_snapshot(
+                    flows,
+                    meta,
+                    period_label=period_label,
+                    period_mode=period_mode,
+                )
+            )
 
     def expand_dataset_summary(self, kind: str) -> None:
         flows = self.app.flow_controller.get_all()
@@ -621,6 +644,27 @@ class DatasetController(DatasetLoadMixin, DatasetIngestMixin, ImportProgressMixi
         self._json_active_file = ""
         self._rebuild_json_file_combo()
 
+    def reanalyze_json_current_period(self) -> None:
+        if self._load_thread is not None:
+            self.app._message_dialog("Dataset", "A dataset is already loading.", width=420)
+            return
+        if not self._json_day_groups or not self._json_active_day:
+            self.app._message_dialog("Dataset", "Select an indexed JSON period first.", width=420)
+            return
+        files = self._active_json_period_files()
+        if not files:
+            self.app._message_dialog("Dataset", "No JSON files are available for the selected period.", width=420)
+            return
+        self._load_active_json_period(force=True)
+
+    def _update_json_reanalyze_button_state(self) -> None:
+        btn = getattr(self.app, "btn_json_reanalyze_period", None)
+        if btn is None:
+            return
+        busy = self._load_thread is not None
+        has_period = bool(self._json_day_groups and self._json_active_day and self._active_json_period_files())
+        btn.setEnabled(not busy and has_period)
+
     def _try_load_active_json_period(self, *, force: bool = True) -> None:
         if self._json_active_day and self._active_json_period_files():
             self._load_active_json_period(force=force)
@@ -655,15 +699,22 @@ class DatasetController(DatasetLoadMixin, DatasetIngestMixin, ImportProgressMixi
         self.load_dataset_files(self._json_day_source, files, progress_label=period_label)
 
     def _sync_json_period_selector_panel(self) -> None:
+        has_periods = bool(self._json_day_groups_raw)
         sync_period_selector_panel(
-            has_periods=bool(self._json_day_groups_raw),
+            has_periods=has_periods,
             granularity=self._json_period_granularity,
             period_label=getattr(self.app, "lbl_json_day", None),
             day_combo=getattr(self.app, "cmb_json_day", None),
             mode_combo=getattr(self.app, "cmb_json_period_mode", None),
             pick_range_button=getattr(self.app, "btn_json_pick_range", None),
             period_row=getattr(self.app, "json_period_row", None),
+            trailing_widgets={
+                getattr(self.app, "btn_json_reanalyze_period", None): has_periods,
+            }
+            if hasattr(self.app, "btn_json_reanalyze_period")
+            else None,
         )
+        self._update_json_reanalyze_button_state()
 
     def _restore_json_period_range_from_days(self) -> None:
         if not self._json_day_groups_raw:
@@ -1032,9 +1083,11 @@ class DatasetController(DatasetLoadMixin, DatasetIngestMixin, ImportProgressMixi
 
         self.app.btn_load.setEnabled(not loading)
         self.app.btn_load.setText("Loading..." if loading else "Load dataset")
+        self._update_json_reanalyze_button_state()
 
     def reset_loaded_flow_views(self) -> None:
         """Clear loaded flow/table views without removing indexed period selectors."""
+        self._json_meta = {}
         app = self.app
         app.current_folder = None
         app._current_flow = None
@@ -1073,7 +1126,8 @@ class DatasetController(DatasetLoadMixin, DatasetIngestMixin, ImportProgressMixi
         for rows in getattr(app, "summary_preview_rows", {}).values():
             self.clear_summary_preview_rows(rows)
 
-        app.txt_ai_summary.clear()
+        if hasattr(app, "json_investigation_snapshot"):
+            app.json_investigation_snapshot.clear()
 
         if hasattr(app, "details_panel"):
             app.details_panel.show()

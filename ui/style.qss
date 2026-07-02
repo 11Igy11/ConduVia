@@ -52,7 +52,7 @@ QLabel#Signature {
 QLabel#SectionTitle {
     font-weight: 600;
     color: #e5e7eb;
-    padding: 2px 0 4px 0;
+    padding: 2px 0 6px 0;
 }
 
 QLabel#DialogMessageLabel {
@@ -494,6 +494,20 @@ QPushButton#SummaryExpandButton {
     margin: 0;
 }
 
+QTabWidget#ExploreSubTabs::pane {
+    padding: 0;
+    top: -1px;
+}
+
+QTabWidget#JsonWorkspaceTabs::pane {
+    padding: 0;
+    top: -1px;
+}
+
+QTabWidget#JsonWorkspaceTabs QTabBar {
+    min-height: 36px;
+}
+
 QTabWidget#ExploreSubTabs QTabBar {
     min-height: 36px;
 }
@@ -723,8 +737,8 @@ QGroupBox#SummaryCard {
     background: #273549;
     border: none;
     border-radius: 10px;
-    margin-top: 10px;
-    padding-top: 10px;
+    margin-top: 0;
+    padding-top: 8px;
     padding: 8px;
     font-weight: 600;
     color: #e5e7eb;
@@ -737,7 +751,7 @@ QGroupBox#SummaryCard:hover {
 QGroupBox#SummaryCard::title {
     subcontrol-origin: margin;
     left: 12px;
-    padding: 0 6px 0 6px;
+    padding: 0 6px 6px 6px;
     color: #e5e7eb;
 }
 
@@ -748,6 +762,16 @@ QFrame#PcapInvestigatorCard {
     background: #273549;
     border: 1px solid #3b82f6;
     border-radius: 12px;
+}
+
+QScrollArea#PcapInvestigatorSummaryScroll,
+QWidget#PcapInvestigatorSummaryBody {
+    background: #273549;
+    border: none;
+}
+
+QScrollArea#PcapInvestigatorSummaryScroll QAbstractScrollArea::viewport {
+    background: #273549;
 }
 
 QLabel#PcapPlainSummary {
@@ -764,6 +788,43 @@ QLabel#PcapKeyPoints {
 QLabel#PcapLimitations {
     color: #cbd5e1;
     font-size: 11px;
+}
+
+QFrame#InvestigationSnapshotCard,
+QGroupBox#InvestigationSnapshotCard {
+    background: #273549;
+    border: 1px solid #3b82f6;
+    border-radius: 12px;
+    margin-top: 0;
+    padding-top: 8px;
+}
+
+QGroupBox#InvestigationSnapshotCard::title {
+    subcontrol-origin: margin;
+    left: 10px;
+    padding: 0 6px 8px 6px;
+    color: #e5e7eb;
+}
+
+QScrollArea#InvestigationSnapshotScroll,
+QWidget#InvestigationSnapshotContent {
+    background: #273549;
+    border: none;
+}
+
+QScrollArea#InvestigationSnapshotScroll QAbstractScrollArea::viewport {
+    background: #273549;
+}
+
+QLabel#InvestigationSnapshotHeadline {
+    color: #f8fafc;
+    font-size: 14px;
+    font-weight: 600;
+}
+
+QLabel#InvestigationSnapshotBody {
+    color: #dbeafe;
+    font-size: 12px;
 }
 
 /* =========================

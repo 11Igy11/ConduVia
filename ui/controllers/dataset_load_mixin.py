@@ -26,7 +26,7 @@ from core.analysis_limits import (
     SUMMARY_VALUE_COL_WIDTH,
 )
 from core.analyzer import top_applications, top_dst_ips, top_protocols, top_src_ips
-from core.case_ingest import evidence_paths, filter_case_scan, group_evidence_by_date
+from core.dataset_target import dataset_target_check_skippable
 from core.db import (
     add_dataset_load,
     get_project,
@@ -369,6 +369,9 @@ class DatasetLoadMixin:
             )
 
         self._set_loading(True)
+        snapshot_panel = getattr(self.app, "json_investigation_snapshot", None)
+        if snapshot_panel is not None:
+            snapshot_panel.set_loading("Analyzing JSON flows...")
         if hasattr(self.app, "lbl_path"):
             kind = "folder selection" if mode == "files" else ("folder" if mode == "folder" else "JSON file")
             self.app.lbl_path.setText(f"Analyzing {kind}: {path}")
@@ -409,17 +412,26 @@ class DatasetLoadMixin:
             )
             return
 
-        if not self._confirm_or_bind_project_target(result.get("meta") or {}):
-            return
-
         path = str(result["path"])
         files = result["files"]
-        flows = result["flows"]
         compare_result = result.get("compare_result")
+        meta = dict(result.get("meta") or {})
+        file_paths = [str(item) for item in files if str(item or "").strip()]
 
+        if dataset_target_check_skippable(
+            self.app.current_project_id,
+            path,
+            file_paths,
+        ):
+            self._bind_empty_project_target(meta)
+        elif not self._confirm_or_bind_project_target(meta):
+            return
+
+        flows = result["flows"]
         self.app.current_folder = Path(result["current_folder"])
         self.app.flow_controller.page_size = self.app.PAGE_SIZE
         self.app.flow_controller.set_flows(flows)
+        self._json_meta = dict(result.get("meta") or {})
 
         if hasattr(self.app, "registry_page"):
             self.app.registry_page.set_dataset(path, files, flows, compare_result=compare_result)
@@ -484,7 +496,7 @@ class DatasetLoadMixin:
         self.app.explore_ui_controller.update_loaded_label()
         self.app.explore_ui_controller.update_load_more_enabled()
 
-        self.app.tabs.setCurrentIndex(1)
+        self.app.tabs.setCurrentIndex(0)
         self.app._flows_expanded = False
         self.app.details_panel.show()
         self.app.btn_expand_flows.setText("Expand Flows")
@@ -499,8 +511,6 @@ class DatasetLoadMixin:
         self._sync_json_period_selector_panel()
 
     def _reset_ai_outputs_for_new_dataset(self) -> None:
-        if hasattr(self.app, "txt_ai_summary"):
-            self.app.txt_ai_summary.clear()
         if hasattr(self.app, "btn_ai_summary"):
             self.app.btn_ai_summary.setEnabled(True)
             self.app.btn_ai_summary.setText("Generate AI Summary")
@@ -606,6 +616,26 @@ class DatasetLoadMixin:
         selected_item = self.app.projects_list.currentItem()
         if selected_item and int(selected_item.data(Qt.UserRole)) == project_id:
             self.app.projects_ui_controller.on_project_selected_preview()
+
+    def _bind_empty_project_target(self, meta: dict) -> None:
+        project_id = self.app.current_project_id
+        if project_id is None:
+            return
+
+        project = get_project(project_id)
+        if not project:
+            return
+
+        dataset_identifier, dataset_type = self._dataset_target_from_meta(meta)
+        if is_imsi_target_type(dataset_type):
+            dataset_identifier = format_intercept_imsi(dataset_identifier)
+        if not dataset_identifier:
+            return
+        if (project.target_identifier or "").strip() or project_identifier_rows(project):
+            return
+
+        set_project_target(project_id, dataset_identifier, dataset_type)
+        self._refresh_selected_project_preview(project_id)
 
     def _confirm_or_bind_project_target(self, meta: dict) -> bool:
         project_id = self.app.current_project_id

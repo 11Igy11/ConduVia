@@ -31,7 +31,13 @@ from PySide6.QtWidgets import (
     QHeaderView,
 )
 
-from core.analysis_limits import PROFILE_CHART_PREVIEW_ROWS
+from core.analysis_limits import (
+    PCAP_CHART_COLUMN_HEIGHT,
+    PCAP_CHART_PREVIEW_MIN_HEIGHT,
+    PCAP_SUMMARY_CHARTS_ROW_HEIGHT,
+    PCAP_VISIBILITY_PANEL_HEIGHT,
+    PROFILE_CHART_PREVIEW_ROWS,
+)
 from ui.expand_dialogs import (
     build_dict_table,
 )
@@ -133,6 +139,18 @@ class PcapPage(PcapInvestigatorMixin, PcapPeriodMixin, PcapAnalysisMixin, PcapEx
         self.lbl_file = QLabel("No PCAP loaded")
         self.lbl_file.setObjectName("HeaderPathLabel")
         self.lbl_file.setWordWrap(True)
+        self.lbl_file.setMinimumHeight(20)
+        self.lbl_file.setMaximumHeight(40)
+        self.lbl_batch_status = QLabel("")
+        self.lbl_batch_status.setObjectName("MutedLabel")
+        self.lbl_batch_status.setWordWrap(False)
+        self.lbl_batch_status.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        self.lbl_batch_status.hide()
+        file_row = QHBoxLayout()
+        file_row.setContentsMargins(0, 0, 0, 0)
+        file_row.setSpacing(12)
+        file_row.addWidget(self.lbl_file, 1)
+        file_row.addWidget(self.lbl_batch_status, 0)
         self.lbl_stats = QLabel("")
         self.lbl_stats.setObjectName("HeaderStatLabel")
         self.lbl_stats.setWordWrap(False)
@@ -160,14 +178,6 @@ class PcapPage(PcapInvestigatorMixin, PcapPeriodMixin, PcapAnalysisMixin, PcapEx
             pick_range_button=self.btn_pcap_pick_range,
             trailing_widgets=[self.btn_reanalyze_period],
         )
-
-        self.lbl_pcap_meta = QLabel("")
-        self.lbl_pcap_meta.setObjectName("HeaderStatLabel")
-        self.lbl_pcap_meta.setWordWrap(False)
-        header_meta = QHBoxLayout()
-        header_meta.setSpacing(4)
-        header_meta.setContentsMargins(0, 0, 0, 0)
-        header_meta.addWidget(self.lbl_pcap_meta, 1)
 
         self.lbl_period_gaps = QLabel("")
         self.lbl_period_gaps.setObjectName("MutedLabel")
@@ -197,26 +207,21 @@ class PcapPage(PcapInvestigatorMixin, PcapPeriodMixin, PcapAnalysisMixin, PcapEx
         self.load_progress.setTextVisible(False)
         self.load_progress.hide()
 
-        header_layout.addLayout(top)
-        header_layout.addWidget(self.lbl_file)
-        header_layout.addLayout(header_bottom)
-        header_layout.addLayout(header_meta)
-        header_layout.addLayout(gap_row)
-        header_layout.addWidget(self.lbl_limit_notice)
-        header_layout.addWidget(self.lbl_load_progress)
-        header_layout.addWidget(self.load_progress)
+        self.pcap_status_track = QWidget()
+        status_track_layout = QVBoxLayout(self.pcap_status_track)
+        status_track_layout.setContentsMargins(0, 0, 0, 0)
+        status_track_layout.setSpacing(2)
+        status_track_layout.addWidget(self.lbl_limit_notice)
+        status_track_layout.addWidget(self.lbl_load_progress)
+        status_track_layout.addWidget(self.load_progress)
+        self.pcap_status_track.setFixedHeight(0)
+        self.pcap_status_track.hide()
 
-        self.batch_status_panel = QFrame()
-        self.batch_status_panel.setObjectName("InlinePanel")
-        batch_layout = QHBoxLayout(self.batch_status_panel)
-        batch_layout.setContentsMargins(8, 6, 8, 6)
-        batch_layout.setSpacing(8)
-        self.lbl_batch_status = QLabel("")
-        self.lbl_batch_status.setObjectName("MutedLabel")
-        self.lbl_batch_status.setWordWrap(True)
-        batch_layout.addWidget(self.lbl_batch_status, 1)
-        self.batch_status_panel.setVisible(False)
-        header_layout.addWidget(self.batch_status_panel)
+        header_layout.addLayout(top)
+        header_layout.addLayout(file_row)
+        header_layout.addLayout(header_bottom)
+        header_layout.addLayout(gap_row)
+        header_layout.addWidget(self.pcap_status_track)
         header_layout.addWidget(self.pcap_period_row)
         root.addWidget(header)
 
@@ -409,9 +414,11 @@ class PcapPage(PcapInvestigatorMixin, PcapPeriodMixin, PcapAnalysisMixin, PcapEx
 
         self.investigator_card = QFrame()
         self.investigator_card.setObjectName("PcapInvestigatorCard")
+        self.investigator_card.setFixedHeight(PCAP_SUMMARY_CHARTS_ROW_HEIGHT)
+        self.investigator_card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         card_outer = QVBoxLayout(self.investigator_card)
         card_outer.setContentsMargins(14, 12, 14, 12)
-        card_outer.setSpacing(8)
+        card_outer.setSpacing(0)
 
         self.lbl_plain_summary = QLabel("Open a PCAP file to see a plain-language investigation view.")
         self.lbl_plain_summary.setObjectName("PcapPlainSummary")
@@ -428,9 +435,23 @@ class PcapPage(PcapInvestigatorMixin, PcapPeriodMixin, PcapAnalysisMixin, PcapEx
         self.lbl_limitations.setWordWrap(True)
         self.lbl_limitations.setTextInteractionFlags(Qt.TextSelectableByMouse)
 
-        card_outer.addWidget(self.lbl_plain_summary)
-        card_outer.addWidget(self.lbl_key_points)
-        card_outer.addWidget(self.lbl_limitations)
+        summary_body = QWidget()
+        summary_body.setObjectName("PcapInvestigatorSummaryBody")
+        summary_body_layout = QVBoxLayout(summary_body)
+        summary_body_layout.setContentsMargins(0, 0, 0, 0)
+        summary_body_layout.setSpacing(8)
+        summary_body_layout.addWidget(self.lbl_plain_summary)
+        summary_body_layout.addWidget(self.lbl_key_points)
+        summary_body_layout.addWidget(self.lbl_limitations)
+
+        self.summary_body_scroll = QScrollArea()
+        self.summary_body_scroll.setObjectName("PcapInvestigatorSummaryScroll")
+        self.summary_body_scroll.setWidgetResizable(True)
+        self.summary_body_scroll.setFrameShape(QFrame.NoFrame)
+        self.summary_body_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.summary_body_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.summary_body_scroll.setWidget(summary_body)
+        card_outer.addWidget(self.summary_body_scroll, 1)
 
         self.chart_services = BarChartWidget(
             "Visible service groups",
@@ -484,20 +505,21 @@ class PcapPage(PcapInvestigatorMixin, PcapPeriodMixin, PcapAnalysisMixin, PcapEx
 
         services_widget = QWidget()
         services_widget.setLayout(services_box)
+        services_widget.setFixedHeight(PCAP_CHART_COLUMN_HEIGHT)
         activity_widget = QWidget()
         activity_widget.setLayout(activity_box)
+        activity_widget.setFixedHeight(PCAP_CHART_COLUMN_HEIGHT)
 
-        top = QHBoxLayout()
-        top.setSpacing(10)
-        self.chart_services.setMinimumHeight(260)
-        self.chart_activity.setMinimumHeight(260)
-        self.visibility_panel.setMinimumHeight(170)
+        charts_row = QHBoxLayout()
+        charts_row.setSpacing(10)
+        self.chart_services.setFixedHeight(PCAP_CHART_PREVIEW_MIN_HEIGHT)
+        self.chart_activity.setFixedHeight(PCAP_CHART_PREVIEW_MIN_HEIGHT)
 
-        top.addWidget(services_widget, 1)
-        top.addWidget(activity_widget, 1)
+        charts_row.addWidget(services_widget, 1)
+        charts_row.addWidget(activity_widget, 1)
 
         layout.addWidget(self.investigator_card)
-        layout.addLayout(top)
+        layout.addLayout(charts_row)
         layout.addWidget(self.visibility_panel)
 
         scroll.setWidget(content)
@@ -765,6 +787,8 @@ class PcapPage(PcapInvestigatorMixin, PcapPeriodMixin, PcapAnalysisMixin, PcapEx
         if summary is None:
             banner.hide()
             banner.clear()
+            if hasattr(self, "_sync_pcap_header_chrome"):
+                self._sync_pcap_header_chrome()
             return
         text = pcap_flow_cap_notice(
             flows_capped=bool(getattr(summary, "flows_capped", False)),
@@ -777,6 +801,8 @@ class PcapPage(PcapInvestigatorMixin, PcapPeriodMixin, PcapAnalysisMixin, PcapEx
         else:
             banner.hide()
             banner.clear()
+        if hasattr(self, "_sync_pcap_header_chrome"):
+            self._sync_pcap_header_chrome()
 
 
     def _build_visibility_panel(self) -> QFrame:
@@ -798,7 +824,7 @@ class PcapPage(PcapInvestigatorMixin, PcapPeriodMixin, PcapAnalysisMixin, PcapEx
         self.visibility_rows_layout = QVBoxLayout()
         self.visibility_rows_layout.setSpacing(6)
         layout.addLayout(self.visibility_rows_layout)
-        layout.addStretch()
+        panel.setFixedHeight(PCAP_VISIBILITY_PANEL_HEIGHT)
         return panel
 
     def _build_artifacts_tab(self) -> QWidget:
@@ -1072,10 +1098,9 @@ class PcapPage(PcapInvestigatorMixin, PcapPeriodMixin, PcapAnalysisMixin, PcapEx
             self.btn_reanalyze_period.setVisible(False)
         if hasattr(self, "pcap_period_row"):
             self.pcap_period_row.setVisible(False)
-        if hasattr(self, "batch_status_panel"):
-            self.batch_status_panel.setVisible(False)
         if hasattr(self, "lbl_batch_status"):
             self.lbl_batch_status.clear()
+            self.lbl_batch_status.hide()
 
         empty_chart = "Open a PCAP file to show visible service groups."
         empty_activity = "Open a PCAP file to show hourly packet activity."

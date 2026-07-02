@@ -190,6 +190,7 @@ class PcapAnalysisMixin:
         if not paths:
             return
 
+        active_day = str(getattr(self, "_pcap_active_day", "") or "")
         self.btn_open.setEnabled(False)
         self.btn_open.setText("Loading...")
         self.btn_export.setEnabled(False)
@@ -199,12 +200,15 @@ class PcapAnalysisMixin:
         if hasattr(self, "btn_reanalyze_period"):
             self.btn_reanalyze_period.setEnabled(False)
         self.txt_pcap_ai_summary.clear()
-        if len(paths) == 1:
-            self.lbl_file.setText(paths[0])
-            current_text = Path(paths[0]).name
+        if active_day or len(paths) > 1:
+            current_text = label or self._active_period_title(file_count=len(paths))
+            self.lbl_file.setText(current_text)
+        elif len(paths) == 1:
+            current_text = label or Path(paths[0]).name
+            self.lbl_file.setText(current_text)
         else:
             current_text = label or f"{len(paths):,} PCAP files"
-            self.lbl_file.setText(self._active_period_title(file_count=len(paths)))
+            self.lbl_file.setText(current_text)
         self.lbl_stats.setText(
             "Analyzing capture..."
             if len(paths) == 1
@@ -479,7 +483,7 @@ class PcapAnalysisMixin:
         self._sync_period_gap_visibility()
 
     def _update_batch_status(self, current_file: str = "", error_text: str = "") -> None:
-        if not hasattr(self, "batch_status_panel"):
+        if not hasattr(self, "lbl_batch_status"):
             return
 
         status_text = format_batch_status_text(
@@ -490,14 +494,17 @@ class PcapAnalysisMixin:
             batch_total=int(self._pcap_batch_total or 0),
             batch_failed=int(self._pcap_batch_failed or 0),
             error_text=error_text,
-            context_day=self._batch_context_label(current_file),
-            hide_individual_names=self._hide_individual_pcap_names(),
+            context_day="",
+            hide_individual_names=True,
         )
         if status_text is None:
+            self.lbl_batch_status.clear()
+            self.lbl_batch_status.hide()
             self._sync_period_selector_panel()
             return
 
         self.lbl_batch_status.setText(status_text)
+        self.lbl_batch_status.show()
         self._sync_period_selector_panel()
 
     def _mark_current_ingest(self, status: str, message: str = "") -> None:

@@ -88,8 +88,6 @@ class AiTaskController(QObject):
 
         app = self.app
 
-        app.txt_ai_summary.setPlainText(result)
-
         title = {
 
             "summary": "JSON Dataset Summary",
@@ -130,7 +128,8 @@ class AiTaskController(QObject):
 
     def on_error(self, message: str) -> None:
 
-        self.app.txt_ai_summary.setPlainText(f"AI error: {message}")
+        if hasattr(self.app, "txt_ai_hub"):
+            self.app.txt_ai_hub.setPlainText(f"AI error: {message}")
 
         self._restore_mode_ui()
 

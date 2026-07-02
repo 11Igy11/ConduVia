@@ -26,10 +26,9 @@ from PySide6.QtWidgets import (
 
 from core.analysis_limits import (
     EMBEDDED_SUMMARY_TOP_N,
+    INVESTIGATION_SNAPSHOT_EMPTY_HEIGHT,
     SUMMARY_CARD_HEIGHT,
     SUMMARY_CARD_WIDTH,
-    SUMMARY_CARDS_WRAP_HEIGHT,
-    SUMMARY_CARDS_WRAP_WIDTH,
     SUMMARY_VALUE_COL_WIDTH,
 )
 from ui.buttons import make_action_button, style_action_button
@@ -59,6 +58,8 @@ def build_explore_workspace(app: App) -> tuple[QWidget, QFrame]:
     # -------- Explore page --------
     explore_container = QWidget()
     explore_layout = QVBoxLayout(explore_container)
+    explore_layout.setContentsMargins(0, 0, 0, 0)
+    explore_layout.setSpacing(0)
 
     app.lbl_project_banner = QLabel("Project: (none)")
     app.lbl_project_banner.setObjectName("HeaderProjectLabel")
@@ -141,6 +142,10 @@ def build_explore_workspace(app: App) -> tuple[QWidget, QFrame]:
 
     app.cmb_json_period_mode = make_period_mode_combo(header_card)
     app.btn_json_pick_range = make_pick_range_button(header_card)
+    app.btn_json_reanalyze_period = make_action_button("Re-analyze Period", enabled=False)
+    app.btn_json_reanalyze_period.setToolTip(
+        "Re-load and analyze the selected JSON period from source files."
+    )
     app.json_period_row = build_period_selector_row(
         header_card,
         period_label=app.lbl_json_day,
@@ -148,6 +153,7 @@ def build_explore_workspace(app: App) -> tuple[QWidget, QFrame]:
         mode_combo=app.cmb_json_period_mode,
         pick_range_button=app.btn_json_pick_range,
         middle_widgets=[app.cmb_json_file],
+        trailing_widgets=[app.btn_json_reanalyze_period],
     )
 
     header_meta = QHBoxLayout()
@@ -204,8 +210,8 @@ def build_explore_workspace(app: App) -> tuple[QWidget, QFrame]:
 
     summary_tab = QWidget()
     summary_layout = QVBoxLayout(summary_tab)
-    summary_layout.setContentsMargins(8, 8, 8, 8)
-    summary_layout.setSpacing(8)
+    summary_layout.setContentsMargins(6, 4, 6, 6)
+    summary_layout.setSpacing(6)
 
     app.summary_preview_rows: dict[str, list[tuple[QLabel, QLabel]]] = {}
     app.summary_preview_cards: dict[str, QGroupBox] = {}
@@ -214,15 +220,17 @@ def build_explore_workspace(app: App) -> tuple[QWidget, QFrame]:
     def _build_summary_card(title: str, key: str) -> QGroupBox:
         box = QGroupBox(title)
         box.setObjectName("SummaryCard")
-        box.setFixedSize(SUMMARY_CARD_WIDTH, SUMMARY_CARD_HEIGHT)
+        box.setFixedHeight(SUMMARY_CARD_HEIGHT)
+        box.setMinimumWidth(150)
+        box.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         layout = QVBoxLayout(box)
-        layout.setContentsMargins(8, 8, 8, 8)
+        layout.setContentsMargins(8, 10, 8, 8)
         layout.setSpacing(4)
 
         rows: list[tuple[QLabel, QLabel]] = []
         rows_layout = QVBoxLayout()
-        rows_layout.setContentsMargins(0, 0, 0, 0)
-        rows_layout.setSpacing(2)
+        rows_layout.setContentsMargins(0, 10, 0, 0)
+        rows_layout.setSpacing(3)
         for _row_index in range(EMBEDDED_SUMMARY_TOP_N):
             row_layout = QHBoxLayout()
             row_layout.setContentsMargins(0, 0, 0, 0)
@@ -251,6 +259,7 @@ def build_explore_workspace(app: App) -> tuple[QWidget, QFrame]:
         layout.addStretch(1)
 
         expand = make_action_button("Expand table", object_name="SummaryExpandButton", enabled=False)
+        expand.hide()
         expand.clicked.connect(lambda _checked=False, kind=key: app.dataset_controller.expand_dataset_summary(kind))
         app.summary_expand_buttons[key] = expand
         expand_row = QHBoxLayout()
@@ -259,67 +268,50 @@ def build_explore_workspace(app: App) -> tuple[QWidget, QFrame]:
         layout.addLayout(expand_row)
         return box
 
-    app.lbl_dataset_summary = QLabel("Dataset summary")
+    app.lbl_dataset_summary = QLabel("Dataset breakdown")
     app.lbl_dataset_summary.setObjectName("SectionTitle")
 
     cards_grid = QGridLayout()
     cards_grid.setContentsMargins(0, 0, 0, 0)
-    cards_grid.setHorizontalSpacing(10)
+    cards_grid.setHorizontalSpacing(8)
     cards_grid.setVerticalSpacing(8)
-    cards_grid.addWidget(_build_summary_card("Top source IPs", "src"), 0, 0)
-    cards_grid.addWidget(_build_summary_card("Top destination IPs", "dst"), 0, 1)
-    cards_grid.addWidget(_build_summary_card("Top protocols", "proto"), 1, 0)
-    cards_grid.addWidget(_build_summary_card("Top applications", "apps"), 1, 1)
+    card_specs = (
+        ("Top source IPs", "src"),
+        ("Top destination IPs", "dst"),
+        ("Top protocols", "proto"),
+        ("Top applications", "apps"),
+    )
+    for index, (card_title, card_key) in enumerate(card_specs):
+        cards_grid.addWidget(_build_summary_card(card_title, card_key), index // 2, index % 2)
 
     cards_panel = QWidget()
-    cards_panel.setFixedSize(SUMMARY_CARDS_WRAP_WIDTH, SUMMARY_CARDS_WRAP_HEIGHT)
     cards_panel.setLayout(cards_grid)
+    cards_panel.setFixedHeight(SUMMARY_CARD_HEIGHT * 2 + 8)
+    cards_panel.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
 
-    dataset_column = QVBoxLayout()
-    dataset_column.setContentsMargins(0, 0, 0, 0)
-    dataset_column.setSpacing(6)
-    dataset_column.addWidget(app.lbl_dataset_summary)
-    dataset_column.addWidget(cards_panel)
+    from ui.investigation_snapshot_panel import InvestigationSnapshotPanel
 
-    app.lbl_ai_summary = QLabel("AI assistant output")
-    app.lbl_ai_summary.setObjectName("SectionTitle")
+    app.json_investigation_snapshot = InvestigationSnapshotPanel(
+        empty_text="Load a dataset to see an investigation snapshot.",
+        empty_fixed_height=INVESTIGATION_SNAPSHOT_EMPTY_HEIGHT,
+    )
 
-    app.txt_ai_summary = QTextEdit()
-    app.txt_ai_summary.setReadOnly(True)
-    app.txt_ai_summary.setPlaceholderText("Generate AI summary to populate this panel.")
+    breakdown_panel = QWidget()
+    breakdown_panel.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum)
+    breakdown_layout = QVBoxLayout(breakdown_panel)
+    breakdown_layout.setContentsMargins(0, 0, 0, 0)
+    breakdown_layout.setSpacing(10)
+    breakdown_layout.addWidget(app.lbl_dataset_summary)
+    breakdown_layout.addWidget(cards_panel)
 
-    ai_output_card = QFrame()
-    ai_output_card.setObjectName("Card")
-    ai_output_card.setMinimumHeight(SUMMARY_CARDS_WRAP_HEIGHT)
-    ai_output_card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-    ai_output_card_layout = QVBoxLayout(ai_output_card)
-    ai_output_card_layout.setContentsMargins(10, 10, 10, 10)
-    ai_output_card_layout.setSpacing(0)
-    ai_output_card_layout.addWidget(app.txt_ai_summary, 1)
+    summary_row = QHBoxLayout()
+    summary_row.setSpacing(12)
+    summary_row.setAlignment(Qt.AlignTop)
+    summary_row.addWidget(app.json_investigation_snapshot, 3)
+    summary_row.addWidget(breakdown_panel, 2)
 
-    ai_column = QVBoxLayout()
-    ai_column.setContentsMargins(0, 0, 0, 0)
-    ai_column.setSpacing(6)
-    ai_column.addWidget(app.lbl_ai_summary)
-    ai_column.addWidget(ai_output_card, 1)
-
-    dataset_column_widget = QWidget()
-    dataset_column_widget.setLayout(dataset_column)
-    dataset_column_widget.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Expanding)
-    dataset_column_widget.setFixedWidth(SUMMARY_CARDS_WRAP_WIDTH)
-
-    ai_column_widget = QWidget()
-    ai_column_widget.setLayout(ai_column)
-    ai_column_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-
-    summary_content = QHBoxLayout()
-    summary_content.setContentsMargins(0, 0, 0, 0)
-    summary_content.setSpacing(12)
-    summary_content.setAlignment(Qt.AlignTop)
-    summary_content.addWidget(dataset_column_widget, 0)
-    summary_content.addWidget(ai_column_widget, 1)
-
-    summary_layout.addLayout(summary_content, 1)
+    summary_layout.addLayout(summary_row)
+    summary_layout.addStretch(1)
 
     app.tabs.addTab(summary_tab, "Summary")
 
@@ -535,17 +527,6 @@ def build_explore_workspace(app: App) -> tuple[QWidget, QFrame]:
     app.tabs.addTab(app.findings_page, "Findings")
     app.IDX_FINDINGS_TAB = 2
 
-    explore_ai_actions = QHBoxLayout()
-    explore_ai_actions.setContentsMargins(0, 0, 8, 0)
-    explore_ai_actions.setSpacing(6)
-    explore_ai_actions.addWidget(app.btn_load)
-    explore_ai_actions.addWidget(app.btn_ai_summary)
-    explore_ai_actions.addWidget(app.btn_add_ai_to_notes)
-    explore_ai_actions_widget = QWidget()
-    explore_ai_actions_widget.setObjectName("ExploreTabActions")
-    explore_ai_actions_widget.setLayout(explore_ai_actions)
-    explore_ai_actions_widget.setFixedHeight(32)
-    app.tabs.setCornerWidget(explore_ai_actions_widget, Qt.TopRightCorner)
     # Explore layout
     explore_layout.addWidget(app.lbl_mode)
     explore_layout.addWidget(app.lbl_conv_summary)

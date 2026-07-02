@@ -529,8 +529,63 @@ QGroupBox#FlowDetailsCard::title {
     color: #0f172a;
 }
 
+QFrame#InvestigationSnapshotCard,
+QGroupBox#InvestigationSnapshotCard {
+    background: #ffffff;
+    border: 1px solid #60a5fa;
+    color: #111827;
+}
+
+QGroupBox#InvestigationSnapshotCard::title {
+    background: #ffffff;
+    color: #0f172a;
+}
+
+QGroupBox#InvestigationSnapshotCard QLabel {
+    background: transparent;
+    color: #111827;
+}
+
+QGroupBox#InvestigationSnapshotCard QScrollArea,
+QScrollArea#InvestigationSnapshotScroll,
+QWidget#InvestigationSnapshotContent {
+    background: #ffffff;
+    border: none;
+}
+
+QScrollArea#InvestigationSnapshotScroll QAbstractScrollArea::viewport {
+    background: #ffffff;
+}
+
+QLabel#InvestigationSnapshotHeadline {
+    color: #0f172a;
+}
+
+QLabel#InvestigationSnapshotBody {
+    color: #334155;
+}
+
+QGroupBox#SummaryCard:hover {
+    background: #f8fafc;
+}
+
+QLabel#SummaryPreviewName,
+QLabel#SummaryPreviewCount {
+    color: #334155;
+}
+
 QFrame#PcapInvestigatorCard {
     border: 1px solid #60a5fa;
+}
+
+QScrollArea#PcapInvestigatorSummaryScroll,
+QWidget#PcapInvestigatorSummaryBody {
+    background: #ffffff;
+    border: none;
+}
+
+QScrollArea#PcapInvestigatorSummaryScroll QAbstractScrollArea::viewport {
+    background: #ffffff;
 }
 
 QLabel#FlowFieldValue {

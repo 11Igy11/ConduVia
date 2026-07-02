@@ -67,11 +67,10 @@ class BarChartWidget(QFrame):
         self.rows.setSpacing(6)
         self.rows.setAlignment(Qt.AlignTop)
         self.layout.addLayout(self.rows, 1)
-        self.setMinimumHeight(140)
+        self.setMinimumHeight(80)
 
     def configure_expand_table(self, callback) -> None:
         self._expand_callback = callback
-        self.btn_expand_table.show()
 
     def _on_expand_table_clicked(self) -> None:
         if self._expand_callback is not None:
@@ -80,6 +79,7 @@ class BarChartWidget(QFrame):
     def set_expand_enabled(self, enabled: bool, *, tooltip: str = "") -> None:
         if self._expand_callback is None:
             return
+        self.btn_expand_table.setVisible(enabled)
         self.btn_expand_table.setEnabled(enabled)
         self.btn_expand_table.setToolTip(tooltip or "")
 
@@ -97,7 +97,6 @@ class BarChartWidget(QFrame):
             empty.setWordWrap(True)
             empty.setAlignment(Qt.AlignLeft | Qt.AlignTop)
             self.rows.addWidget(empty)
-            self.rows.addStretch(1)
             return
 
         max_count = max(int(row.get(self.value_key) or 0) for row in rows) or 1
