@@ -26,9 +26,22 @@ from ui.dataset_header_layout import DATASET_HEADER_STATUS_TRACK_HEIGHT
 from ui.period_selector_panel import sync_period_selector_panel, sync_pick_range_button
 from ui.workers.pcap_workers import PcapBatchWorker
 
+_PCAP_ALL_FILES_TOKEN = "__all__"
+
 
 class PcapPeriodMixin:
     """PCAP period selector, gap banner, saved-period load, and load progress UI."""
+
+    def _unique_paths(self, paths: list[str] | None) -> list[str]:
+        seen: set[str] = set()
+        unique: list[str] = []
+        for path in paths or []:
+            text = str(path or "").strip()
+            if not text or text in seen:
+                continue
+            seen.add(text)
+            unique.append(text)
+        return unique
 
     def _sync_save_period_button(self, *, visible: bool | None = None, saved: bool = False, hide: bool = False) -> None:
         btn = getattr(self, "btn_save_project", None)
@@ -121,7 +134,7 @@ class PcapPeriodMixin:
 
     def _raw_daily_day_groups(self) -> dict[str, list[str]]:
         raw = {
-            str(day): [str(path) for path in (paths or []) if str(path or "").strip()]
+            str(day): self._unique_paths(list(paths or []))
             for day, paths in (self._pcap_day_groups_raw or {}).items()
             if str(day or "").strip()
         }
@@ -173,7 +186,7 @@ class PcapPeriodMixin:
 
     def _store_day_groups_raw(self, day_groups: dict[str, list[str]]) -> list[str]:
         cleaned = {
-            str(day): [str(path) for path in paths if str(path or "").strip()]
+            str(day): self._unique_paths(list(paths or []))
             for day, paths in (day_groups or {}).items()
         }
         cleaned = {day: paths for day, paths in cleaned.items() if paths}
@@ -184,7 +197,7 @@ class PcapPeriodMixin:
             self._clear_day_groups()
             return []
         self._pcap_day_groups = {}
-        return [path for paths in self._pcap_day_groups_raw.values() for path in paths]
+        return self._unique_paths([path for paths in self._pcap_day_groups_raw.values() for path in paths])
 
     def _apply_imported_period_range_only(self, start: str = "", end: str = "") -> None:
         from core.period_gaps import normalize_period_day
@@ -239,7 +252,7 @@ class PcapPeriodMixin:
 
     def _set_day_groups(self, day_groups: dict[str, list[str]], *, allow_empty_days: bool = False) -> list[str]:
         cleaned = {
-            str(day): [str(path) for path in paths if str(path or "").strip()]
+            str(day): self._unique_paths(list(paths or []))
             for day, paths in (day_groups or {}).items()
         }
         if allow_empty_days:
@@ -304,6 +317,7 @@ class PcapPeriodMixin:
                 self.cmb_pcap_day.setCurrentIndex(index)
         self.cmb_pcap_day.blockSignals(False)
         self._pcap_active_day = state.active_key
+        self._rebuild_pcap_file_combo()
         self._sync_period_selector_panel()
         self._update_reanalyze_button_state()
         self._update_period_gap_banner()
@@ -466,6 +480,105 @@ class PcapPeriodMixin:
                 DATASET_HEADER_STATUS_TRACK_HEIGHT if status_active else 0
             )
 
+    def _active_pcap_period_paths(self, day: str | None = None) -> list[str]:
+        day_key = str(day or self._pcap_active_day or self.cmb_pcap_day.currentData() or "")
+        if self._pcap_period_granularity == "day" and day_key and day_key != "undated":
+            from core.period_calendar import expand_day_group_paths
+
+            paths = expand_day_group_paths(self._pcap_day_groups, day_key)
+        else:
+            paths = list(self._pcap_day_groups.get(day_key, []) or [])
+        active_file = str(getattr(self, "_pcap_active_file", "") or "").strip()
+        if active_file and active_file in paths:
+            return [active_file]
+        return paths
+
+    def _rebuild_pcap_file_combo(self) -> None:
+        file_combo = getattr(self, "cmb_pcap_file", None)
+        if file_combo is None:
+            return
+        paths = list(self._pcap_day_groups.get(str(self._pcap_active_day or ""), []) or [])
+        self._pcap_file_switching = True
+        file_combo.blockSignals(True)
+        file_combo.clear()
+        if len(paths) <= 1:
+            file_combo.setVisible(False)
+            self._pcap_active_file = ""
+        else:
+            file_combo.addItem(f"All files ({len(paths):,})", _PCAP_ALL_FILES_TOKEN)
+            for path in sorted(paths, key=lambda item: Path(item).name.casefold()):
+                file_combo.addItem(Path(path).name, path)
+            file_combo.setVisible(True)
+            if self._pcap_active_file and self._pcap_active_file in paths:
+                index = file_combo.findData(self._pcap_active_file)
+                if index >= 0:
+                    file_combo.setCurrentIndex(index)
+            else:
+                self._pcap_active_file = ""
+                file_combo.setCurrentIndex(0)
+        file_combo.blockSignals(False)
+        self._pcap_file_switching = False
+
+    def _period_bucket_file_count(self, day: str | None = None) -> int:
+        day_key = str(day or self._pcap_active_day or self.cmb_pcap_day.currentData() or "")
+        return len(self._pcap_day_groups.get(day_key, []) or [])
+
+    def _period_bucket_label(self, day: str | None = None, *, kind: str = "PCAP") -> str:
+        day_key = str(day or self._pcap_active_day or self.cmb_pcap_day.currentData() or "")
+        count = self._period_bucket_file_count(day_key)
+        if day_key and count:
+            return period_group_label(
+                day_key,
+                granularity=self._pcap_period_granularity or "day",
+                file_count=max(1, count),
+                kind=kind,
+            )
+        if count > 1:
+            return f"{count:,} {kind} files"
+        if count == 1:
+            return f"1 {kind} file"
+        return f"No {kind} loaded"
+
+    def _calendar_day_source_note(self, source_count: int, day: str | None = None) -> str:
+        day_key = str(day or self._pcap_active_day or self.cmb_pcap_day.currentData() or "")
+        bucket_count = self._period_bucket_file_count(day_key)
+        if day_key and bucket_count and source_count > bucket_count:
+            return (
+                f"{source_count:,} source PCAP files scanned for this calendar day "
+                f"(including adjacent files for midnight overlap; period bucket: {bucket_count:,})."
+            )
+        if source_count > 1:
+            return f"{source_count:,} source PCAP files scanned for this period."
+        if source_count == 1:
+            return "1 source PCAP file scanned for this period."
+        return ""
+
+    def _on_pcap_file_changed(self, index: int) -> None:
+        if getattr(self, "_pcap_file_switching", False) or index < 0:
+            return
+        file_combo = getattr(self, "cmb_pcap_file", None)
+        if file_combo is None or not file_combo.isVisible():
+            return
+        if self._thread is not None or self._batch_runner.is_running():
+            return
+        token = str(file_combo.itemData(index) or "")
+        self._pcap_active_file = "" if token == _PCAP_ALL_FILES_TOKEN else token
+        day = str(self._pcap_active_day or self.cmb_pcap_day.currentData() or "")
+        if day and self._try_load_saved_pcap_period(day) and not self._pcap_active_file:
+            return
+        paths = self._active_pcap_period_paths(day)
+        if not paths:
+            return
+        if len(paths) == 1:
+            label = f"{self._format_day_label(day)} — {Path(paths[0]).name}" if day else Path(paths[0]).name
+            self._load_pcap_files(paths, label=label)
+        else:
+            self._pcap_batch_total = len(paths)
+            self._pcap_batch_processed = 0
+            self._pcap_batch_failed = 0
+            label = self._period_bucket_label(day) if day else f"{len(paths):,} PCAP files"
+            self._load_pcap_files(paths, label=label)
+
     def load_active_period(self, *, prefer_saved: bool = False) -> None:
         if not self._pcap_day_groups:
             return
@@ -476,9 +589,9 @@ class PcapPeriodMixin:
             return
         if prefer_saved and self._try_load_saved_pcap_period(day):
             return
-        paths = list(self._pcap_day_groups.get(day, []))
+        paths = self._active_pcap_period_paths(day)
         if paths:
-            self._load_pcap_files(paths, label=f"{self._format_day_label(day)} ({len(paths):,} PCAP files)")
+            self._load_pcap_files(paths, label=self._period_bucket_label(day))
         elif prefer_saved:
             self._try_load_saved_pcap_period(day)
 
@@ -519,10 +632,10 @@ class PcapPeriodMixin:
         self.chart_activity.set_rows([], empty_text=empty_saved)
         self._service_chart_full_rows = []
         self._activity_chart_full_rows = []
-        if hasattr(self, "btn_expand_chart_services"):
-            self.btn_expand_chart_services.setEnabled(False)
-        if hasattr(self, "btn_expand_chart_activity"):
-            self.btn_expand_chart_activity.setEnabled(False)
+        if hasattr(self, "chart_services"):
+            self.chart_services.set_expand_enabled(False)
+        if hasattr(self, "chart_activity"):
+            self.chart_activity.set_expand_enabled(False)
         self._set_visibility_indicators([], empty_text=empty_saved)
         self.lbl_overview_text.setText(
             f"Saved PCAP period for {self._format_day_label(day)}.\n"
@@ -573,6 +686,12 @@ class PcapPeriodMixin:
             self.cmb_pcap_day.blockSignals(True)
             self.cmb_pcap_day.clear()
             self.cmb_pcap_day.blockSignals(False)
+        if hasattr(self, "cmb_pcap_file"):
+            self.cmb_pcap_file.blockSignals(True)
+            self.cmb_pcap_file.clear()
+            self.cmb_pcap_file.setVisible(False)
+            self.cmb_pcap_file.blockSignals(False)
+            self._pcap_active_file = ""
         if not keep_raw and hasattr(self, "cmb_pcap_period_mode"):
             self.cmb_pcap_period_mode.blockSignals(True)
             self.cmb_pcap_period_mode.setCurrentIndex(0)
@@ -592,8 +711,10 @@ class PcapPeriodMixin:
         if not day:
             return
         self._pcap_active_day = day
+        self._pcap_active_file = ""
+        self._rebuild_pcap_file_combo()
         self._pcap_queue = []
-        paths = list(self._pcap_day_groups.get(day, []))
+        paths = self._active_pcap_period_paths(day)
         if self._try_load_saved_pcap_period(day):
             return
         if not paths:
@@ -603,7 +724,7 @@ class PcapPeriodMixin:
         self._pcap_batch_processed = 0
         self._pcap_batch_failed = 0
         self._update_batch_status(f"{self._format_day_label(day)} aggregate")
-        self._load_pcap_files(paths, label=f"{self._format_day_label(day)} ({len(paths):,} PCAP files)")
+        self._load_pcap_files(paths, label=self._period_bucket_label(day))
 
     def _format_day_label(self, day: str) -> str:
         return format_period_day_label(day)
@@ -719,7 +840,7 @@ class PcapPeriodMixin:
             return
 
         day = str(self._pcap_active_day or self.cmb_pcap_day.currentData() or "")
-        paths = list(self._pcap_day_groups.get(day, []))
+        paths = self._active_pcap_period_paths(day)
         if not paths and getattr(self, "summary", None):
             paths = list(getattr(self.summary, "source_paths", None) or [])
         if not paths and getattr(self, "summary", None) and self.summary.file_path:
@@ -731,7 +852,7 @@ class PcapPeriodMixin:
 
         label = ""
         if day:
-            label = f"{self._format_day_label(day)} ({len(paths):,} PCAP files)"
+            label = self._period_bucket_label(day)
         elif len(paths) > 1:
             label = f"{len(paths):,} PCAP files"
         if len(paths) == 1:
@@ -768,7 +889,6 @@ class PcapPeriodMixin:
         self.btn_add_notes.setEnabled(False)
         if hasattr(self, "btn_mark_finding"):
             self.btn_mark_finding.setEnabled(False)
-        self.txt_pcap_ai_summary.clear()
 
         period_label = label or f"{len(clean_paths):,} PCAP files"
         self.lbl_file.setText(self._active_period_title(file_count=len(clean_paths)))

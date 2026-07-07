@@ -191,12 +191,18 @@ class ProjectsUIController:
         from core.case_metadata import (
             EARLIER_LAWFUL_INTERCEPTION_DATES_LABEL,
             LAWFUL_INTERCEPTION_DATES_ACTIVE_LABEL,
+            ensure_project_metadata_from_evidence,
             format_active_order_validity,
             format_klasa_all,
             format_order_validity_history,
             format_urbroj_all,
             load_case_metadata,
         )
+
+        ensure_project_metadata_from_evidence(pid)
+        p = get_project(pid)
+        if not p:
+            return
 
         metadata = load_case_metadata(pid)
         klasa_all = format_klasa_all(metadata)
@@ -635,7 +641,7 @@ class ProjectsUIController:
         self.app.project_recent_json_rows = list(json_evidence.get("json_day_rows") or [])[:MAX_RECENT_UI_ROWS]
         self.app.project_recent_pcap_rows = list(pcap_evidence.get("recent_day_rows") or [])[:MAX_RECENT_UI_ROWS]
 
-        activity_rows = list_activity(project_id, limit=MAX_RECENT_UI_ROWS)
+        activity_rows = list_activity(project_id, limit=MAX_RECENT_UI_ROWS, order="asc")
         self.app.project_activity_rows = []
         for row in activity_rows:
             event = self.activity_label(str(row["event_type"] or ""), str(row["message"] or ""))
@@ -684,7 +690,7 @@ class ProjectsUIController:
             activity_rows = getattr(self.app, "project_activity_rows", []) or []
             self.app.lbl_recent_activity_count.setText(f"{activity_count:,} events")
             if activity_count and activity_rows:
-                newest = self._short_text(activity_rows[0].get("event") or "-")
+                newest = self._short_text(activity_rows[-1].get("event") or "-")
                 self.app.lbl_recent_activity_detail.setText(f"Latest: {newest}")
             elif activity_count:
                 self.app.lbl_recent_activity_detail.setText(f"{activity_count:,} recent events")

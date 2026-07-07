@@ -27,6 +27,10 @@ class ImportPauseGate:
         with self._lock:
             return self._paused
 
+    def is_aborted(self) -> bool:
+        with self._lock:
+            return self._aborted
+
     def wait_if_paused(self) -> bool:
         """Block until resumed. Returns False when aborted."""
         with self._cond:

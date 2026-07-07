@@ -1,7 +1,7 @@
 # ViaNyquist User Guide
 
 **Version:** Beta  
-**Last updated:** June 2026
+**Last updated:** July 2026
 
 ---
 
@@ -52,6 +52,8 @@ The left sidebar contains:
 
 The JSON section has three top tabs: **Explore**, **Registry**, **Listing**.
 
+Tab bars across the app (JSON, PCAP, Explore sub-tabs, Registry, OSINT, and similar) are **click-only** for switching tabs — scrolling the mouse wheel over a tab bar does not change the selected tab.
+
 ---
 
 ## 4. Projects
@@ -83,6 +85,10 @@ Select a project to preview details on the right. **Set active** makes it the wo
 - **Mobile / MSISDN**, **IMSI**, **IMEI** — use the **+** button to add multiple values; **−** removes a row.
 - **Other identifiers** — additional lines (e.g. email, legacy IDs).
 
+IP addresses are **not** accepted in name or identifier fields (MSISDN, IMSI, IMEI). Use flow tables for IP review.
+
+When you import a JSON dataset, lawful-interception metadata (Klasa, Urbroj, lawful interception dates, and subscriber identifiers when present) can be synced into the active project. You are prompted on the first import of a new source if project identifiers differ from the file.
+
 **Case order metadata**
 
 - **Klasa**, **Urbroj** — with **…** picker if saved values exist.
@@ -98,9 +104,9 @@ Shows ID, subject, identifiers, Klasa/Urbroj, lawful interception dates, descrip
 
 | Card | Action |
 |------|--------|
-| **Recent JSON files** | **Open JSON list** — load or open indexed JSON days |
-| **Recent PCAP days** | **Open PCAP list** — open saved PCAP periods |
-| **Recent activity** | **Open activity log** — project event timeline |
+| **Recent JSON files** | **Open JSON list** — load or open indexed JSON days; multi-select rows and **Delete selected** to remove indexed files from the project |
+| **Recent PCAP days** | **Open PCAP list** — open saved PCAP periods; multi-select and **Delete selected** to remove indexed PCAP evidence |
+| **Recent activity** | **Open activity log** — project event timeline (newest events at the bottom) |
 
 ---
 
@@ -118,13 +124,32 @@ Choose:
 
 **Folder import** offers **Import all**, **Choose date range**, or **Cancel**. JSON is indexed by calendar day. Use **Period** (Day / Month / **Selected period**), **Pick range…**, and **Missing days** to work with date spans.
 
+During import, a progress dialog shows indexing status. **Pause** temporarily stops processing; **Cancel import** aborts the session and rolls back evidence indexed in that import (so a half-finished folder load does not leave a broken dataset in the project).
+
 ### 5.2 From PCAP
 
-On the PCAP page, click **Load dataset** and select one or more `.pcap` / `.pcapng` files. Use **Save Period to Project** to register the capture to the active project workspace.
+On the PCAP page, click **Load dataset** and select one or more `.pcap` / `.pcapng` files. Large multi-day folders may be processed as an automatic batch (one period at a time) with optional auto-save to the project. Use **Save Period to Project** to register the current capture to the active project workspace.
 
 ### 5.3 From Projects
 
 Use **Open JSON list** or **Open PCAP list** on the recent cards; multi-select rows and **Load selected**, or double-click a row.
+
+### 5.4 Period selector and calendar day
+
+Both JSON and PCAP use the same period controls in the header:
+
+| Control | Purpose |
+|---------|---------|
+| **Period** | **Day**, **Month**, or **Selected period** |
+| **Day combo** | Calendar day bucket (file count shown, e.g. `23/07/2024 (8 JSON)`) |
+| **File combo** | **All files** for that day, or one source file (JSON and PCAP) |
+| **Pick range…** | Custom date span |
+| **Re-analyze Period** | Rebuild analysis from source files for the selected period |
+| **Missing days** | Highlights gaps in indexed coverage |
+
+When **Day** is selected, the header **Window** always shows the **full calendar day** (`00:00:00.000` – `23:59:59.999`). A separate line (**Traffic observed …**) shows when flows or packets actually occurred inside that day.
+
+Re-analyze loads flows whose timestamps fall on the selected calendar day. Source files from the adjacent calendar day may also be scanned so traffic that crosses midnight is not split incorrectly. The status line explains when more files are scanned than appear in the day bucket (midnight overlap).
 
 ---
 
@@ -132,27 +157,35 @@ Use **Open JSON list** or **Open PCAP list** on the recent cards; multi-select r
 
 Sub-tabs: **Summary**, **Flows**, **Findings**.
 
+Top-level JSON tabs (**Explore**, **Registry**, **Listing**) and Explore sub-tabs do **not** scroll when you use the mouse wheel over the tab bar — only the page content scrolls.
+
 ### 6.1 Header
 
-- **Load dataset**, **Generate AI Summary**, **Add AI to Notes**
-- Project path and stats; **Page size** and **Load next** for large datasets
-- **Period** controls and search: `Search IP / SNI / app...`
+- **Load dataset**, **Generate AI Summary**, **Add Summary to Notes**
+- Project path and stats (green loading text while JSON is parsed, same style as PCAP import)
+- **Page size** and **Load next** for large datasets
+- **Period** row: day/month/range, file picker, **Re-analyze Period**, **Missing days**
+- Search: `Search IP / SNI / app...`
 
 ### 6.2 Summary
 
-- Cards: **Top source IPs**, **Top destination IPs**, **Top protocols**, **Top applications** — each with **Expand table**
-- **AI assistant output** — filled by **Generate AI Summary**
+- **Investigation snapshot** — headline, findings, activity patterns, service groups, and next steps generated from the loaded period (peak hours, bursts, messaging/social services, volume). No raw IP addresses in the snapshot text.
+- Cards: **Top source IPs**, **Top destination IPs**, **Top protocols**, **Top applications** — each with **Expand table** (expand control in the chart header)
+- **Generate AI Summary** sends structured context to the AI assistant; results appear on **AI output**
 
 ### 6.3 Flows
 
+- **View** modes (like Listing): Default, All fields, Custom, or saved presets
+- **Customize** — pick columns (e.g. add separate Date and Time columns)
+- **Presets ▾** — save, update, or delete column layouts
 - Filters: **Filter source**, **Filter destination**, **Filter SNI**
 - **Conversation: OFF/ON** — focus on one endpoint pair
 - **Expand Flows** / **Collapse Flows**
-- **Export table** (CSV / Excel / HTML)
+- **Export table** (CSV / Excel / HTML) — exports **visible** filtered rows; a warning appears if the export is not the full dataset
 - **Mark as Finding** — save selected flow as a finding
 - **Explain with AI** — send flow context to AI
 
-Sortable table columns include Source/destination IP and port, Protocol, Application, Bytes, Duration, SNI. **Flow details** panel shows the selected row.
+Sortable table columns depend on the active view. **Flow details** panel shows the selected row.
 
 ### 6.4 Findings (in Explore)
 
@@ -190,24 +223,49 @@ Default columns include Date, Time, IPs, ports, Protocol, Application, Server Na
 
 ### 9.1 Header
 
-- **Load dataset**, **Save Period to Project**, **AI Summary**, **Add to Notes**, **Export Summary**
-- **Period** row: day combo, Day / Month / Selected period, **Pick range…**, **Re-analyze Period**, **Missing days**
+- **Load dataset**, **Save Period to Project**, **AI Summary**, **Add Summary to Notes**, **Export Summary**
+- **Period** row: day combo, Day / Month / Selected period, **file picker** (all files or one PCAP in the bucket), **Pick range…**, **Re-analyze Period**, **Missing days**
+- Stats line: format, packets, volume, period window, and calendar-day notes when applicable
 
 ### 9.2 Tabs
 
 | Tab | Content |
 |-----|---------|
-| **Summary** | Plain-language overview, key points, limitations, service groups, hourly activity |
-| **Communications** | Communication highlights (service, indicator, host, volume, timing) |
-| **Evidence** | **Evidence** (DNS, TLS SNI, HTTP hosts, visible samples) and **Artifacts** (extracted artefacts) |
+| **Summary** | Plain-language overview, key points, limitations, service groups, hourly activity (expand tables from chart headers) |
+| **Communications** | Two sub-tabs: **Communications** (messaging, calls, push) and **Social** (YouTube, TikTok, Spotify, and similar content/API traffic) |
+| **Evidence** | DNS, TLS SNI, HTTP hosts, visible samples, and extracted **Artifacts** |
 | **Network** | **Overview** and **Connections** tables |
-| **AI Summary** | AI explanation of the capture |
 
-Many sections offer **Expand table** or **Open full … table** for larger views.
+There is **no separate AI Summary tab** on PCAP. **AI Summary** runs analysis and opens the result on **AI output**.
 
-### 9.3 Limitations
+### 9.3 Communications and Social
 
-HTTPS, QUIC, and most app traffic are encrypted. Without plaintext, only metadata and visible artefacts are shown. Messaging or call-like indicators are heuristic, not proof of user action.
+Communication indicators are **grouped** by service, indicator type, and host — not one row per flow.
+
+| Column / concept | Meaning |
+|------------------|---------|
+| **Type** | Call / media, Messaging / push, Background / sync, Content / API, or Other |
+| **Indicator** | Short plain-language label (e.g. push channel, likely call/media session) |
+| **Sessions** | Number of flows combined into that row |
+| **Confidence** | high / medium / low (metadata-based) |
+
+The Communications card highlights **review leads** first. **Routine** background/sync rows (for example repetitive Apple push contacts) are grouped and de-emphasised; open **Open communications table** to see the full list (review leads first, routine at the bottom).
+
+**Mark as Finding** saves the selected communication indicator (from the full table) to the project findings.
+
+### 9.4 Summary text
+
+The Summary tab and investigation snapshot describe:
+
+- Peak activity hour and share of timed traffic
+- Observed traffic window inside the calendar day
+- Priority communication leads with time span and volume
+- Social/content usage when present
+- How many routine background flows were grouped separately
+
+### 9.5 Limitations
+
+HTTPS, QUIC, and most app traffic are encrypted. Without plaintext, only metadata and visible artefacts are shown. Messaging or call-like indicators are heuristic, not proof of user action or message content.
 
 ---
 
@@ -232,7 +290,10 @@ A **Finding** is an item you mark as important for the case.
 
 ### 11.1 Create
 
-In **Flows**, select a row and click **Mark as Finding**. Enter **Title**, optional **Note**, and **Tags** (comma-separated). The view switches to the Findings tab.
+- **JSON → Flows** — select a row and click **Mark as Finding**
+- **PCAP → Communications** — open the full communications table, select a grouped indicator, and click **Mark as Finding**
+
+Enter **Title**, optional **Note**, and **Tags** (comma-separated). The view may switch to the Findings tab.
 
 ### 11.2 Browse and filter
 
@@ -271,12 +332,14 @@ Use **Summary** when you open a new JSON day, PCAP period, or want a case-wide p
 
 | Screen | Buttons | Where results appear |
 |--------|---------|----------------------|
-| **JSON → Explore** | **Generate AI Summary**, **Explain with AI** | Summary/Flows area and **AI output** |
-| **PCAP** | **AI Summary** | **AI Summary** tab and **AI output** |
+| **JSON → Explore** | **Generate AI Summary**, **Explain with AI** | Investigation snapshot context and **AI output** |
+| **PCAP** | **AI Summary** | **AI output** (no separate PCAP AI tab) |
 | **Findings** | **Explain with AI** | **AI output** |
 | **Profile** | **AI Profile Summary** | **AI output** |
 
-**Add to Notes** / **Add AI to Notes** copies the latest AI text into project notes (rich-text editor).
+**Add Summary to Notes** copies the investigation snapshot (JSON or PCAP summary text) into project notes. On **Findings**, **Add Finding to Notes** copies selected finding rows (multi-select with Ctrl+click).
+
+**Add to Notes** / legacy AI copy actions may still appear in some PCAP areas; prefer **Add Summary to Notes** for the structured snapshot.
 
 While a request runs, the UI shows a progress message. Large JSON periods or PCAP captures can take several minutes — the **Timeout** in Settings controls the maximum wait.
 
@@ -336,10 +399,12 @@ Requires an active project. Notes are stored with the project and in the workspa
 Aggregated view of saved JSON, PCAP, findings, and activity for the active project.
 
 - **AI Profile Summary**, **Add to Notes**, **Export Profile** (HTML)
-- **Evidence Overview** metrics
-- **Profile Summary** and **Activity rhythm**
-- Charts: evidence sources, device IPs, event types, behaviour insights
+- **Evidence Overview** metrics and period coverage
+- **Profile Summary** and **Activity rhythm** (when traffic tends to occur)
+- Charts: evidence sources, device IPs, behaviour insights, **Activity by hour** (with **Expand table** for hour / flows / volume)
 - **Repository hits** banner when internal repository matches exist
+
+The older standalone **Activity event types** chart has been removed; event history is available from **Recent activity** on the Projects page.
 
 Activity patterns are indicators only — they do not prove who used a device or whether a person was awake or asleep.
 
@@ -373,7 +438,7 @@ Default location: project workspace `exports/` (when workspace is configured).
 | Area | Formats | How |
 |------|---------|-----|
 | Listing | CSV, Excel, HTML | **Export** |
-| Explore Flows | CSV, Excel, HTML | **Export table** |
+| Explore Flows | CSV, Excel, HTML | **Export table** (visible rows; warning if filtered) |
 | Registry | HTML | **Export HTML report** |
 | Registry dataset | CSV, Excel, HTML | **Open dataset table** |
 | PCAP | HTML | **Export Summary** |
@@ -403,6 +468,7 @@ Each project has a workspace under the chosen parent folder. Typical structure:
 
 - No decryption of HTTPS, QUIC, or app-layer encryption
 - Metadata ≠ message content
+- PCAP **Communications** indicators (including call/media labels) are metadata heuristics only
 - Device activity ≠ proof a specific person used the device
 - Do not treat AI text as evidence
 - Use **Findings** for key items; **Notes** for your reasoning
@@ -474,10 +540,14 @@ Alphabetical list of abbreviations and technical terms you may see in ViaNyquist
 | Term | Meaning |
 |------|---------|
 | **Activity Profile** | Cross-evidence summary for the active project — JSON days, PCAP volume, findings, notes, and behaviour charts on the **Profile** page. |
-| **Finding** | Investigator-marked important flow or item, saved to the project with title, notes, and optional AI explanation. |
+| **Calendar day** | A full 24-hour period from `00:00:00` to `23:59:59` on the selected date. Day mode filters and displays traffic by flow timestamps, not only by source file name. |
+| **Finding** | Investigator-marked important flow, communication indicator, or item, saved to the project with title, notes, and optional AI explanation. |
 | **Flow** | One communication record between source and destination (IPs, ports, protocol, application, timing, volume). Core unit in **JSON → Explore** and Listing. |
+| **Investigation snapshot** | Structured summary block on JSON **Summary** (headline, findings, patterns, next steps) built from analyst metrics without exposing raw IPs in the narrative. |
 | **JSON dataset** | Indexed collection of flow JSON files for a project period (by calendar day). Distinct from a single PCAP capture. |
+| **Review lead** | A grouped communication indicator prioritised for manual review (call/media or stronger messaging signals). |
 | **Repository** | Local store of imported leak/breach datasets searched from **OSINT → Repository** (phones, emails, OIB, names, etc.). |
+| **Routine background** | Low-priority grouped traffic (push/sync, generic contacts) shown separately from review leads in PCAP Communications. |
 | **Workspace** | Per-project folder under the parent you choose at creation; holds `datasets/`, `exports/`, `findings/`, `notes/`, and `reports/`. |
 
 ---

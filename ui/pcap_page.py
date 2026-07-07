@@ -24,7 +24,6 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QSizePolicy,
     QTableView,
-    QTabWidget,
     QTextEdit,
     QVBoxLayout,
     QWidget,
@@ -46,6 +45,8 @@ from ui.dataset_header_layout import (
     DATASET_HEADER_MARGINS,
     DATASET_HEADER_SPACING,
     DATASET_PAGE_SPACING,
+    PERIOD_COMBO_FILE_MIN_WIDTH,
+    PERIOD_CONTROL_HEIGHT,
 )
 from core.limit_notices import pcap_flow_cap_notice
 from core.pcap_analyzer import PcapSummary
@@ -62,6 +63,7 @@ from ui.period_selector_panel import (
     make_period_mode_combo,
     make_pick_range_button,
 )
+from ui.tab_widgets import make_tab_widget
 from ui.font_utils import apply_named_style, refresh_widget_style
 from ui.thread_utils import stop_qthread
 from ui.worker_runner import WorkerRunner
@@ -95,11 +97,16 @@ class PcapPage(PcapInvestigatorMixin, PcapPeriodMixin, PcapAnalysisMixin, PcapEx
         self._pcap_period_range_start = ""
         self._pcap_period_range_end = ""
         self._pcap_active_day = ""
+        self._pcap_active_file = ""
+        self._pcap_file_switching = False
         self._period_load_progress: QProgressBar | None = None
         self._service_chart_full_rows: list[dict[str, Any]] = []
         self._activity_chart_full_rows: list[dict[str, Any]] = []
         self._all_artifacts: list[dict[str, Any]] = []
         self._selected_communication_row: dict[str, Any] | None = None
+        self._communication_rows_comm: list[dict[str, Any]] = []
+        self._communication_rows_comm_all: list[dict[str, Any]] = []
+        self._communication_rows_social: list[dict[str, Any]] = []
         self._build_ui()
 
     def _build_ui(self):
@@ -158,6 +165,11 @@ class PcapPage(PcapInvestigatorMixin, PcapPeriodMixin, PcapAnalysisMixin, PcapEx
         self.lbl_pcap_day = make_period_label(header)
         self.cmb_pcap_day = make_period_day_combo(header)
         self.cmb_pcap_period_mode = make_period_mode_combo(header)
+        self.cmb_pcap_file = QComboBox(header)
+        self.cmb_pcap_file.setMinimumWidth(PERIOD_COMBO_FILE_MIN_WIDTH)
+        self.cmb_pcap_file.setObjectName("CompactControl")
+        self.cmb_pcap_file.setFixedHeight(PERIOD_CONTROL_HEIGHT)
+        self.cmb_pcap_file.setVisible(False)
         self.btn_pcap_pick_range = make_pick_range_button(header)
         self.btn_reanalyze_period = make_action_button("Re-analyze Period", enabled=False)
         self.btn_reanalyze_period.setToolTip(
@@ -176,6 +188,7 @@ class PcapPage(PcapInvestigatorMixin, PcapPeriodMixin, PcapAnalysisMixin, PcapEx
             day_combo=self.cmb_pcap_day,
             mode_combo=self.cmb_pcap_period_mode,
             pick_range_button=self.btn_pcap_pick_range,
+            middle_widgets=[self.cmb_pcap_file],
             trailing_widgets=[self.btn_reanalyze_period],
         )
 
@@ -225,13 +238,11 @@ class PcapPage(PcapInvestigatorMixin, PcapPeriodMixin, PcapAnalysisMixin, PcapEx
         header_layout.addWidget(self.pcap_period_row)
         root.addWidget(header)
 
-        self.tabs = QTabWidget()
+        self.tabs = make_tab_widget()
         self.tabs.addTab(self._build_investigator_tab(), "Summary")
         self.tabs.addTab(self._build_highlights_tab(), "Communications")
         self.tabs.addTab(self._build_evidence_section(), "Evidence")
         self.tabs.addTab(self._build_network_section(), "Network")
-        self.ai_summary_tab = self._build_ai_tab()
-        self.tabs.addTab(self.ai_summary_tab, "AI Summary")
         root.addWidget(self.tabs, 1)
 
         self.btn_open.clicked.connect(self.open_pcap_dialog)
@@ -243,6 +254,7 @@ class PcapPage(PcapInvestigatorMixin, PcapPeriodMixin, PcapAnalysisMixin, PcapEx
         self.btn_export.clicked.connect(self.export_summary)
         self.btn_reanalyze_period.clicked.connect(self.reanalyze_current_period)
         self.cmb_pcap_day.currentIndexChanged.connect(self._on_pcap_day_changed)
+        self.cmb_pcap_file.currentIndexChanged.connect(self._on_pcap_file_changed)
         self.cmb_pcap_period_mode.currentIndexChanged.connect(self._on_pcap_period_mode_changed)
         self.btn_pcap_pick_range.clicked.connect(self.configure_pcap_period_range)
 
@@ -252,12 +264,10 @@ class PcapPage(PcapInvestigatorMixin, PcapPeriodMixin, PcapAnalysisMixin, PcapEx
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        self.summary_tabs = QTabWidget()
+        self.summary_tabs = make_tab_widget()
         self.summary_tabs.addTab(self._build_highlights_tab(), "Highlights")
         self.summary_tabs.addTab(self._build_investigator_tab(), "Investigator View")
         self.summary_tabs.addTab(self._build_overview_tab(), "Overview")
-        self.ai_summary_tab = self._build_ai_tab()
-        self.summary_tabs.addTab(self.ai_summary_tab, "AI Summary")
         layout.addWidget(self.summary_tabs)
         return page
 
@@ -281,7 +291,7 @@ class PcapPage(PcapInvestigatorMixin, PcapPeriodMixin, PcapAnalysisMixin, PcapEx
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        self.evidence_tabs = QTabWidget()
+        self.evidence_tabs = make_tab_widget()
         self.evidence_tabs.addTab(self._build_evidence_tab(), "Evidence")
         self.evidence_tabs.addTab(self._build_artifacts_tab(), "Artifacts")
         layout.addWidget(self.evidence_tabs)
@@ -293,7 +303,7 @@ class PcapPage(PcapInvestigatorMixin, PcapPeriodMixin, PcapAnalysisMixin, PcapEx
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        self.network_tabs = QTabWidget()
+        self.network_tabs = make_tab_widget()
         self.network_tabs.addTab(self._build_overview_tab(), "Overview")
         self.network_tabs.addTab(self._build_connections_tab(), "Connections")
         layout.addWidget(self.network_tabs)
@@ -321,9 +331,11 @@ class PcapPage(PcapInvestigatorMixin, PcapPeriodMixin, PcapAnalysisMixin, PcapEx
         self.lbl_highlights_brief.setTextInteractionFlags(Qt.TextSelectableByMouse)
 
         self.communication_full_columns = [
+            ("type", "Type"),
             ("service", "Service"),
-            ("activity_type", "Indicator"),
+            ("activity_label", "Indicator"),
             ("confidence", "Confidence"),
+            ("sessions", "Sessions"),
             ("host", "Host / Signal"),
             ("protocol", "Protocol"),
             ("bytes", "Volume"),
@@ -332,16 +344,18 @@ class PcapPage(PcapInvestigatorMixin, PcapPeriodMixin, PcapAnalysisMixin, PcapEx
             ("first_seen", "First Seen"),
         ]
         self.communication_columns = [
+            ("type", "Type"),
             ("service", "Service"),
-            ("activity_type", "Indicator"),
+            ("activity_label", "Indicator"),
+            ("sessions", "Sessions"),
             ("host", "Host / Signal"),
             ("bytes", "Volume"),
             ("packets", "Packets"),
             ("duration_ms", "Duration"),
             ("first_seen", "First Seen"),
         ]
-        self.communication_fixed_widths = {0: 170, 1: 190, 3: 95, 4: 85, 5: 100, 6: 175}
-        self.communication_full_fixed_widths = {0: 170, 1: 190, 2: 95, 3: 240, 4: 80, 5: 95, 6: 85, 7: 105, 8: 175}
+        self.communication_fixed_widths = {0: 110, 1: 150, 2: 210, 3: 75, 4: 95, 5: 90, 6: 85, 7: 105, 8: 175}
+        self.communication_full_fixed_widths = {0: 110, 1: 150, 2: 210, 3: 95, 4: 75, 5: 220, 6: 80, 7: 90, 8: 85, 9: 105, 10: 175}
         self.tbl_communications = self._table(
             self.communication_columns,
             fixed_widths=self.communication_fixed_widths,
@@ -350,7 +364,7 @@ class PcapPage(PcapInvestigatorMixin, PcapPeriodMixin, PcapAnalysisMixin, PcapEx
         self.tbl_communications.setMinimumHeight(360)
         self.tbl_communications.setWordWrap(True)
         self.tbl_communications.verticalHeader().setDefaultSectionSize(40)
-        self.tbl_communications.sortByColumn(3, Qt.DescendingOrder)
+        self.tbl_communications.sortByColumn(5, Qt.DescendingOrder)
         self.tbl_communications.selectionModel().currentRowChanged.connect(self._on_communication_selected)
         self.tbl_communications.hide()
 
@@ -360,13 +374,25 @@ class PcapPage(PcapInvestigatorMixin, PcapPeriodMixin, PcapAnalysisMixin, PcapEx
         self.txt_communication_detail.setPlaceholderText("Select a communication indicator to see the evidence used for classification.")
         self.txt_communication_detail.hide()
 
-        self.btn_expand_communications = make_action_button("Open full communication table")
-        self.btn_expand_communications.clicked.connect(self._open_communications_dialog)
+        self.btn_expand_communications = make_action_button("Open communications table")
+        self.btn_expand_communications.clicked.connect(
+            lambda: self._open_communications_dialog("communications")
+        )
         self.btn_mark_communication_finding = make_action_button("Mark as Finding", enabled=False)
         self.btn_mark_communication_finding.setToolTip(
             "Save the selected communication indicator as a finding. Select a row in the full table first."
         )
         self.btn_mark_communication_finding.clicked.connect(self._mark_pcap_communication_as_finding)
+
+        self.lbl_social_count = QLabel("0 indicators")
+        self.lbl_social_count.setObjectName("ProfileMetric")
+        self.lbl_social_count.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self.lbl_social_breakdown = QLabel("No social/content indicators yet.")
+        self.lbl_social_breakdown.setObjectName("MutedLabel")
+        self.lbl_social_breakdown.setWordWrap(True)
+        self.lbl_social_breakdown.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self.btn_expand_social = make_action_button("Open social media table")
+        self.btn_expand_social.clicked.connect(lambda: self._open_communications_dialog("social"))
 
         brief_group = self._group("Investigation brief", self.lbl_highlights_brief)
         brief_group.setMaximumHeight(160)
@@ -380,15 +406,26 @@ class PcapPage(PcapInvestigatorMixin, PcapPeriodMixin, PcapAnalysisMixin, PcapEx
         self.lbl_communication_breakdown.setTextInteractionFlags(Qt.TextSelectableByMouse)
 
         communication_card = self._evidence_launcher_card(
-            "Communication indicators",
-            "Metadata-based app/service indicators. Open the full table to sort, copy and inspect evidence for each row.",
+            "Messaging, calls and push",
+            "Messaging apps, push transports, calls and sustained media-like sessions.",
             self.lbl_communication_count,
             self.lbl_communication_breakdown,
             self.btn_expand_communications,
             extra_buttons=[self.btn_mark_communication_finding],
         )
+        social_card = self._evidence_launcher_card(
+            "Social and content apps",
+            "YouTube, TikTok, Spotify and similar content/API traffic ranked by volume, burst and duration.",
+            self.lbl_social_count,
+            self.lbl_social_breakdown,
+            self.btn_expand_social,
+        )
+
+        self.communication_tabs = make_tab_widget()
+        self.communication_tabs.addTab(communication_card, "Communications")
+        self.communication_tabs.addTab(social_card, "Social")
         layout.addWidget(brief_group)
-        layout.addWidget(communication_card, 0)
+        layout.addWidget(self.communication_tabs, 0)
         scroll.setWidget(content)
         outer.addWidget(scroll, 1)
 
@@ -472,36 +509,18 @@ class PcapPage(PcapInvestigatorMixin, PcapPeriodMixin, PcapAnalysisMixin, PcapEx
         self.visibility_panel = self._build_visibility_panel()
         self.chart_services.set_rows([], empty_text="Open a PCAP file to show visible service groups.")
         self.chart_activity.set_rows([], empty_text="Open a PCAP file to show hourly packet activity.")
-
-        self.btn_expand_chart_services = make_action_button(
-            "Expand table",
-            object_name="SummaryExpandButton",
-            enabled=False,
-        )
-        self.btn_expand_chart_services.clicked.connect(self._expand_service_chart)
-
-        self.btn_expand_chart_activity = make_action_button(
-            "Expand table",
-            object_name="SummaryExpandButton",
-            enabled=False,
-        )
-        self.btn_expand_chart_activity.clicked.connect(self._expand_activity_chart)
+        self.chart_services.configure_expand_table(self._expand_service_chart)
+        self.chart_activity.configure_expand_table(self._expand_activity_chart)
 
         services_box = QVBoxLayout()
-        services_box.setSpacing(6)
+        services_box.setSpacing(0)
+        services_box.setContentsMargins(0, 0, 0, 0)
         services_box.addWidget(self.chart_services, 1)
-        expand_services = QHBoxLayout()
-        expand_services.addStretch()
-        expand_services.addWidget(self.btn_expand_chart_services)
-        services_box.addLayout(expand_services)
 
         activity_box = QVBoxLayout()
-        activity_box.setSpacing(6)
+        activity_box.setSpacing(0)
+        activity_box.setContentsMargins(0, 0, 0, 0)
         activity_box.addWidget(self.chart_activity, 1)
-        expand_activity = QHBoxLayout()
-        expand_activity.addStretch()
-        expand_activity.addWidget(self.btn_expand_chart_activity)
-        activity_box.addLayout(expand_activity)
 
         services_widget = QWidget()
         services_widget.setLayout(services_box)
@@ -512,8 +531,6 @@ class PcapPage(PcapInvestigatorMixin, PcapPeriodMixin, PcapAnalysisMixin, PcapEx
 
         charts_row = QHBoxLayout()
         charts_row.setSpacing(10)
-        self.chart_services.setFixedHeight(PCAP_CHART_PREVIEW_MIN_HEIGHT)
-        self.chart_activity.setFixedHeight(PCAP_CHART_PREVIEW_MIN_HEIGHT)
 
         charts_row.addWidget(services_widget, 1)
         charts_row.addWidget(activity_widget, 1)
@@ -524,18 +541,6 @@ class PcapPage(PcapInvestigatorMixin, PcapPeriodMixin, PcapAnalysisMixin, PcapEx
 
         scroll.setWidget(content)
         page_layout.addWidget(scroll, 1)
-        return page
-
-    def _build_ai_tab(self) -> QWidget:
-        page = QWidget()
-        layout = QVBoxLayout(page)
-        layout.setContentsMargins(8, 8, 8, 8)
-        layout.setSpacing(10)
-
-        self.txt_pcap_ai_summary = QTextEdit()
-        self.txt_pcap_ai_summary.setReadOnly(True)
-        self.txt_pcap_ai_summary.setPlaceholderText("Open a PCAP file, then generate an AI explanation grounded in the extracted evidence.")
-        layout.addWidget(self.txt_pcap_ai_summary, 1)
         return page
 
     def _build_overview_tab(self) -> QWidget:
@@ -1108,10 +1113,10 @@ class PcapPage(PcapInvestigatorMixin, PcapPeriodMixin, PcapAnalysisMixin, PcapEx
             self.chart_services.set_rows([], empty_text=empty_chart)
         if hasattr(self, "chart_activity"):
             self.chart_activity.set_rows([], empty_text=empty_activity)
-        if hasattr(self, "btn_expand_chart_services"):
-            self.btn_expand_chart_services.setEnabled(False)
-        if hasattr(self, "btn_expand_chart_activity"):
-            self.btn_expand_chart_activity.setEnabled(False)
+        if hasattr(self, "chart_services"):
+            self.chart_services.set_expand_enabled(False)
+        if hasattr(self, "chart_activity"):
+            self.chart_activity.set_expand_enabled(False)
 
         self._set_investigator_text({"plain_summary": "Open a PCAP file to see a plain-language investigation view."})
         if hasattr(self, "lbl_highlights_brief"):
@@ -1149,8 +1154,6 @@ class PcapPage(PcapInvestigatorMixin, PcapPeriodMixin, PcapAnalysisMixin, PcapEx
                 self._set_table(table, [])
         if hasattr(self, "txt_communication_detail"):
             self.txt_communication_detail.clear()
-        if hasattr(self, "txt_pcap_ai_summary"):
-            self.txt_pcap_ai_summary.clear()
 
         self._set_visibility_indicators([], empty_text="Open a PCAP file to show readable vs encrypted indicators.")
         self._set_artifact_tables([])

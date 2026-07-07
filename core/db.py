@@ -665,9 +665,21 @@ def set_project_subject(
     db_path: Path = DEFAULT_DB_PATH,
 ) -> None:
     from core.osint.imsi import format_intercept_imsi
+    from core.project_identity import sanitize_subject_fields
+
+    cleaned = sanitize_subject_fields(
+        first_name=first_name,
+        last_name=last_name,
+        oib=oib,
+        msisdn=msisdn,
+        imsi=imsi,
+        imei=imei,
+        ip=ip,
+        extra_identifiers=extra_identifiers,
+    )
 
     imsi_rows = []
-    for part in str(imsi or "").replace(";", "\n").replace(",", "\n").splitlines():
+    for part in str(cleaned.get("imsi") or "").replace(";", "\n").replace(",", "\n").splitlines():
         item = part.strip()
         if item:
             imsi_rows.append(format_intercept_imsi(item))
@@ -689,14 +701,14 @@ def set_project_subject(
             WHERE id = ?;
             """,
             (
-                (first_name or "").strip(),
-                (last_name or "").strip(),
-                (oib or "").strip(),
-                (msisdn or "").strip(),
+                cleaned.get("first_name", ""),
+                cleaned.get("last_name", ""),
+                cleaned.get("oib", ""),
+                cleaned.get("msisdn", ""),
                 imsi_value,
-                (imei or "").strip(),
-                (ip or "").strip(),
-                (extra_identifiers or "").strip(),
+                cleaned.get("imei", ""),
+                cleaned.get("ip", ""),
+                cleaned.get("extra_identifiers", ""),
                 project_id,
             ),
         )
@@ -730,14 +742,21 @@ def add_activity(project_id: int, event_type: str, message: str = "", db_path: P
             (project_id, (event_type or "").strip() or "event", message or ""),
         )
 
-def list_activity(project_id: int, limit: int = 200, db_path: Path = DEFAULT_DB_PATH) -> list[sqlite3.Row]:
+def list_activity(
+    project_id: int,
+    limit: int = 200,
+    *,
+    order: str = "desc",
+    db_path: Path = DEFAULT_DB_PATH,
+) -> list[sqlite3.Row]:
+    direction = "ASC" if str(order or "").casefold() == "asc" else "DESC"
     with _connect(db_path) as con:
         rows = con.execute(
-            """
+            f"""
             SELECT *
             FROM activity_log
             WHERE project_id = ?
-            ORDER BY created_at DESC, id DESC
+            ORDER BY created_at {direction}, id {direction}
             LIMIT ?;
             """,
             (project_id, limit),
@@ -879,6 +898,119 @@ def mark_ingest_items_batch(
             """,
             [(status, message or "", project_id, path) for path in paths],
         )
+
+
+def delete_ingest_items_for_paths(
+    project_id: int,
+    file_paths: Iterable[str],
+    db_path: Path = DEFAULT_DB_PATH,
+) -> int:
+    paths = [str(path or "").strip() for path in file_paths if str(path or "").strip()]
+    if not paths:
+        return 0
+    with _connect(db_path) as con:
+        before = con.total_changes
+        con.executemany(
+            "DELETE FROM ingest_items WHERE project_id = ? AND file_path = ?;",
+            [(project_id, path) for path in paths],
+        )
+        return con.total_changes - before
+
+
+def delete_ingest_items_for_source_root(
+    project_id: int,
+    source_root: str,
+    db_path: Path = DEFAULT_DB_PATH,
+) -> int:
+    source_root = (source_root or "").strip()
+    if not source_root:
+        return 0
+    with _connect(db_path) as con:
+        before = con.total_changes
+        con.execute(
+            "DELETE FROM ingest_items WHERE project_id = ? AND source_root = ?;",
+            (project_id, source_root),
+        )
+        return con.total_changes - before
+
+
+def delete_project_dataset(
+    project_id: int,
+    folder_path: str,
+    db_path: Path = DEFAULT_DB_PATH,
+) -> int:
+    folder_path = (folder_path or "").strip()
+    if not folder_path:
+        return 0
+    path_key = _dataset_path_key(folder_path)
+    with _connect(db_path) as con:
+        rows = con.execute(
+            "SELECT id, folder_path FROM datasets WHERE project_id = ?;",
+            (project_id,),
+        ).fetchall()
+        deleted = 0
+        for row in rows:
+            if _dataset_path_key(str(row["folder_path"] or "")) != path_key:
+                continue
+            con.execute("DELETE FROM datasets WHERE id = ?;", (int(row["id"]),))
+            deleted += 1
+        return deleted
+
+
+def delete_pcap_sources_for_paths(
+    project_id: int,
+    file_paths: Iterable[str],
+    db_path: Path = DEFAULT_DB_PATH,
+) -> int:
+    paths = [str(path or "").strip() for path in file_paths if str(path or "").strip()]
+    if not paths:
+        return 0
+    with _connect(db_path) as con:
+        before = con.total_changes
+        con.executemany(
+            "DELETE FROM pcap_sources WHERE project_id = ? AND file_path = ?;",
+            [(project_id, path) for path in paths],
+        )
+        return con.total_changes - before
+
+
+def delete_pcap_sources_for_period_days(
+    project_id: int,
+    period_days: Iterable[str],
+    db_path: Path = DEFAULT_DB_PATH,
+) -> int:
+    days = [str(day or "").strip() for day in period_days if str(day or "").strip()]
+    if not days:
+        return 0
+    with _connect(db_path) as con:
+        before = con.total_changes
+        con.executemany(
+            "DELETE FROM pcap_sources WHERE project_id = ? AND period_day = ?;",
+            [(project_id, day) for day in days],
+        )
+        return con.total_changes - before
+
+
+def rollback_project_import(
+    project_id: int,
+    source_root: str,
+    *,
+    file_paths: Iterable[str] | None = None,
+    db_path: Path = DEFAULT_DB_PATH,
+) -> dict[str, int]:
+    """Remove indexed/imported artifacts for a cancelled evidence folder import."""
+    paths = [str(path or "").strip() for path in (file_paths or []) if str(path or "").strip()]
+    counts = {
+        "ingest": delete_ingest_items_for_paths(project_id, paths, db_path=db_path)
+        if paths
+        else delete_ingest_items_for_source_root(project_id, source_root, db_path=db_path),
+        "datasets": delete_project_dataset(project_id, source_root, db_path=db_path),
+        "pcap_sources": delete_pcap_sources_for_paths(project_id, paths, db_path=db_path),
+    }
+    if source_root:
+        add_activity(project_id, "import_cancelled", source_root, db_path=db_path)
+    touch_project(project_id, db_path=db_path)
+    return counts
 
 
 def list_ingest_items(

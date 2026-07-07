@@ -64,16 +64,28 @@ class PcapBatchWorker(QObject):
         pause_gate: ImportPauseGate | None = None,
     ):
         super().__init__()
-        self.paths = [str(path) for path in paths if str(path or "").strip()]
+        self.paths = self._unique_paths(paths)
         self.project_id = project_id
         self.auto_save = bool(auto_save)
         self.day_groups = {
-            str(day): [str(path) for path in day_paths if str(path or "").strip()]
+            str(day): self._unique_paths(day_paths)
             for day, day_paths in (day_groups or {}).items()
             if str(day or "").strip() and day != "undated"
         }
         self.pause_gate = pause_gate
         self.stop_requested = False
+
+    @staticmethod
+    def _unique_paths(paths: list[str] | None) -> list[str]:
+        seen: set[str] = set()
+        unique: list[str] = []
+        for path in paths or []:
+            text = str(path or "").strip()
+            if not text or text in seen:
+                continue
+            seen.add(text)
+            unique.append(text)
+        return unique
 
     def _wait_if_paused(self) -> bool:
         if self.pause_gate is None:

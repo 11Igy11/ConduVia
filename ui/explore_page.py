@@ -17,7 +17,6 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QSizePolicy,
     QSplitter,
-    QTabWidget,
     QTableView,
     QTextEdit,
     QVBoxLayout,
@@ -49,6 +48,7 @@ from ui.dataset_header_layout import (
 from ui.explore_models import FlowTableModel, NumericSortProxy
 from ui.explore_widgets import FlowTableView
 from ui.findings_page import FindingsPage
+from ui.tab_widgets import make_tab_widget
 
 if TYPE_CHECKING:
     from ui.app import App
@@ -197,16 +197,22 @@ def build_explore_workspace(app: App) -> tuple[QWidget, QFrame]:
     app.search.setObjectName("CompactControl")
     app.search.setFixedHeight(28)
 
-    app.tabs = QTabWidget()
+    app.tabs = make_tab_widget()
     app.tabs.setObjectName("ExploreSubTabs")
     app.tabs.setDocumentMode(True)
 
     app.btn_ai_summary = make_action_button("Generate AI Summary", object_name="ExploreTabActionButton")
-    app.btn_add_ai_to_notes = make_action_button(
-        "Add AI to Notes",
+    app.btn_add_summary_to_notes = make_action_button(
+        "Add Summary to Notes",
         object_name="ExploreTabActionButton",
         enabled=True,
     )
+    app.btn_add_finding_to_notes = make_action_button(
+        "Add Finding to Notes",
+        object_name="ExploreTabActionButton",
+        enabled=True,
+    )
+    app.btn_add_finding_to_notes.hide()
 
     summary_tab = QWidget()
     summary_layout = QVBoxLayout(summary_tab)
@@ -337,6 +343,17 @@ def build_explore_workspace(app: App) -> tuple[QWidget, QFrame]:
     right_actions = QHBoxLayout()
     right_actions.setSpacing(8)
 
+    app.cmb_flows_view = QComboBox()
+    app.cmb_flows_view.setObjectName("FlowsViewModeCombo")
+    app.cmb_flows_view.setMinimumWidth(132)
+    app.cmb_flows_view.setFixedHeight(PERIOD_CONTROL_HEIGHT)
+    app.cmb_flows_view.addItem("Default", "default")
+    app.cmb_flows_view.addItem("All fields", "all")
+    app.cmb_flows_view.addItem("Custom", "custom")
+
+    app.btn_customize_flows = make_action_button("Customize")
+    app.btn_customize_flows.hide()
+
     app.btn_filter_src = make_action_button("Filter source")
     app.btn_filter_dst = make_action_button("Filter destination")
     app.btn_filter_sni = make_action_button("Filter SNI")
@@ -349,6 +366,8 @@ def build_explore_workspace(app: App) -> tuple[QWidget, QFrame]:
     app.btn_export_flows = make_action_button("Export table")
 
     left_actions.addSpacing(6)
+    left_actions.addWidget(app.cmb_flows_view)
+    left_actions.addWidget(app.btn_customize_flows)
     left_actions.addWidget(app.btn_filter_src)
     left_actions.addWidget(app.btn_filter_dst)
     left_actions.addWidget(app.btn_filter_sni)
@@ -382,7 +401,7 @@ def build_explore_workspace(app: App) -> tuple[QWidget, QFrame]:
     app.table.verticalHeader().setDefaultSectionSize(34)
 
     header = app.table.horizontalHeader()
-    header.setStretchLastSection(False)
+    header.setStretchLastSection(True)
     header.setMinimumSectionSize(70)
     header.setDefaultAlignment(Qt.AlignLeft | Qt.AlignVCenter)
     header.setSectionResizeMode(QHeaderView.Interactive)
@@ -391,25 +410,6 @@ def build_explore_workspace(app: App) -> tuple[QWidget, QFrame]:
     app.proxy = NumericSortProxy()
     app.proxy.setSourceModel(app.model)
     app.table.setModel(app.proxy)
-
-    header = app.table.horizontalHeader()
-    header.setSectionResizeMode(0, QHeaderView.Interactive)        # Source IP
-    header.setSectionResizeMode(1, QHeaderView.Fixed)              # Source Port
-    header.setSectionResizeMode(2, QHeaderView.Interactive)        # Destination IP
-    header.setSectionResizeMode(3, QHeaderView.Fixed)              # Destination Port
-    header.setSectionResizeMode(4, QHeaderView.Fixed)              # Protocol
-    header.setSectionResizeMode(5, QHeaderView.Interactive)        # App
-    header.setSectionResizeMode(6, QHeaderView.Fixed)              # Bytes
-    header.setSectionResizeMode(7, QHeaderView.Fixed)              # Duration
-    header.setSectionResizeMode(8, QHeaderView.Stretch)            # SNI
-    app.table.setColumnWidth(0, 138)
-    app.table.setColumnWidth(1, 92)
-    app.table.setColumnWidth(2, 138)
-    app.table.setColumnWidth(3, 116)
-    app.table.setColumnWidth(4, 86)
-    app.table.setColumnWidth(5, 140)
-    app.table.setColumnWidth(6, 96)
-    app.table.setColumnWidth(7, 104)
 
     app.splitter.addWidget(app.table)
 
@@ -526,6 +526,14 @@ def build_explore_workspace(app: App) -> tuple[QWidget, QFrame]:
 
     app.tabs.addTab(app.findings_page, "Findings")
     app.IDX_FINDINGS_TAB = 2
+
+    def _sync_explore_notes_buttons(index: int) -> None:
+        is_findings = index == app.IDX_FINDINGS_TAB
+        app.btn_add_summary_to_notes.setVisible(not is_findings)
+        app.btn_add_finding_to_notes.setVisible(is_findings)
+
+    app.tabs.currentChanged.connect(_sync_explore_notes_buttons)
+    _sync_explore_notes_buttons(app.tabs.currentIndex())
 
     # Explore layout
     explore_layout.addWidget(app.lbl_mode)

@@ -12,11 +12,12 @@ from PySide6.QtWidgets import (
     QPushButton,
     QScrollArea,
     QSplitter,
-    QTabWidget,
     QTextEdit,
     QVBoxLayout,
     QWidget,
 )
+
+from ui.tab_widgets import make_tab_widget
 
 if TYPE_CHECKING:
     from ui.app import App
@@ -84,7 +85,7 @@ def build_osint_page(app: App) -> QWidget:
     app.txt_osint_filter.setMinimumHeight(34)
     browse_layout.addWidget(app.txt_osint_filter)
 
-    tabs = QTabWidget()
+    tabs = make_tab_widget()
     tabs.setDocumentMode(True)
     app.list_osint_identifiers = QListWidget()
     app.list_osint_ips = QListWidget()

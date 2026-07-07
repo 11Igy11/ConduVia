@@ -214,3 +214,116 @@ def repair_stored_imsi_identifiers(project_id: int, *, db_path=None) -> None:
                 "UPDATE projects SET subject_imsi = ?, updated_at = datetime('now') WHERE id = ?;",
                 (imsi, project_id),
             )
+
+
+def looks_like_ip_address(value: str) -> bool:
+    from core.osint.normalize import normalize_ip
+
+    return bool(normalize_ip(str(value or "").strip()))
+
+
+_SUBJECT_NON_IP_FIELDS = frozenset({
+    "first_name",
+    "last_name",
+    "oib",
+    "msisdn",
+    "imsi",
+    "imei",
+    "extra_identifiers",
+})
+
+
+def sanitize_subject_fields(**fields: str) -> dict[str, str]:
+    """Strip IP-looking values from name/identifier fields; route them to subject_ip."""
+    cleaned = {key: str(value or "").strip() for key, value in fields.items()}
+    ip_value = cleaned.get("ip", "")
+    for key in _SUBJECT_NON_IP_FIELDS:
+        value = cleaned.get(key, "")
+        if not value or not looks_like_ip_address(value):
+            continue
+        if not ip_value:
+            ip_value = value
+        cleaned[key] = ""
+    if ip_value:
+        cleaned["ip"] = ip_value
+    return cleaned
+
+
+def subject_field_rejects_ip(field_key: str, value: str) -> bool:
+    return field_key in _SUBJECT_NON_IP_FIELDS and looks_like_ip_address(value)
+
+
+def _subject_field_for_target_type(target_type: str) -> str:
+    kind = str(target_type or "").strip().casefold()
+    if not kind:
+        return ""
+    if "imsi" in kind:
+        return "imsi"
+    if "imei" in kind:
+        return "imei"
+    if kind in {"ip", "ipv4", "ipv6"}:
+        return "ip"
+    if "msisdn" in kind or kind in {"phone", "mobile", "mobile number", "isdndataonly", "msisdndataonly"}:
+        return "msisdn"
+    if "isdn" in kind:
+        return "msisdn"
+    return ""
+
+
+def _infer_subject_field(target: str, target_type: str) -> str:
+    field = _subject_field_for_target_type(target_type)
+    if field:
+        return field
+    if looks_like_ip_address(target):
+        return "ip"
+    digits = normalize_identifier_value(target, "MSISDN")
+    if digits.isdigit() and 8 <= len(digits) <= 15:
+        return "msisdn"
+    if digits.isdigit() and len(digits) >= 14:
+        return "imsi"
+    return ""
+
+
+def sync_project_subject_from_json_meta(
+    project_id: int,
+    meta: dict,
+    *,
+    db_path=None,
+) -> None:
+    """Fill empty project subject fields from JSON dataset metadata."""
+    from core.db import DEFAULT_DB_PATH, get_project, set_project_subject, set_project_target
+
+    db_path = db_path or DEFAULT_DB_PATH
+    project = get_project(project_id, db_path=db_path)
+    if not project:
+        return
+
+    target = str(meta.get("target") or "").strip()
+    target_type = str(meta.get("targettype") or "").strip()
+    if not target:
+        return
+
+    if is_imsi_target_type(target_type):
+        target = format_intercept_imsi(target)
+
+    field = _infer_subject_field(target, target_type)
+
+    updates: dict[str, str] = {}
+    if field == "msisdn" and not _split_identifier_values(project.subject_msisdn):
+        updates["msisdn"] = target
+    elif field == "imsi" and not _split_identifier_values(project.subject_imsi):
+        updates["imsi"] = target
+    elif field == "imei" and not _split_identifier_values(project.subject_imei):
+        updates["imei"] = target
+    elif field == "ip" and not (project.subject_ip or "").strip():
+        updates["ip"] = target
+
+    if updates:
+        set_project_subject(project_id, **updates, db_path=db_path)
+
+    project = get_project(project_id, db_path=db_path)
+    if not project:
+        return
+
+    if not (project.target_identifier or "").strip() and not project_identifier_rows(project):
+        set_project_target(project_id, target, target_type or field.upper(), db_path=db_path)

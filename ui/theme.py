@@ -529,24 +529,24 @@ QGroupBox#FlowDetailsCard::title {
     color: #0f172a;
 }
 
-QFrame#InvestigationSnapshotCard,
-QGroupBox#InvestigationSnapshotCard {
+QFrame#InvestigationSnapshotCard {
     background: #ffffff;
     border: 1px solid #60a5fa;
     color: #111827;
 }
 
-QGroupBox#InvestigationSnapshotCard::title {
-    background: #ffffff;
-    color: #0f172a;
-}
-
-QGroupBox#InvestigationSnapshotCard QLabel {
+QFrame#InvestigationSnapshotCard QLabel {
     background: transparent;
     color: #111827;
 }
 
-QGroupBox#InvestigationSnapshotCard QScrollArea,
+QLabel#InvestigationSnapshotEmpty {
+    color: #0f172a;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+QFrame#InvestigationSnapshotCard QScrollArea,
 QScrollArea#InvestigationSnapshotScroll,
 QWidget#InvestigationSnapshotContent {
     background: #ffffff;

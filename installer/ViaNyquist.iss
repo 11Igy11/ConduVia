@@ -1,7 +1,7 @@
 [Setup]
 AppId={{D9054D7D-5B2D-4B5D-A518-4DE5C3C0A6B2}
 AppName=ViaNyquist
-AppVersion=0.1.0
+AppVersion=0.2.0
 AppPublisher=Igy
 AppPublisherURL=https://github.com/11Igy11/ViaNyquist
 AppSupportURL=https://github.com/11Igy11/ViaNyquist
@@ -9,7 +9,7 @@ AppUpdatesURL=https://github.com/11Igy11/ViaNyquist
 DefaultDirName={autopf}\ViaNyquist
 DefaultGroupName=ViaNyquist
 OutputDir=output
-OutputBaseFilename=ViaNyquist_Setup
+OutputBaseFilename=ViaNyquist_Setup_0.2.0
 Compression=lzma
 SolidCompression=yes
 WizardStyle=modern
@@ -17,7 +17,7 @@ SetupIconFile=..\assets\ViaNyquist.ico
 WizardImageFile=assets\wizard-image.bmp
 WizardSmallImageFile=assets\wizard-small.bmp
 UninstallDisplayIcon={app}\ViaNyquist.exe
-VersionInfoVersion=0.1.0
+VersionInfoVersion=0.2.0
 VersionInfoCompany=Igy
 VersionInfoDescription=ViaNyquist beta installer
 VersionInfoProductName=ViaNyquist

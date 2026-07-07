@@ -284,6 +284,7 @@ class DatasetIngestMixin:
     def _begin_import_processing(self, folder: str, scan) -> None:
         self._import_finalize_completed = False
         self._import_finalize_pending = False
+        self._import_session_paths = self._evidence_paths_from_scan(scan)
         self._import_plan = {
             "folder": folder,
             "scan": scan,
@@ -296,6 +297,8 @@ class DatasetIngestMixin:
         QTimer.singleShot(0, self._import_process_tick)
 
     def _import_process_tick(self) -> None:
+        if self._import_pause_gate.is_aborted() or getattr(self, "_import_cancel_requested", False):
+            return
         if self.import_session_active() and self._import_pause_gate.is_paused():
             self._refresh_import_progress_dialog()
             QTimer.singleShot(400, self._import_process_tick)
@@ -425,6 +428,11 @@ class DatasetIngestMixin:
                 day_count=len(day_groups_dict),
                 defer_workspace_sync=True,
             )
+            if getattr(self.app, "current_project_id", None) is not None:
+                self._sync_project_metadata_from_json_files(
+                    int(self.app.current_project_id),
+                    [str(path) for path in json_files],
+                )
             paths = list(self._json_day_groups.get(self._json_active_day, []) or [])
             if paths and len(paths) <= MAX_INTERACTIVE_FOLDER_JSON_FILES:
                 self.load_dataset_files(folder, paths)
@@ -798,7 +806,18 @@ class DatasetIngestMixin:
         if project_id is None:
             return
 
+        self._import_session_registered = True
+        if not self._import_session_paths:
+            self._import_session_paths = self._evidence_paths_from_scan(scan)
+
         add_dataset_load(project_id, folder)
+        json_paths = [
+            str(getattr(item, "path", "") or "")
+            for item in (getattr(scan, "json_files", None) or [])
+            if str(getattr(item, "path", "") or "").strip()
+        ]
+        if json_paths:
+            self._sync_project_metadata_from_json_files(project_id, json_paths)
         update_dataset_scan_metadata(
             project_id,
             folder,
@@ -821,6 +840,30 @@ class DatasetIngestMixin:
             return
         self.app.projects_ui_controller.refresh_recent_datasets(project_id)
         self.app.projects_ui_controller.refresh_case_dashboard()
+
+    @staticmethod
+    def _evidence_paths_from_scan(scan) -> list[str]:
+        paths: list[str] = []
+        for item in list(getattr(scan, "json_files", None) or []) + list(getattr(scan, "pcap_files", None) or []):
+            path = str(getattr(item, "path", "") or "")
+            if path and path not in paths:
+                paths.append(path)
+        return paths
+
+    def _sync_project_metadata_from_json_files(self, project_id: int, json_paths: list[str]) -> None:
+        if not project_id or not json_paths:
+            return
+        try:
+            from core.case_metadata import sync_project_from_json_files
+
+            sync_project_from_json_files(int(project_id), json_paths)
+        except Exception:
+            return
+        if int(project_id) != getattr(self.app, "current_project_id", None):
+            return
+        if hasattr(self.app, "projects_ui_controller"):
+            self.app.projects_ui_controller.on_project_selected_preview()
+            self.app.projects_ui_controller.refresh_case_dashboard()
 
     def _json_day_groups_from_ingest(self, project_id: int | None, folder_prefix: str = "") -> dict[str, list[str]]:
         if project_id is None:

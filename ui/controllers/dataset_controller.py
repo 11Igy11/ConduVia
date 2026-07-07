@@ -332,6 +332,62 @@ class DatasetController(DatasetLoadMixin, DatasetIngestMixin, ImportProgressMixi
             export_source_label=source_label,
         )
 
+    def add_json_summary_to_notes(self) -> None:
+        flows = self.app.flow_controller.get_all()
+        if not flows:
+            self.app._message_dialog("Notes", "Load a JSON dataset first.", width=420)
+            return
+        if self.app.current_project_id is None:
+            self.app._message_dialog("Notes", "Open an active project first.", width=420)
+            return
+
+        from core.evidence_policy import format_period_day_label
+        from core.investigation_snapshot import build_json_snapshot, format_snapshot_notes_block
+
+        active_day = str(getattr(self, "_json_active_day", "") or "")
+        period_mode = str(getattr(self, "_json_period_granularity", "day") or "day")
+        period_label = format_period_day_label(active_day) if active_day else ""
+        meta = dict(getattr(self, "_json_meta", None) or {})
+        snapshot = build_json_snapshot(
+            flows,
+            meta,
+            period_label=period_label,
+            period_mode=period_mode,
+        )
+        stats_lines = []
+        if hasattr(self.app, "lbl_stats"):
+            stats_text = str(self.app.lbl_stats.text() or "").strip()
+            if stats_text:
+                stats_lines.append(stats_text)
+        block = format_snapshot_notes_block(
+            "JSON investigation snapshot",
+            snapshot,
+            stats_lines=stats_lines or None,
+        )
+        if not block.strip():
+            self.app._message_dialog("Notes", "There is no summary text to add.", width=420)
+            return
+
+        try:
+            if hasattr(self.app, "notes_page"):
+                self.app.notes_page.append_block(block)
+            else:
+                existing = self.app.txt_notes.toPlainText() or ""
+                new_text = f"{existing}\n{block}" if existing.strip() else block
+                self.app.txt_notes.setPlainText(new_text)
+            self.app._notes_dirty = True
+            self.app.notes_controller.flush()
+            from core.db import add_activity
+
+            add_activity(int(self.app.current_project_id), "json_notes_added", "Investigation snapshot")
+            self.app.notes_controller.refresh_activity_ui()
+        except Exception as exc:
+            self.app._message_dialog("Notes", "Failed to add summary to notes.", str(exc), width=520)
+            return
+
+        if hasattr(self.app, "go_to_notes"):
+            self.app.go_to_notes()
+
     def _apply_imported_period_as_default(self, start: str = "", end: str = "") -> None:
         from core.period_gaps import normalize_period_day
 
@@ -527,15 +583,35 @@ class DatasetController(DatasetLoadMixin, DatasetIngestMixin, ImportProgressMixi
         self._json_active_file = "" if token == _JSON_ALL_FILES_TOKEN else token
         self._load_active_json_period(force=True)
 
+    def _json_period_bucket_files(self) -> list[str]:
+        day = str(self._json_active_day or "")
+        return list(self._json_day_groups.get(day, []) or [])
+
+    def _json_calendar_day_source_note(self, source_count: int, day: str | None = None) -> str:
+        day_key = str(day or self._json_active_day or "")
+        bucket_count = len(self._json_day_groups.get(day_key, []) or [])
+        if day_key and bucket_count and source_count > bucket_count:
+            return (
+                f"Loading JSON day {self._format_day_label(day_key)} "
+                f"({bucket_count:,} JSON files; scanning {source_count:,} source files including adjacent files for midnight overlap)..."
+            )
+        if source_count == 1:
+            return f"Loading JSON file {Path(self._active_json_period_files()[0]).name}..."
+        return ""
+
     def _active_json_period_files(self) -> list[str]:
         day = str(self._json_active_day or "")
+        if self._json_period_granularity == "day" and day and day != "undated":
+            from core.period_calendar import expand_day_group_paths
+
+            return expand_day_group_paths(self._json_day_groups, day)
         return list(self._json_day_groups.get(day, []) or [])
 
     def _rebuild_json_file_combo(self) -> None:
         file_combo = getattr(self.app, "cmb_json_file", None)
         if file_combo is None:
             return
-        files = self._active_json_period_files()
+        files = self._json_period_bucket_files()
         self._json_file_switching = True
         file_combo.blockSignals(True)
         file_combo.clear()
@@ -696,6 +772,9 @@ class DatasetController(DatasetLoadMixin, DatasetIngestMixin, ImportProgressMixi
             period_label = f"Loading JSON file {Path(files[0]).name}..."
         elif len(files) > 1:
             period_label = f"Loading JSON day {period_label} ({len(files):,} files)..."
+            source_note = self._json_calendar_day_source_note(len(files), day)
+            if source_note:
+                period_label = source_note
         self.load_dataset_files(self._json_day_source, files, progress_label=period_label)
 
     def _sync_json_period_selector_panel(self) -> None:

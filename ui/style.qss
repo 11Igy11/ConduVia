@@ -790,20 +790,16 @@ QLabel#PcapLimitations {
     font-size: 11px;
 }
 
-QFrame#InvestigationSnapshotCard,
-QGroupBox#InvestigationSnapshotCard {
+QFrame#InvestigationSnapshotCard {
     background: #273549;
     border: 1px solid #3b82f6;
     border-radius: 12px;
-    margin-top: 0;
-    padding-top: 8px;
 }
 
-QGroupBox#InvestigationSnapshotCard::title {
-    subcontrol-origin: margin;
-    left: 10px;
-    padding: 0 6px 8px 6px;
-    color: #e5e7eb;
+QLabel#InvestigationSnapshotEmpty {
+    color: #f8fafc;
+    font-size: 13px;
+    font-weight: 600;
 }
 
 QScrollArea#InvestigationSnapshotScroll,

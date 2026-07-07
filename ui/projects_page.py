@@ -20,6 +20,8 @@ from PySide6.QtWidgets import (
 )
 
 from ui.project_rows_dialog import (
+    delete_selected_json_dataset_rows,
+    delete_selected_pcap_dataset_rows,
     load_selected_json_dataset_rows,
     load_selected_pcap_dataset_rows,
     open_json_dataset_row,
@@ -255,6 +257,8 @@ def build_projects_page(app: App) -> QWidget:
             on_double_click=lambda row, dialog: open_json_dataset_row(app, row, dialog),
             multi_select=True,
             on_action=lambda rows, dialog: load_selected_json_dataset_rows(app, rows, dialog),
+            show_delete=True,
+            on_delete=lambda rows, dialog: delete_selected_json_dataset_rows(app, rows, dialog),
         )
     )
     app.btn_expand_pcap_datasets.clicked.connect(
@@ -273,6 +277,8 @@ def build_projects_page(app: App) -> QWidget:
             on_double_click=lambda row, dialog: open_pcap_dataset_row(app, row, dialog),
             multi_select=True,
             on_action=lambda rows, dialog: load_selected_pcap_dataset_rows(app, rows, dialog),
+            show_delete=True,
+            on_delete=lambda rows, dialog: delete_selected_pcap_dataset_rows(app, rows, dialog),
             export_category="pcap",
         )
     )

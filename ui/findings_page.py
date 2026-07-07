@@ -6,7 +6,7 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QComboBox, QLineEdit, QSplitter,
-    QListWidget, QTextEdit
+    QListWidget, QTextEdit, QAbstractItemView,
 )
 
 from ui.buttons import make_action_button
@@ -85,6 +85,7 @@ class FindingsPage(QWidget):
         self.findings_split = QSplitter(Qt.Horizontal)
 
         self.findings_list = QListWidget()
+        self.findings_list.setSelectionMode(QAbstractItemView.ExtendedSelection)
 
         self.finding_detail = QTextEdit()
         self.finding_detail.setReadOnly(True)
@@ -125,19 +126,20 @@ class FindingsPage(QWidget):
         self.btn_finding_ai.setEnabled(enabled)
 
     def selected_finding_id(self) -> int | None:
-        item = self.findings_list.currentItem()
-        if not item:
-            return None
+        ids = self.selected_finding_ids()
+        return ids[0] if ids else None
 
-        fid = item.data(Qt.UserRole)
-
-        if not fid or str(item.text()).startswith("("):
-            return None
-
-        try:
-            return int(fid)
-        except Exception:
-            return None
+    def selected_finding_ids(self) -> list[int]:
+        ids: list[int] = []
+        for item in self.findings_list.selectedItems():
+            fid = item.data(Qt.UserRole)
+            if not fid or str(item.text()).startswith("("):
+                continue
+            try:
+                ids.append(int(fid))
+            except Exception:
+                continue
+        return ids
 
     def clear_detail(self):
         self.finding_detail.setText("")

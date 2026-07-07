@@ -1,10 +1,13 @@
 from ui.explore_widgets import AITextWorker
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QTableView
+from ui.column_picker_dialog import ColumnPickerDialog
 from ui.export_menu import popup_export_menu
+from ui.font_utils import apply_named_style
+from ui.flow_columns import DEFAULT_FLOW_COLUMNS, available_flow_columns
 from ui.table_export import export_table_dialog
 
-from core.formatters import human_bytes
+from core.formatters import format_export_cell, human_bytes
 from core.protocols import format_ip_proto
 
 class ExploreUIController:
@@ -12,6 +15,7 @@ class ExploreUIController:
         self.app = app
         self._json_stats_base = ""
         self._json_stats_include_counts = True
+        self._flows_custom_columns: list[str] = []
 
     def on_page_size_changed(self, txt: str):
         try:
@@ -46,9 +50,20 @@ class ExploreUIController:
         if hasattr(self.app, "lbl_showing"):
             self.app.lbl_showing.clear()
 
-    def set_json_stats_text(self, text: str, *, include_counts: bool = True) -> None:
+    def set_json_stats_text(
+        self,
+        text: str,
+        *,
+        include_counts: bool = True,
+        loading: bool = False,
+    ) -> None:
         self._json_stats_base = str(text or "")
         self._json_stats_include_counts = include_counts
+        if hasattr(self.app, "lbl_stats"):
+            apply_named_style(
+                self.app.lbl_stats,
+                "PcapLoadingStatus" if loading else "HeaderStatLabel",
+            )
         self.refresh_json_header_stats()
 
     def update_load_more_enabled(self):
@@ -185,19 +200,22 @@ class ExploreUIController:
         total_bytes = 0
         apps = {}
 
-        for r in range(rows):
-            idx_bytes = self.app.proxy.index(r, 6)
-            idx_app = self.app.proxy.index(r, 5)
+        bytes_col = self._flow_column_index("bidirectional_bytes")
+        app_col = self._flow_column_index("application_name")
 
-            b = self.app.proxy.data(idx_bytes, Qt.DisplayRole)
-            app = self.app.proxy.data(idx_app, Qt.DisplayRole) or ""
+        for r in range(rows):
+            idx_bytes = self.app.proxy.index(r, bytes_col) if bytes_col >= 0 else None
+            idx_app = self.app.proxy.index(r, app_col) if app_col >= 0 else None
+
+            b = self.app.proxy.data(idx_bytes, Qt.DisplayRole) if idx_bytes is not None else 0
+            app_name = self.app.proxy.data(idx_app, Qt.DisplayRole) or "" if idx_app is not None else ""
 
             try:
                 total_bytes += int(b)
             except Exception:
                 pass
 
-            apps[app] = apps.get(app, 0) + 1
+            apps[app_name] = apps.get(app_name, 0) + 1
 
         top_app = max(apps, key=apps.get) if apps else "-"
 
@@ -218,10 +236,15 @@ class ExploreUIController:
         self.update_showing()
 
     def scroll_to_flow_pair(self, src: str, dst: str):
+        src_col = self._flow_column_index("src_ip")
+        dst_col = self._flow_column_index("dst_ip")
+        if src_col < 0 or dst_col < 0:
+            return None, None
+
         for r_idx in range(self.app.proxy.rowCount()):
-            idx0 = self.app.proxy.index(r_idx, 0)
+            idx0 = self.app.proxy.index(r_idx, src_col)
             src_ip = self.app.proxy.data(idx0, Qt.DisplayRole)
-            dst_ip = self.app.proxy.data(self.app.proxy.index(r_idx, 2), Qt.DisplayRole)
+            dst_ip = self.app.proxy.data(self.app.proxy.index(r_idx, dst_col), Qt.DisplayRole)
 
             if (src_ip == src and dst_ip == dst) or (src_ip == dst and dst_ip == src):
                 self.app.table.scrollTo(idx0, QTableView.PositionAtCenter)
@@ -292,7 +315,7 @@ class ExploreUIController:
         self.app.copy_text("\n".join(lines))
 
     def export_flows_table(self, export_format: str | None = None) -> None:
-        flows = self.app.flow_controller.get_all()
+        flows, export_note = self._flows_for_export()
         if not flows:
             self.app._message_dialog("Export table", "No flows are loaded or visible.", width=420)
             return
@@ -306,7 +329,10 @@ class ExploreUIController:
                 project_id=self.app.current_project_id,
                 category="json",
                 flows_override=flows,
+                flow_columns=self.app.model.columns(),
             )
+            if export_note:
+                self.app._message_dialog("Export table", export_note, width=520)
             return
 
         popup_export_menu(
@@ -320,6 +346,30 @@ class ExploreUIController:
                 )
             },
         )
+
+    def _flows_for_export(self) -> tuple[list[dict], str]:
+        flows: list[dict] = []
+        seen: set[int] = set()
+        for row_idx in range(self.app.proxy.rowCount()):
+            source_index = self.app.proxy.mapToSource(self.app.proxy.index(row_idx, 0))
+            source_row = source_index.row()
+            if source_row < 0 or source_row in seen:
+                continue
+            seen.add(source_row)
+            flow = self.app.flow_controller.get_flow_by_row(source_row)
+            if isinstance(flow, dict):
+                flows.append(flow)
+
+        note = ""
+        total = self.app.flow_controller.get_total_count()
+        loaded = self.app.flow_controller.get_loaded_count()
+        if flows and total > loaded:
+            note = (
+                f"Exported {len(flows):,} visible flow(s). "
+                f"The full period contains {total:,} flows but only {loaded:,} are loaded in the table. "
+                "Use Load more before export if you need the entire period."
+            )
+        return flows, note
 
     def generate_ai_summary(self):
         flows = self.app.flow_controller.get_all()
@@ -375,4 +425,68 @@ class ExploreUIController:
         )
         self.app.ai_task_controller.start("flow", worker)
 
-    
+    def _flow_column_index(self, key: str) -> int:
+        model = getattr(self.app, "model", None)
+        if model is None or not hasattr(model, "column_index"):
+            return -1
+        return int(model.column_index(key))
+
+    def _available_flow_columns(self) -> list[str]:
+        flows = self.app.flow_controller.get_all()
+        return available_flow_columns(list(flows))
+
+    def update_flows_view_controls(self) -> None:
+        combo = getattr(self.app, "cmb_flows_view", None)
+        customize = getattr(self.app, "btn_customize_flows", None)
+        if combo is None or customize is None:
+            return
+        has_flows = bool(self.app.flow_controller.get_all())
+        combo.setEnabled(has_flows)
+        mode = str(combo.currentData() or "default")
+        customize.setVisible(has_flows and mode == "custom")
+
+    def on_flows_view_mode_changed(self, index: int) -> None:
+        combo = getattr(self.app, "cmb_flows_view", None)
+        if combo is None or index < 0:
+            return
+
+        mode = str(combo.itemData(index) or "default")
+        if mode == "all":
+            columns = self._available_flow_columns()
+            self.app.model.set_columns(columns)
+        elif mode == "custom":
+            columns = list(self._flows_custom_columns or DEFAULT_FLOW_COLUMNS)
+            self.app.model.set_columns(columns)
+        else:
+            self.app.model.set_columns(list(DEFAULT_FLOW_COLUMNS))
+        self.update_flows_view_controls()
+
+    def open_flows_customize_dialog(self) -> None:
+        flows = self.app.flow_controller.get_all()
+        if not flows:
+            self.app._message_dialog("Flows", "Load flows first.", width=420)
+            return
+
+        dlg = ColumnPickerDialog(
+            current_columns=self.app.model.columns(),
+            all_columns=self._available_flow_columns(),
+            parent=self.app,
+        )
+        if not dlg.exec():
+            return
+
+        selected = dlg.get_selected_columns()
+        if not selected:
+            return
+
+        self._flows_custom_columns = list(selected)
+        self.app.model.set_columns(selected)
+        combo = getattr(self.app, "cmb_flows_view", None)
+        if combo is not None:
+            custom_index = combo.findData("custom")
+            if custom_index >= 0:
+                combo.blockSignals(True)
+                combo.setCurrentIndex(custom_index)
+                combo.blockSignals(False)
+        self.update_flows_view_controls()
+

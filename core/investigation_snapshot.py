@@ -7,6 +7,20 @@ from core.analyst import compute_analyst_summary
 from core.analyzer import top_applications
 from core.formatters import human_bytes
 from core.pcap_analyzer import PcapSummary, build_investigator_view
+from core.service_classification import communication_indicator_family
+from core.summary_heuristics import (
+    burst_hour_labels,
+    communication_lead_line,
+    flow_activity_window,
+    format_activity_window,
+    format_hour_label,
+    largest_flow_narrative,
+    messaging_and_social_lines,
+    pcap_peak_hour_label,
+    peak_hour_share_pct,
+    rhythm_label,
+    service_groups_from_flows,
+)
 
 SnapshotSource = Literal["json", "pcap"]
 
@@ -94,100 +108,143 @@ def _pattern_share_pct(rows: list[dict[str, Any]], *, value_key: str) -> float:
     return (peak / total) * 100.0
 
 
-def _json_findings(analyst: dict[str, Any]) -> list[str]:
+def _json_findings(
+    analyst: dict[str, Any],
+    *,
+    flows: list[dict[str, Any]],
+    service_groups: list[tuple[str, int, int]],
+) -> list[str]:
     findings: list[str] = []
     bytes_info = analyst.get("bytes") or {}
-    dominance = analyst.get("dominance") or {}
     activity = analyst.get("activity") or {}
     largest = analyst.get("largest") or {}
-    dominant = analyst.get("dominant_app") or {}
+    total_bytes = int(bytes_info.get("total_bytes") or 0)
 
-    outbound_share = float(bytes_info.get("outbound_share_total_pct") or 0.0)
-    if outbound_share > 60:
-        findings.append(
-            f"High outbound share: {outbound_share:.1f}% of total bytes (private to public)."
-        )
-    elif outbound_share >= 35:
-        findings.append(
-            f"Moderate outbound share: {outbound_share:.1f}% of total bytes (private to public)."
-        )
+    peak_hour = activity.get("peak_hour")
+    peak_share = peak_hour_share_pct(list(activity.get("hour_hist") or []), peak_hour)
+    peak_label = format_hour_label(peak_hour)
+    if peak_label and peak_share >= 8:
+        findings.append(f"Peak activity around {peak_label} ({peak_share:.1f}% of timed flows).")
 
-    internal = dominance.get("top_internal_outbound") or {}
-    internal_share = float(internal.get("share_of_outbound_pct") or 0.0)
-    if internal_share > 70:
-        findings.append(
-            f"Outbound bytes are highly concentrated on one internal host ({internal_share:.1f}% of outbound)."
-        )
-    elif internal_share >= 40:
-        findings.append(
-            f"Outbound bytes are moderately concentrated on one internal host ({internal_share:.1f}% of outbound)."
-        )
+    for burst in burst_hour_labels(list(activity.get("hour_hist") or [])):
+        if len(findings) >= 5:
+            break
+        if peak_label and burst.startswith(peak_label):
+            continue
+        findings.append(f"Activity spike at {burst}.")
 
-    destination = dominance.get("top_destination_outbound") or {}
-    dst_share = float(destination.get("share_of_outbound_pct") or 0.0)
-    if dst_share > 70:
-        findings.append(
-            f"Outbound traffic is dominated by one destination ({dst_share:.1f}% of outbound bytes)."
-        )
-    elif dst_share >= 40:
-        findings.append(
-            f"Outbound traffic is concentrated on one destination ({dst_share:.1f}% of outbound bytes)."
-        )
+    messaging, social = messaging_and_social_lines(service_groups, total_bytes=total_bytes)
+    if messaging:
+        findings.append(f"Messaging/cloud services stand out: {messaging[0]}.")
+    if social and len(findings) < 5:
+        findings.append(f"Social/content usage: {social[0]}.")
 
     night_share = float(activity.get("night_share_pct") or 0.0)
     if night_share >= 60:
         findings.append(
             f"Night-heavy activity: {night_share:.1f}% of timed flows occur between 22:00 and 06:00."
         )
-    elif night_share >= 35:
+    elif night_share >= 35 and len(findings) < 5:
         findings.append(
             f"Noticeable night activity: {night_share:.1f}% of timed flows occur between 22:00 and 06:00."
         )
 
-    largest_out_share = float(largest.get("largest_outbound_share_pct") or 0.0)
-    if largest_out_share >= 35:
+    outbound_share = float(bytes_info.get("outbound_share_total_pct") or 0.0)
+    if outbound_share > 60 and len(findings) < 5:
         findings.append(
-            f"One outbound flow accounts for {largest_out_share:.1f}% of outbound bytes."
+            f"High outbound share: {outbound_share:.1f}% of total bytes leaves the private side."
         )
-    elif largest_out_share >= 15:
+    elif outbound_share >= 35 and len(findings) < 5:
         findings.append(
-            f"A single outbound flow is unusually large ({largest_out_share:.1f}% of outbound bytes)."
+            f"Moderate outbound share: {outbound_share:.1f}% of total bytes leaves the private side."
         )
 
+    largest_out_share = float(largest.get("largest_outbound_share_pct") or 0.0)
+    if largest_out_share >= 15 and len(findings) < 5:
+        narrative = largest_flow_narrative(largest.get("largest_outbound_flow"), outbound=True)
+        if narrative:
+            findings.append(narrative)
+    elif float(largest.get("largest_total_share_pct") or 0.0) >= 20 and len(findings) < 5:
+        narrative = largest_flow_narrative(largest.get("largest_total_flow"), outbound=False)
+        if narrative:
+            findings.append(narrative)
+
+    dominant = analyst.get("dominant_app") or {}
     app_name = str((dominant.get("by_bytes") or {}).get("name") or "")
     app_share = float((dominant.get("by_bytes") or {}).get("share_pct") or 0.0)
     if app_name and app_name != "—" and app_share >= 25 and len(findings) < 5:
-        findings.append(f"Dominant application by volume: {app_name} ({app_share:.1f}% of bytes).")
+        findings.append(f"Dominant application label by volume: {app_name} ({app_share:.1f}% of bytes).")
 
     return findings[:5]
 
 
-def _json_headline(analyst: dict[str, Any], *, period_label: str) -> str:
+def _json_headline(
+    analyst: dict[str, Any],
+    *,
+    period_label: str,
+    service_groups: list[tuple[str, int, int]],
+    activity_window: str,
+) -> str:
     activity = analyst.get("activity") or {}
-    dominant = analyst.get("dominant_app") or {}
     coverage = analyst.get("coverage") or {}
-    deviation = analyst.get("behavior_deviation") or {}
+    bytes_info = analyst.get("bytes") or {}
 
-    app_name = str((dominant.get("by_bytes") or {}).get("name") or "mixed applications")
-    app_share = float((dominant.get("by_bytes") or {}).get("share_pct") or 0.0)
-    night_share = float(activity.get("night_share_pct") or 0.0)
-    business_share = float(activity.get("business_share_pct") or 0.0)
-    level = str(deviation.get("level") or "LOW")
+    flows = int(coverage.get("total_flows") or 0)
+    total_bytes = int(bytes_info.get("total_bytes") or 0)
+    peak_label = format_hour_label(activity.get("peak_hour"))
+    peak_share = peak_hour_share_pct(list(activity.get("hour_hist") or []), activity.get("peak_hour"))
+    rhythm = rhythm_label(
+        night_share=float(activity.get("night_share_pct") or 0.0),
+        business_share=float(activity.get("business_share_pct") or 0.0),
+    )
 
-    if night_share >= 55:
-        rhythm = "evening- and night-heavy"
-    elif business_share >= 55:
-        rhythm = "business-hours-heavy"
-    else:
-        rhythm = "mixed-hour"
+    lead_service = service_groups[0][0] if service_groups else "mixed applications"
+    lead_share = 0.0
+    if service_groups and total_bytes > 0:
+        lead_share = (service_groups[0][2] / total_bytes) * 100.0
 
     period_part = f" for {period_label}" if period_label else ""
-    flows = int(coverage.get("total_flows") or 0)
-    return (
-        f"{rhythm.capitalize()} flow dataset{period_part}: "
-        f"{flows:,} flows; {app_name} leads with {app_share:.1f}% of bytes "
-        f"(deviation level {level})."
+    headline = (
+        f"{rhythm.capitalize()} activity{period_part}: {flows:,} flows, "
+        f"{human_bytes(total_bytes, precision=2)}."
     )
+    if peak_label:
+        headline += f" Busiest around {peak_label}"
+        if peak_share >= 8:
+            headline += f" ({peak_share:.1f}% of timed flows)"
+        headline += "."
+    headline += f" Leading service group: {lead_service}"
+    if lead_share >= 5:
+        headline += f" ({lead_share:.1f}% of bytes)"
+    headline += "."
+    if activity_window:
+        headline += f" Traffic observed {activity_window}."
+    return headline
+
+
+def _json_next_steps(
+    analyst: dict[str, Any],
+    *,
+    service_groups: list[tuple[str, int, int]],
+) -> list[str]:
+    steps = [
+        "Open Registry for concentration metrics and analyst flags.",
+        "Open Flows to filter by top application or destination.",
+    ]
+    activity = analyst.get("activity") or {}
+    night_share = float(activity.get("night_share_pct") or 0.0)
+    peak_label = format_hour_label(activity.get("peak_hour"))
+    bursts = burst_hour_labels(list(activity.get("hour_hist") or []))
+
+    if bursts:
+        steps.append(f"Review flows around {bursts[0].split(' ')[0]} first — that hour shows a clear spike.")
+    elif peak_label and night_share >= 35:
+        steps.append(f"Review late-night flows first, especially around {peak_label}.")
+    elif service_groups:
+        steps.append(f"Filter Flows by {service_groups[0][0]} to inspect the leading service group.")
+    else:
+        steps.append("Open Listing when you need a tabular export view.")
+    return steps[:3]
 
 
 def build_json_snapshot(
@@ -202,29 +259,50 @@ def build_json_snapshot(
     coverage = analyst.get("coverage") or {}
     activity = analyst.get("activity") or {}
     bytes_info = analyst.get("bytes") or {}
-    dominant = analyst.get("dominant_app") or {}
 
     total_bytes = int(bytes_info.get("total_bytes") or 0)
     total_flows = int(coverage.get("total_flows") or len(flows))
-    peak_hour = activity.get("peak_hour")
-    peak_text = f"{int(peak_hour):02d}:00" if peak_hour is not None else "unknown"
+    service_groups = service_groups_from_flows(flows, limit=5)
+    first_seen, last_seen = flow_activity_window(flows)
+    activity_window = format_activity_window(first_seen, last_seen)
 
-    patterns = [
-        f"Peak activity hour: {peak_text}",
+    findings = _json_findings(analyst, flows=flows, service_groups=service_groups)
+
+    patterns = []
+    peak_label = format_hour_label(activity.get("peak_hour"))
+    quiet_label = format_hour_label(activity.get("quiet_hour"))
+    if peak_label:
+        peak_share = peak_hour_share_pct(list(activity.get("hour_hist") or []), activity.get("peak_hour"))
+        patterns.append(f"Peak hour: {peak_label} ({peak_share:.1f}% of timed flows)")
+    if quiet_label and quiet_label != peak_label:
+        patterns.append(f"Quietest hour: {quiet_label}")
+    patterns.append(
         f"Night share: {float(activity.get('night_share_pct') or 0.0):.1f}% | "
-        f"Business hours: {float(activity.get('business_share_pct') or 0.0):.1f}%",
-        f"Outbound share of total bytes: {float(bytes_info.get('outbound_share_total_pct') or 0.0):.1f}%",
-    ]
+        f"Business hours: {float(activity.get('business_share_pct') or 0.0):.1f}%"
+    )
+    patterns.append(
+        f"Outbound share of total bytes: {float(bytes_info.get('outbound_share_total_pct') or 0.0):.1f}%"
+    )
+    burst_lines = burst_hour_labels(list(activity.get("hour_hist") or []))
+    if burst_lines:
+        patterns.append("Activity spikes: " + ", ".join(burst_lines))
     active_days = int(coverage.get("active_days") or 0)
     if active_days:
         patterns.append(
             f"Active days in view: {active_days:,} "
             f"({str(coverage.get('pattern') or 'unknown')} communication pattern)."
         )
+    if activity_window:
+        patterns.append(f"Observed traffic window: {activity_window}")
 
     top_apps = top_applications(flows, limit=3)
     apps_line = ""
-    if top_apps:
+    if service_groups:
+        apps_line = "Service groups by volume: " + ", ".join(
+            f"{name} ({human_bytes(byte_count, precision=2)})"
+            for name, _count, byte_count in service_groups[:3]
+        )
+    elif top_apps:
         apps_line = "Detected applications: " + ", ".join(name for name, _count in top_apps)
 
     narrative_parts = []
@@ -233,26 +311,33 @@ def build_json_snapshot(
     narrative_parts.append(
         f"The dataset contains {total_flows:,} flows and {human_bytes(total_bytes, precision=2)} of bidirectional volume."
     )
-    dominant_name = str((dominant.get("by_bytes") or {}).get("name") or "")
-    if dominant_name and dominant_name != "—":
-        narrative_parts.append(
-            f"{dominant_name} is the leading application by bytes "
-            f"({float((dominant.get('by_bytes') or {}).get('share_pct') or 0.0):.1f}% share)."
-        )
+    if findings:
+        narrative_parts.append("Most notable signals: " + " ".join(findings[:2]))
+    deviation = analyst.get("behavior_deviation") or {}
+    reasons = [str(item).strip() for item in (deviation.get("reasons") or []) if str(item).strip()]
+    for reason in reasons:
+        if any(token in reason for token in ("private→public", "outbound", "night", "bulk", "concentrated")):
+            if "." not in reason.split(":")[-1]:  # skip IP-heavy dominance lines
+                narrative_parts.append(reason)
+                break
+            if "ratio" in reason.lower() or "night" in reason.lower():
+                narrative_parts.append(reason)
+                break
     narrative_parts.append(
         "Use Registry for full statistics, Flows for record-level review, and Listing for export-oriented tables."
     )
 
     return InvestigationSnapshot(
-        headline=_json_headline(analyst, period_label=period_label),
-        findings=_json_findings(analyst),
+        headline=_json_headline(
+            analyst,
+            period_label=period_label,
+            service_groups=service_groups,
+            activity_window=activity_window,
+        ),
+        findings=findings,
         patterns=patterns,
         apps_line=apps_line,
-        next_steps=[
-            "Open Registry for concentration metrics and analyst flags.",
-            "Open Flows to filter by top application or destination.",
-            "Open Listing when you need a tabular export view.",
-        ],
+        next_steps=_json_next_steps(analyst, service_groups=service_groups),
         narrative=" ".join(narrative_parts),
         limitations=[
             "Flow records reflect lawful-interception export metadata, not packet-level payload.",
@@ -273,33 +358,52 @@ def build_pcap_snapshot(summary: PcapSummary) -> InvestigationSnapshot:
     investigator = build_investigator_view(summary)
     service_rows = list(investigator.get("service_rows") or [])
     comm_rows = list(summary.communication_rows or [])
-    high_rows = [row for row in comm_rows if str(row.get("confidence") or "").lower() == "high"]
+    comm_only = [row for row in comm_rows if str(row.get("category") or "communications") != "social"]
+    social_rows = [row for row in comm_rows if str(row.get("category") or "") == "social"]
+    review_rows = [row for row in comm_only if str(row.get("tier") or "") == "review"]
+    high_rows = [row for row in comm_only if str(row.get("confidence") or "").lower() == "high"]
+    routine_flows = sum(int(row.get("sessions") or 0) for row in comm_only if str(row.get("tier") or "") == "routine")
 
-    peak_label = _peak_hour_label(list(summary.hourly_activity or []))
-    peak_share = _pattern_share_pct(list(summary.hourly_activity or []), value_key="packets")
+    peak_label, peak_share = pcap_peak_hour_label(list(summary.hourly_activity or []))
     top_services = [str(row.get("service") or "") for row in service_rows[:3] if str(row.get("service") or "")]
     service_text = ", ".join(top_services) if top_services else "mixed services"
+    family_counts = {"call_media": 0, "messaging": 0, "background": 0, "content": 0, "other": 0}
+    for row in comm_only:
+        family = communication_indicator_family(str(row.get("activity_type") or ""))
+        family_counts[family] = family_counts.get(family, 0) + int(row.get("sessions") or 1)
 
+    activity_window = format_activity_window(summary.first_seen, summary.last_seen)
+    lead_count = len(review_rows) or len([row for row in comm_only if str(row.get("tier") or "") != "routine"])
     headline = (
-        f"Capture shows {len(comm_rows):,} communication indicators"
-        + (f" with peak activity around {peak_label}" if peak_label else "")
-        + f"; leading services: {service_text}."
+        f"Capture for this period: {int(summary.packet_count or 0):,} packets, "
+        f"{human_bytes(summary.wire_bytes, precision=2)}."
     )
-    if high_rows:
-        headline += f" {len(high_rows):,} high-confidence indicators deserve review."
+    if peak_label:
+        headline += f" Peak activity around {peak_label}"
+        if peak_share >= 8:
+            headline += f" ({peak_share:.1f}% of timed packets)"
+        headline += "."
+    headline += f" {lead_count:,} review-worthy communication leads; leading services: {service_text}."
+    if routine_flows:
+        headline += f" {routine_flows:,} routine background flows are grouped separately."
+    if activity_window:
+        headline += f" Traffic observed {activity_window}."
 
     findings: list[str] = []
-    for row in high_rows[:3]:
+    lead_source = review_rows or [row for row in comm_only if str(row.get("tier") or "") != "routine"] or comm_only
+    for row in lead_source[:3]:
+        findings.append(communication_lead_line(row))
+    if social_rows and len(findings) < 5:
+        top_social = social_rows[0]
+        label = top_social.get("activity_label") or top_social.get("activity_type")
         findings.append(
-            f"{row.get('service')}: {row.get('activity_type')} "
-            f"({row.get('confidence')} confidence)."
+            f"Social/content: {top_social.get('service')} — {label} "
+            f"({human_bytes(int(top_social.get('bytes') or 0), precision=2)})."
         )
-    if not findings and comm_rows:
-        for row in comm_rows[:2]:
-            findings.append(
-                f"{row.get('service')}: {row.get('activity_type')} "
-                f"({row.get('confidence')} confidence)."
-            )
+    if family_counts["background"] and len(findings) < 5:
+        findings.append(
+            f"{family_counts['background']:,} grouped flows look like background sync/push rather than direct user interaction."
+        )
 
     visibility_rows = list(investigator.get("visibility_rows") or [])
     encrypted = next((row for row in visibility_rows if str(row.get("label") or "").startswith("Encrypted")), None)
@@ -308,11 +412,24 @@ def build_pcap_snapshot(summary: PcapSummary) -> InvestigationSnapshot:
     ]
     if peak_label:
         patterns.append(f"Peak hour bucket: {peak_label} ({peak_share:.1f}% of timed packets).")
+    if activity_window:
+        patterns.append(f"Observed traffic window: {activity_window}")
     if encrypted and int(encrypted.get("count") or 0) > 0:
         patterns.append(
             f"Encrypted or metadata-only sessions: {int(encrypted.get('count') or 0):,} packets "
             f"({float(encrypted.get('share') or 0.0):.1f}% share)."
         )
+    mix_parts: list[str] = []
+    if family_counts["call_media"]:
+        mix_parts.append(f"{family_counts['call_media']:,} call/media-like")
+    if family_counts["messaging"]:
+        mix_parts.append(f"{family_counts['messaging']:,} messaging/push-like")
+    if family_counts["background"]:
+        mix_parts.append(f"{family_counts['background']:,} background/sync")
+    if family_counts["content"]:
+        mix_parts.append(f"{family_counts['content']:,} content/app-session")
+    if mix_parts:
+        patterns.append("Communication mix: " + ", ".join(mix_parts) + ".")
     patterns.append(
         f"Visible DNS names: {int(summary.total_dns_names or len(summary.dns_queries or [])):,}; "
         f"TLS SNI hosts: {int(summary.total_tls_sni_hosts or len(summary.tls_sni or [])):,}."
@@ -323,6 +440,8 @@ def build_pcap_snapshot(summary: PcapSummary) -> InvestigationSnapshot:
         apps_line = "Detected services: " + ", ".join(top_services)
 
     narrative = str(investigator.get("plain_summary") or "").strip()
+    if high_rows and len(findings) < 2:
+        narrative += " " + communication_lead_line(high_rows[0])
     limitations = list(investigator.get("limitations") or [])[:3]
 
     return InvestigationSnapshot(
@@ -331,9 +450,9 @@ def build_pcap_snapshot(summary: PcapSummary) -> InvestigationSnapshot:
         patterns=patterns,
         apps_line=apps_line,
         next_steps=[
-            "Open Communications for classified activity indicators.",
+            "Open Communications and review high-confidence call/media or messaging indicators first.",
             "Open Evidence for DNS, TLS hosts and readable payload samples.",
-            "Use Mark as Finding when a period should be saved to the case.",
+            "Mark a finding only after confirming the indicator against surrounding metadata and timing.",
         ],
         narrative=narrative,
         limitations=limitations,

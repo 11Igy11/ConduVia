@@ -132,6 +132,8 @@ def _sort_behavior_expand_rows(key: str, rows: list[dict[str, Any]]) -> list[dic
     cleaned = list(rows)
     if key in {"service_rows", "domain_rows"}:
         cleaned.sort(key=lambda row: int(row.get("bytes") or row.get("count") or 0), reverse=True)
+    elif key == "hour_rows":
+        cleaned.sort(key=lambda row: str(row.get("label") or ""))
     return cleaned
 
 
@@ -278,12 +280,11 @@ class ActivityProfilePage(QWidget):
             max_rows=PROFILE_CHART_PREVIEW_ROWS,
             value_label_key="badge_label",
         )
-        self.activity_chart = BarChartWidget("Activity event types", count_list=True, max_rows=0)
 
         chart_grid = QGridLayout()
         chart_grid.setSpacing(12)
-        chart_grid.addWidget(self.device_ip_chart, 0, 0)
-        chart_grid.addWidget(self.activity_chart, 0, 1)
+        chart_grid.addWidget(self.evidence_chart, 0, 0)
+        chart_grid.addWidget(self.device_ip_chart, 0, 1)
         chart_grid.setColumnStretch(0, 1)
         chart_grid.setColumnStretch(1, 1)
         scroll_layout.addLayout(chart_grid)
@@ -366,7 +367,10 @@ class ActivityProfilePage(QWidget):
         self.hour_chart = BarChartWidget(
             "Activity by hour (all saved project evidence)",
             value_key="count",
-            max_rows=0,
+            max_rows=PROFILE_CHART_PREVIEW_ROWS,
+        )
+        self.hour_chart.configure_expand_table(
+            lambda: self._expand_behavior_rows("hour_rows", "Activity by hour")
         )
 
         behavior_grid = QGridLayout()
@@ -414,7 +418,6 @@ class ActivityProfilePage(QWidget):
                 "Badge shows packet volume, not IP count."
             ) if profile.get("pcap_device_ip_rows") else "",
         )
-        self.activity_chart.set_rows(profile.get("activity_type_rows") or [], empty_text="No activity events yet.")
         self._set_behavior_profile()
         self._set_pcap_period_coverage(profile.get("pcap_period_coverage") or [])
         self._update_profile_expand_buttons(profile)
@@ -580,7 +583,6 @@ class ActivityProfilePage(QWidget):
         self._set_metrics([])
         self.evidence_chart.set_rows([])
         self.device_ip_chart.set_rows([], empty_text="No saved PCAP device IPs yet.")
-        self.activity_chart.set_rows([], empty_text="No activity events yet.")
         self.service_chart.set_rows([], empty_text="No saved project dataset is available for service groups.")
         self.domain_chart.set_rows([], empty_text="No saved project dataset is available for observed domains.")
         self.day_chart.set_rows([], empty_text="No saved JSON activity is available by day.")
@@ -914,6 +916,7 @@ class ActivityProfilePage(QWidget):
             self.pcap_coverage_chart: len(profile.get("pcap_period_coverage") or []),
             self.service_chart: len(behavior.get("service_rows") or []),
             self.domain_chart: len(behavior.get("domain_rows") or []),
+            self.hour_chart: len(behavior.get("hour_rows") or []),
         }
         preview_limit = PROFILE_CHART_PREVIEW_ROWS
         for chart, count in thresholds.items():
@@ -941,6 +944,8 @@ class ActivityProfilePage(QWidget):
             return
         if key == "service_rows":
             columns = [("label", "Service"), ("bytes_label", "Volume"), ("count", "Flows"), ("example", "Example")]
+        elif key == "hour_rows":
+            columns = [("label", "Hour"), ("count", "Flows"), ("bytes_label", "Volume"), ("share", "Share")]
         else:
             columns = [("label", "Domain"), ("bytes_label", "Volume"), ("count", "Flows"), ("share", "Share")]
         open_project_rows_dialog(self.app, title, columns, rows)

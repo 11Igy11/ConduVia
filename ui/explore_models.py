@@ -4,8 +4,12 @@ import ipaddress
 from PySide6.QtCore import Qt, QAbstractTableModel, QModelIndex, QSortFilterProxyModel
 from PySide6.QtGui import QColor
 
-from core.protocols import format_ip_proto
-
+from ui.flow_columns import (
+    DEFAULT_FLOW_COLUMNS,
+    flow_cell_display,
+    flow_cell_sort_value,
+    friendly_label,
+)
 
 
 def is_private_ip(ip: str) -> bool:
@@ -16,42 +20,56 @@ def is_private_ip(ip: str) -> bool:
 
 
 class FlowTableModel(QAbstractTableModel):
-    COLUMNS = [
-        ("src_ip", "Source IP"),
-        ("src_port", "Source Port"),
-        ("dst_ip", "Destination IP"),
-        ("dst_port", "Destination Port"),
-        ("protocol", "Protocol"),
-        ("application_name", "Application"),
-        ("bidirectional_bytes", "Bytes"),
-        ("bidirectional_duration_ms", "Duration(ms)"),
-        ("requested_server_name", "SNI"),
-    ]
+    DEFAULT_COLUMNS = DEFAULT_FLOW_COLUMNS
+    # Backward-compatible alias used by export helpers.
+    COLUMNS = [(key, friendly_label(key)) for key in DEFAULT_FLOW_COLUMNS]
 
     def __init__(self, flows: list[dict[str, Any]] | None = None):
         super().__init__()
         self._flows: list[dict[str, Any]] = flows or []
+        self._columns: list[str] = list(self.DEFAULT_COLUMNS)
         self._ip_cache: dict[str, bool] = {}
-        self._bg_private = QColor("#E8F5E9")  # light green
-        self._bg_public = QColor("#FFEBEE")   # light red
+        self._bg_private = QColor("#E8F5E9")
+        self._bg_public = QColor("#FFEBEE")
 
     def set_flows(self, flows: list[dict[str, Any]]):
         self.beginResetModel()
-        self._flows = flows
+        self._flows = flows or []
         self._ip_cache.clear()
         self.endResetModel()
+
+    def set_columns(self, columns: list[str] | None):
+        self.beginResetModel()
+        self._columns = [str(col) for col in (columns or []) if str(col).strip()]
+        self._ip_cache.clear()
+        self.endResetModel()
+
+    def columns(self) -> list[str]:
+        return list(self._columns)
+
+    def column_key(self, section: int) -> str | None:
+        if section < 0 or section >= len(self._columns):
+            return None
+        return self._columns[section]
+
+    def column_index(self, key: str) -> int:
+        try:
+            return self._columns.index(key)
+        except ValueError:
+            return -1
 
     def rowCount(self, parent: QModelIndex = QModelIndex()) -> int:
         return len(self._flows)
 
     def columnCount(self, parent: QModelIndex = QModelIndex()) -> int:
-        return len(self.COLUMNS)
+        return len(self._columns)
 
     def headerData(self, section: int, orientation: Qt.Orientation, role: int = Qt.DisplayRole):
         if role != Qt.DisplayRole:
             return None
         if orientation == Qt.Horizontal:
-            return self.COLUMNS[section][1]
+            key = self.column_key(section)
+            return friendly_label(key) if key else None
         return str(section + 1)
 
     def _cached_is_private(self, ip: str) -> bool:
@@ -66,28 +84,18 @@ class FlowTableModel(QAbstractTableModel):
             return None
 
         flow = self._flows[index.row()]
-        key = self.COLUMNS[index.column()][0]
+        key = self.column_key(index.column())
+        if not key:
+            return None
 
         if role == Qt.DisplayRole:
-            val = flow.get(key, "")
-            if key == "protocol":
-                return format_ip_proto(val)
-            return "" if val is None else str(val)
+            return flow_cell_display(key, flow)
 
         if role == Qt.ToolTipRole:
-            val = flow.get(key, "")
-            if key == "protocol":
-                return format_ip_proto(val)
-            return "" if val is None else str(val)
+            return flow_cell_display(key, flow)
 
         if role == Qt.UserRole:
-            val = flow.get(key)
-            if isinstance(val, (int, float)):
-                return val
-            try:
-                return int(val)
-            except Exception:
-                return 0
+            return flow_cell_sort_value(key, flow)
 
         if role == Qt.BackgroundRole and key in ("src_ip", "dst_ip"):
             ip = flow.get(key, "")
@@ -119,12 +127,24 @@ class NumericSortProxy(QSortFilterProxyModel):
         self.conv_b = None
         self.invalidate()
 
+    def _source_column_index(self, key: str) -> int:
+        model = self.sourceModel()
+        if model is None or not hasattr(model, "column_index"):
+            return -1
+        return int(model.column_index(key))
+
     def filterAcceptsRow(self, row: int, parent: QModelIndex) -> bool:
         model = self.sourceModel()
+        if model is None:
+            return True
 
         if self.conv_a and self.conv_b:
-            src_ip = model.data(model.index(row, 0, parent), Qt.DisplayRole) or ""
-            dst_ip = model.data(model.index(row, 2, parent), Qt.DisplayRole) or ""
+            src_col = self._source_column_index("src_ip")
+            dst_col = self._source_column_index("dst_ip")
+            if src_col < 0 or dst_col < 0:
+                return False
+            src_ip = model.data(model.index(row, src_col, parent), Qt.DisplayRole) or ""
+            dst_ip = model.data(model.index(row, dst_col, parent), Qt.DisplayRole) or ""
             a, b = self.conv_a, self.conv_b
             if not ((src_ip == a and dst_ip == b) or (src_ip == b and dst_ip == a)):
                 return False

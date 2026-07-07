@@ -38,12 +38,33 @@ def extract_dataset_meta(json_path: str | Path) -> dict[str, Any]:
 
     # case list (your sample uses case[0].RegNo / OrigRegNo / bt / et)
     case_list = data.get("case")
+    if case_list is None:
+        case_list = data.get("Case")
+    if isinstance(case_list, dict):
+        case_list = [case_list]
     if isinstance(case_list, list) and case_list and isinstance(case_list[0], dict):
         c0 = case_list[0]
-        meta["RegNo"] = c0.get("RegNo")            # map -> Urbroj
-        meta["OrigRegNo"] = c0.get("OrigRegNo")    # map -> Klasa
-        meta["bt"] = c0.get("bt")
-        meta["et"] = c0.get("et")
+        meta["RegNo"] = c0.get("RegNo") or c0.get("regNo") or meta.get("RegNo")
+        meta["OrigRegNo"] = c0.get("OrigRegNo") or c0.get("origRegNo") or meta.get("OrigRegNo")
+        meta["bt"] = c0.get("bt") or meta.get("bt")
+        meta["et"] = c0.get("et") or meta.get("et")
+
+    for key, target_key in (
+        ("RegNo", "RegNo"),
+        ("regNo", "RegNo"),
+        ("OrigRegNo", "OrigRegNo"),
+        ("origRegNo", "OrigRegNo"),
+        ("bt", "bt"),
+        ("et", "et"),
+    ):
+        if target_key not in meta and key in data and data[key] is not None:
+            meta[target_key] = data[key]
+
+    for alias in ("msisdn", "MSISDN", "subscriber", "phoneNumber", "phone_number"):
+        if "target" not in meta and alias in data and data[alias] is not None:
+            meta["target"] = data[alias]
+            if "targettype" not in meta:
+                meta["targettype"] = "MSISDN"
 
     return meta
 

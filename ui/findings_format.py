@@ -6,6 +6,14 @@ from core.db import add_activity, get_finding, update_finding
 from core.formatters import human_bytes
 
 
+def format_finding_notes_block(row: Any, *, status_label: Callable[[str], str] | None = None) -> str:
+    from ui.app_helpers import status_emoji
+
+    label = status_label or status_emoji
+    detail = format_finding_detail(row, label)
+    return f"[Finding]\n{detail}\n{'-' * 60}\n"
+
+
 def format_finding_detail(row: Any, status_label: Callable[[str], str]) -> str:
     return "\n".join(
         [
