@@ -239,6 +239,86 @@ def sync_case_metadata_from_json(
     return warnings
 
 
+def sync_project_from_json_files(
+    project_id: int,
+    json_paths: Iterable[str],
+    *,
+    db_path: Path = DEFAULT_DB_PATH,
+    max_files: int = 8,
+) -> list[str]:
+    """Read wrapper metadata from JSON evidence files and populate the project."""
+    from core.parser import extract_dataset_meta
+    from core.project_identity import sync_project_subject_from_json_meta
+
+    warnings: list[str] = []
+    subject_synced = False
+    case_synced = False
+
+    for path in list(json_paths or [])[:max(1, int(max_files))]:
+        file_path = str(path or "").strip()
+        if not file_path:
+            continue
+        try:
+            meta = extract_dataset_meta(file_path)
+        except Exception:
+            continue
+
+        has_case = any(
+            str(meta.get(key) or "").strip()
+            for key in ("OrigRegNo", "RegNo", "bt", "et")
+        )
+        has_target = bool(str(meta.get("target") or "").strip())
+
+        if has_case:
+            warnings.extend(
+                sync_case_metadata_from_json(
+                    project_id,
+                    meta,
+                    source_file=file_path,
+                    db_path=db_path,
+                )
+            )
+            case_synced = True
+
+        if has_target and not subject_synced:
+            sync_project_subject_from_json_meta(project_id, meta, db_path=db_path)
+            subject_synced = True
+
+        if case_synced and subject_synced:
+            break
+
+    return warnings
+
+
+def ensure_project_metadata_from_evidence(
+    project_id: int,
+    *,
+    db_path: Path = DEFAULT_DB_PATH,
+) -> list[str]:
+    """Backfill empty project metadata from indexed JSON files already in the project."""
+    from core.db import get_project, list_ingest_items
+    from core.project_identity import project_identifiers_text
+
+    project = get_project(project_id, db_path=db_path)
+    if not project:
+        return []
+
+    metadata = load_case_metadata(project_id, db_path=db_path)
+    has_case = bool(active_klasa_value(metadata) or active_urbroj_value(metadata))
+    has_identifiers = project_identifiers_text(project) != "-"
+    if has_case and has_identifiers:
+        return []
+
+    json_paths = [
+        str(item.file_path or "").strip()
+        for item in list_ingest_items(project_id, file_type="json", limit=50, db_path=db_path)
+        if str(item.file_path or "").strip()
+    ]
+    if not json_paths:
+        return []
+    return sync_project_from_json_files(project_id, json_paths, db_path=db_path)
+
+
 def merge_json_case_metadata(
     metadata: dict[str, Any],
     *,

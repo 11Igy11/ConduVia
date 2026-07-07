@@ -376,7 +376,11 @@ class DatasetLoadMixin:
             kind = "folder selection" if mode == "files" else ("folder" if mode == "folder" else "JSON file")
             self.app.lbl_path.setText(f"Analyzing {kind}: {path}")
         if hasattr(self.app, "lbl_stats"):
-            self.app.explore_ui_controller.set_json_stats_text("Loading and parsing JSON flows. Please wait...", include_counts=False)
+            self.app.explore_ui_controller.set_json_stats_text(
+                "Loading and parsing JSON flows. Please wait...",
+                include_counts=False,
+                loading=True,
+            )
         if hasattr(self.app, "lbl_json_meta"):
             self.app.lbl_json_meta.setText("")
 
@@ -403,6 +407,10 @@ class DatasetLoadMixin:
         self._load_thread.start()
 
     def _on_dataset_loaded(self, result: dict):
+        if getattr(self, "_import_cancel_requested", False):
+            self._close_dataset_load_progress()
+            self._set_loading(False)
+            return
         self._close_dataset_load_progress()
         if result.get("project_id") != self.app.current_project_id:
             self.app._message_dialog(
@@ -428,6 +436,23 @@ class DatasetLoadMixin:
             return
 
         flows = result["flows"]
+        calendar_note = ""
+        window_note = ""
+        if self._json_period_granularity == "day" and self._json_active_day:
+            from core.period_calendar import (
+                calendar_day_coverage_note,
+                filter_flows_to_calendar_day,
+                format_calendar_day_window,
+            )
+            from core.formatters import format_pcap_datetime
+
+            flows, _stats = filter_flows_to_calendar_day(flows, self._json_active_day)
+            calendar_note = calendar_day_coverage_note(flows, self._json_active_day)
+            first_seen, last_seen = format_calendar_day_window(self._json_active_day)
+            if first_seen and last_seen:
+                window_note = (
+                    f"Window: {format_pcap_datetime(first_seen)} - {format_pcap_datetime(last_seen)}"
+                )
         self.app.current_folder = Path(result["current_folder"])
         self.app.flow_controller.page_size = self.app.PAGE_SIZE
         self.app.flow_controller.set_flows(flows)
@@ -447,6 +472,10 @@ class DatasetLoadMixin:
             stats_label = (
                 f"{stats_label} | Period: {day_label} ({day_files:,} JSON files)"
             )
+            if window_note:
+                stats_label = f"{stats_label} | {window_note}"
+            if calendar_note:
+                stats_label = f"{stats_label} | {calendar_note}"
         self.app.explore_ui_controller.set_json_stats_text(stats_label)
         if hasattr(self.app, "lbl_json_meta"):
             self.app.lbl_json_meta.setText(_json_order_metadata_line(result.get("meta") or {}))
@@ -475,6 +504,10 @@ class DatasetLoadMixin:
                         "Save/load continued. Review Klasa/Urbroj in Projects.",
                         width=520,
                     )
+                from core.project_identity import sync_project_subject_from_json_meta
+
+                sync_project_subject_from_json_meta(int(self.app.current_project_id), meta)
+                self._refresh_selected_project_preview(int(self.app.current_project_id))
             except Exception:
                 pass
 
@@ -489,6 +522,12 @@ class DatasetLoadMixin:
         self.render_summary()
 
         self.app.model.set_flows(self.app.flow_controller.get_loaded())
+
+        combo = getattr(self.app, "cmb_flows_view", None)
+        if combo is not None:
+            self.app.explore_ui_controller.on_flows_view_mode_changed(combo.currentIndex())
+        else:
+            self.app.explore_ui_controller.update_flows_view_controls()
 
         self.app.search.setText("")
         self.app.explore_ui_controller.leave_conversation(clear_search=False)
@@ -630,6 +669,13 @@ class DatasetLoadMixin:
         if is_imsi_target_type(dataset_type):
             dataset_identifier = format_intercept_imsi(dataset_identifier)
         if not dataset_identifier:
+            return
+
+        from core.project_identity import sync_project_subject_from_json_meta
+
+        sync_project_subject_from_json_meta(project_id, meta)
+        project = get_project(project_id)
+        if not project:
             return
         if (project.target_identifier or "").strip() or project_identifier_rows(project):
             return

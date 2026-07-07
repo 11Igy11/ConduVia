@@ -264,7 +264,7 @@ a:hover { text-decoration: underline; }
       <img class="header-logo" src="manual-assets/logo.png" alt="ViaNyquist logo">
       <div class="header-text">
         <h1>ViaNyquist User Guide</h1>
-        <p class="header-meta">Beta · June 2026</p>
+        <p class="header-meta">Beta · July 2026</p>
       </div>
     </div>
   </header>
@@ -279,7 +279,8 @@ a:hover { text-decoration: underline; }
 <li><a href="#4-5-recent-cards-bottom">Recent cards (bottom)</a></li></ul></li>
 <li><a href="#5-loading-evidence">Loading evidence</a><ul class="toc-sub"><li><a href="#5-1-from-json-explore">From JSON (Explore)</a></li>
 <li><a href="#5-2-from-pcap">From PCAP</a></li>
-<li><a href="#5-3-from-projects">From Projects</a></li></ul></li>
+<li><a href="#5-3-from-projects">From Projects</a></li>
+<li><a href="#5-4-period-selector-and-calendar-day">Period selector and calendar day</a></li></ul></li>
 <li><a href="#6-json-explore">JSON — Explore</a><ul class="toc-sub"><li><a href="#6-1-header">Header</a></li>
 <li><a href="#6-2-summary">Summary</a></li>
 <li><a href="#6-3-flows">Flows</a></li>
@@ -288,7 +289,9 @@ a:hover { text-decoration: underline; }
 <li><a href="#8-json-listing">JSON — Listing</a></li>
 <li><a href="#9-pcap">PCAP</a><ul class="toc-sub"><li><a href="#9-1-header">Header</a></li>
 <li><a href="#9-2-tabs">Tabs</a></li>
-<li><a href="#9-3-limitations">Limitations</a></li></ul></li>
+<li><a href="#9-3-communications-and-social">Communications and Social</a></li>
+<li><a href="#9-4-summary-text">Summary text</a></li>
+<li><a href="#9-5-limitations">Limitations</a></li></ul></li>
 <li><a href="#10-osint">OSINT</a></li>
 <li><a href="#11-findings">Findings</a><ul class="toc-sub"><li><a href="#11-1-create">Create</a></li>
 <li><a href="#11-2-browse-and-filter">Browse and filter</a></li>
@@ -354,6 +357,8 @@ a:hover { text-decoration: underline; }
 
 <p>The JSON section has three top tabs: <strong>Explore</strong>, <strong>Registry</strong>, <strong>Listing</strong>.</p>
 
+<p>Tab bars across the app (JSON, PCAP, Explore sub-tabs, Registry, OSINT, and similar) are <strong>click-only</strong> for switching tabs — scrolling the mouse wheel over a tab bar does not change the selected tab.</p>
+
 <hr>
 
 <h2 id="4-projects">4. Projects</h2>
@@ -391,26 +396,30 @@ a:hover { text-decoration: underline; }
 <li><strong>Other identifiers</strong> — additional lines (e.g. email, legacy IDs).</li>
 </ul>
 
+<p>IP addresses are <strong>not</strong> accepted in name or identifier fields (MSISDN, IMSI, IMEI). Use flow tables for IP review.</p>
+
+<p>When you import a JSON dataset, lawful-interception metadata (Klasa, Urbroj, lawful interception dates, and subscriber identifiers when present) can be synced into the active project. You are prompted on the first import of a new source if project identifiers differ from the file.</p>
+
 <p><strong>Case order metadata</strong></p>
 
 <ul>
 <li><strong>Klasa</strong>, <strong>Urbroj</strong> — with <strong>…</strong> picker if saved values exist.</li>
-<li><strong>Order validity</strong> — from / to dates; <strong>…</strong> opens saved validity periods.</li>
+<li><strong>Lawful interception dates</strong> — from / to dates; <strong>…</strong> opens saved interception periods.</li>
 </ul>
 
 <p>After creating a project you may be asked <strong>Open dataset</strong> to load evidence immediately.</p>
 
 <h3 id="4-4-project-details-panel">4.4 Project details panel</h3>
 
-<p>Shows ID, subject, identifiers, Klasa/Urbroj, order validity, description, workspace path, and timestamps.</p>
+<p>Shows ID, subject, identifiers, Klasa/Urbroj, lawful interception dates, description, workspace path, and timestamps.</p>
 
 <h3 id="4-5-recent-cards-bottom">4.5 Recent cards (bottom)</h3>
 
 <table>
 <tr><th>Card</th><th>Action</th></tr>
-<tr><td><strong>Recent JSON files</strong></td><td><strong>Open JSON list</strong> — load or open indexed JSON days</td></tr>
-<tr><td><strong>Recent PCAP days</strong></td><td><strong>Open PCAP list</strong> — open saved PCAP periods</td></tr>
-<tr><td><strong>Recent activity</strong></td><td><strong>Open activity log</strong> — project event timeline</td></tr>
+<tr><td><strong>Recent JSON files</strong></td><td><strong>Open JSON list</strong> — load or open indexed JSON days; multi-select rows and <strong>Delete selected</strong> to remove indexed files from the project</td></tr>
+<tr><td><strong>Recent PCAP days</strong></td><td><strong>Open PCAP list</strong> — open saved PCAP periods; multi-select and <strong>Delete selected</strong> to remove indexed PCAP evidence</td></tr>
+<tr><td><strong>Recent activity</strong></td><td><strong>Open activity log</strong> — project event timeline (newest events at the bottom)</td></tr>
 </table>
 
 <hr>
@@ -431,13 +440,33 @@ a:hover { text-decoration: underline; }
 
 <p><strong>Folder import</strong> offers <strong>Import all</strong>, <strong>Choose date range</strong>, or <strong>Cancel</strong>. JSON is indexed by calendar day. Use <strong>Period</strong> (Day / Month / <strong>Selected period</strong>), <strong>Pick range…</strong>, and <strong>Missing days</strong> to work with date spans.</p>
 
+<p>During import, a progress dialog shows indexing status. <strong>Pause</strong> temporarily stops processing; <strong>Cancel import</strong> aborts the session and rolls back evidence indexed in that import (so a half-finished folder load does not leave a broken dataset in the project).</p>
+
 <h3 id="5-2-from-pcap">5.2 From PCAP</h3>
 
-<p>On the PCAP page, click <strong>Load dataset</strong> and select one or more <code>.pcap</code> / <code>.pcapng</code> files. Use <strong>Save Period to Project</strong> to register the capture to the active project workspace.</p>
+<p>On the PCAP page, click <strong>Load dataset</strong> and select one or more <code>.pcap</code> / <code>.pcapng</code> files. Large multi-day folders may be processed as an automatic batch (one period at a time) with optional auto-save to the project. Use <strong>Save Period to Project</strong> to register the current capture to the active project workspace.</p>
 
 <h3 id="5-3-from-projects">5.3 From Projects</h3>
 
 <p>Use <strong>Open JSON list</strong> or <strong>Open PCAP list</strong> on the recent cards; multi-select rows and <strong>Load selected</strong>, or double-click a row.</p>
+
+<h3 id="5-4-period-selector-and-calendar-day">5.4 Period selector and calendar day</h3>
+
+<p>Both JSON and PCAP use the same period controls in the header:</p>
+
+<table>
+<tr><th>Control</th><th>Purpose</th></tr>
+<tr><td><strong>Period</strong></td><td><strong>Day</strong>, <strong>Month</strong>, or <strong>Selected period</strong></td></tr>
+<tr><td><strong>Day combo</strong></td><td>Calendar day bucket (file count shown, e.g. <code>23/07/2024 (8 JSON)</code>)</td></tr>
+<tr><td><strong>File combo</strong></td><td><strong>All files</strong> for that day, or one source file (JSON and PCAP)</td></tr>
+<tr><td><strong>Pick range…</strong></td><td>Custom date span</td></tr>
+<tr><td><strong>Re-analyze Period</strong></td><td>Rebuild analysis from source files for the selected period</td></tr>
+<tr><td><strong>Missing days</strong></td><td>Highlights gaps in indexed coverage</td></tr>
+</table>
+
+<p>When <strong>Day</strong> is selected, the header <strong>Window</strong> always shows the <strong>full calendar day</strong> (<code>00:00:00.000</code> – <code>23:59:59.999</code>). A separate line (<strong>Traffic observed …</strong>) shows when flows or packets actually occurred inside that day.</p>
+
+<p>Re-analyze loads flows whose timestamps fall on the selected calendar day. Source files from the adjacent calendar day may also be scanned so traffic that crosses midnight is not split incorrectly. The status line explains when more files are scanned than appear in the day bucket (midnight overlap).</p>
 
 <hr>
 
@@ -445,33 +474,41 @@ a:hover { text-decoration: underline; }
 
 <p>Sub-tabs: <strong>Summary</strong>, <strong>Flows</strong>, <strong>Findings</strong>.</p>
 
+<p>Top-level JSON tabs (<strong>Explore</strong>, <strong>Registry</strong>, <strong>Listing</strong>) and Explore sub-tabs do <strong>not</strong> scroll when you use the mouse wheel over the tab bar — only the page content scrolls.</p>
+
 <h3 id="6-1-header">6.1 Header</h3>
 
 <ul>
-<li><strong>Load dataset</strong>, <strong>Generate AI Summary</strong>, <strong>Add AI to Notes</strong></li>
-<li>Project path and stats; <strong>Page size</strong> and <strong>Load next</strong> for large datasets</li>
-<li><strong>Period</strong> controls and search: <code>Search IP / SNI / app...</code></li>
+<li><strong>Load dataset</strong>, <strong>Generate AI Summary</strong>, <strong>Add Summary to Notes</strong></li>
+<li>Project path and stats (green loading text while JSON is parsed, same style as PCAP import)</li>
+<li><strong>Page size</strong> and <strong>Load next</strong> for large datasets</li>
+<li><strong>Period</strong> row: day/month/range, file picker, <strong>Re-analyze Period</strong>, <strong>Missing days</strong></li>
+<li>Search: <code>Search IP / SNI / app...</code></li>
 </ul>
 
 <h3 id="6-2-summary">6.2 Summary</h3>
 
 <ul>
-<li>Cards: <strong>Top source IPs</strong>, <strong>Top destination IPs</strong>, <strong>Top protocols</strong>, <strong>Top applications</strong> — each with <strong>Expand table</strong></li>
-<li><strong>AI assistant output</strong> — filled by <strong>Generate AI Summary</strong></li>
+<li><strong>Investigation snapshot</strong> — headline, findings, activity patterns, service groups, and next steps generated from the loaded period (peak hours, bursts, messaging/social services, volume). No raw IP addresses in the snapshot text.</li>
+<li>Cards: <strong>Top source IPs</strong>, <strong>Top destination IPs</strong>, <strong>Top protocols</strong>, <strong>Top applications</strong> — each with <strong>Expand table</strong> (expand control in the chart header)</li>
+<li><strong>Generate AI Summary</strong> sends structured context to the AI assistant; results appear on <strong>AI output</strong></li>
 </ul>
 
 <h3 id="6-3-flows">6.3 Flows</h3>
 
 <ul>
+<li><strong>View</strong> modes (like Listing): Default, All fields, Custom, or saved presets</li>
+<li><strong>Customize</strong> — pick columns (e.g. add separate Date and Time columns)</li>
+<li><strong>Presets ▾</strong> — save, update, or delete column layouts</li>
 <li>Filters: <strong>Filter source</strong>, <strong>Filter destination</strong>, <strong>Filter SNI</strong></li>
 <li><strong>Conversation: OFF/ON</strong> — focus on one endpoint pair</li>
 <li><strong>Expand Flows</strong> / <strong>Collapse Flows</strong></li>
-<li><strong>Export table</strong> (CSV / Excel / HTML)</li>
+<li><strong>Export table</strong> (CSV / Excel / HTML) — exports <strong>visible</strong> filtered rows; a warning appears if the export is not the full dataset</li>
 <li><strong>Mark as Finding</strong> — save selected flow as a finding</li>
 <li><strong>Explain with AI</strong> — send flow context to AI</li>
 </ul>
 
-<p>Sortable table columns include Source/destination IP and port, Protocol, Application, Bytes, Duration, SNI. <strong>Flow details</strong> panel shows the selected row.</p>
+<p>Sortable table columns depend on the active view. <strong>Flow details</strong> panel shows the selected row.</p>
 
 <h3 id="6-4-findings-in-explore">6.4 Findings (in Explore)</h3>
 
@@ -514,26 +551,54 @@ a:hover { text-decoration: underline; }
 <h3 id="9-1-header">9.1 Header</h3>
 
 <ul>
-<li><strong>Load dataset</strong>, <strong>Save Period to Project</strong>, <strong>AI Summary</strong>, <strong>Add to Notes</strong>, <strong>Export Summary</strong></li>
-<li><strong>Period</strong> row: day combo, Day / Month / Selected period, <strong>Pick range…</strong>, <strong>Re-analyze Period</strong>, <strong>Missing days</strong></li>
+<li><strong>Load dataset</strong>, <strong>Save Period to Project</strong>, <strong>AI Summary</strong>, <strong>Add Summary to Notes</strong>, <strong>Export Summary</strong></li>
+<li><strong>Period</strong> row: day combo, Day / Month / Selected period, <strong>file picker</strong> (all files or one PCAP in the bucket), <strong>Pick range…</strong>, <strong>Re-analyze Period</strong>, <strong>Missing days</strong></li>
+<li>Stats line: format, packets, volume, period window, and calendar-day notes when applicable</li>
 </ul>
 
 <h3 id="9-2-tabs">9.2 Tabs</h3>
 
 <table>
 <tr><th>Tab</th><th>Content</th></tr>
-<tr><td><strong>Summary</strong></td><td>Plain-language overview, key points, limitations, service groups, hourly activity</td></tr>
-<tr><td><strong>Communications</strong></td><td>Communication highlights (service, indicator, host, volume, timing)</td></tr>
-<tr><td><strong>Evidence</strong></td><td><strong>Evidence</strong> (DNS, TLS SNI, HTTP hosts, visible samples) and <strong>Artifacts</strong> (extracted artefacts)</td></tr>
+<tr><td><strong>Summary</strong></td><td>Plain-language overview, key points, limitations, service groups, hourly activity (expand tables from chart headers)</td></tr>
+<tr><td><strong>Communications</strong></td><td>Two sub-tabs: <strong>Communications</strong> (messaging, calls, push) and <strong>Social</strong> (YouTube, TikTok, Spotify, and similar content/API traffic)</td></tr>
+<tr><td><strong>Evidence</strong></td><td>DNS, TLS SNI, HTTP hosts, visible samples, and extracted <strong>Artifacts</strong></td></tr>
 <tr><td><strong>Network</strong></td><td><strong>Overview</strong> and <strong>Connections</strong> tables</td></tr>
-<tr><td><strong>AI Summary</strong></td><td>AI explanation of the capture</td></tr>
 </table>
 
-<p>Many sections offer <strong>Expand table</strong> or <strong>Open full … table</strong> for larger views.</p>
+<p>There is <strong>no separate AI Summary tab</strong> on PCAP. <strong>AI Summary</strong> runs analysis and opens the result on <strong>AI output</strong>.</p>
 
-<h3 id="9-3-limitations">9.3 Limitations</h3>
+<h3 id="9-3-communications-and-social">9.3 Communications and Social</h3>
 
-<p>HTTPS, QUIC, and most app traffic are encrypted. Without plaintext, only metadata and visible artefacts are shown. Messaging or call-like indicators are heuristic, not proof of user action.</p>
+<p>Communication indicators are <strong>grouped</strong> by service, indicator type, and host — not one row per flow.</p>
+
+<table>
+<tr><th>Column / concept</th><th>Meaning</th></tr>
+<tr><td><strong>Type</strong></td><td>Call / media, Messaging / push, Background / sync, Content / API, or Other</td></tr>
+<tr><td><strong>Indicator</strong></td><td>Short plain-language label (e.g. push channel, likely call/media session)</td></tr>
+<tr><td><strong>Sessions</strong></td><td>Number of flows combined into that row</td></tr>
+<tr><td><strong>Confidence</strong></td><td>high / medium / low (metadata-based)</td></tr>
+</table>
+
+<p>The Communications card highlights <strong>review leads</strong> first. <strong>Routine</strong> background/sync rows (for example repetitive Apple push contacts) are grouped and de-emphasised; open <strong>Open communications table</strong> to see the full list (review leads first, routine at the bottom).</p>
+
+<p><strong>Mark as Finding</strong> saves the selected communication indicator (from the full table) to the project findings.</p>
+
+<h3 id="9-4-summary-text">9.4 Summary text</h3>
+
+<p>The Summary tab and investigation snapshot describe:</p>
+
+<ul>
+<li>Peak activity hour and share of timed traffic</li>
+<li>Observed traffic window inside the calendar day</li>
+<li>Priority communication leads with time span and volume</li>
+<li>Social/content usage when present</li>
+<li>How many routine background flows were grouped separately</li>
+</ul>
+
+<h3 id="9-5-limitations">9.5 Limitations</h3>
+
+<p>HTTPS, QUIC, and most app traffic are encrypted. Without plaintext, only metadata and visible artefacts are shown. Messaging or call-like indicators are heuristic, not proof of user action or message content.</p>
 
 <hr>
 
@@ -560,7 +625,12 @@ a:hover { text-decoration: underline; }
 
 <h3 id="11-1-create">11.1 Create</h3>
 
-<p>In <strong>Flows</strong>, select a row and click <strong>Mark as Finding</strong>. Enter <strong>Title</strong>, optional <strong>Note</strong>, and <strong>Tags</strong> (comma-separated). The view switches to the Findings tab.</p>
+<ul>
+<li><strong>JSON → Flows</strong> — select a row and click <strong>Mark as Finding</strong></li>
+<li><strong>PCAP → Communications</strong> — open the full communications table, select a grouped indicator, and click <strong>Mark as Finding</strong></li>
+</ul>
+
+<p>Enter <strong>Title</strong>, optional <strong>Note</strong>, and <strong>Tags</strong> (comma-separated). The view may switch to the Findings tab.</p>
 
 <h3 id="11-2-browse-and-filter">11.2 Browse and filter</h3>
 
@@ -604,13 +674,15 @@ a:hover { text-decoration: underline; }
 
 <table>
 <tr><th>Screen</th><th>Buttons</th><th>Where results appear</th></tr>
-<tr><td><strong>JSON → Explore</strong></td><td><strong>Generate AI Summary</strong>, <strong>Explain with AI</strong></td><td>Summary/Flows area and <strong>AI output</strong></td></tr>
-<tr><td><strong>PCAP</strong></td><td><strong>AI Summary</strong></td><td><strong>AI Summary</strong> tab and <strong>AI output</strong></td></tr>
+<tr><td><strong>JSON → Explore</strong></td><td><strong>Generate AI Summary</strong>, <strong>Explain with AI</strong></td><td>Investigation snapshot context and <strong>AI output</strong></td></tr>
+<tr><td><strong>PCAP</strong></td><td><strong>AI Summary</strong></td><td><strong>AI output</strong> (no separate PCAP AI tab)</td></tr>
 <tr><td><strong>Findings</strong></td><td><strong>Explain with AI</strong></td><td><strong>AI output</strong></td></tr>
 <tr><td><strong>Profile</strong></td><td><strong>AI Profile Summary</strong></td><td><strong>AI output</strong></td></tr>
 </table>
 
-<p><strong>Add to Notes</strong> / <strong>Add AI to Notes</strong> copies the latest AI text into project notes (rich-text editor).</p>
+<p><strong>Add Summary to Notes</strong> copies the investigation snapshot (JSON or PCAP summary text) into project notes. On <strong>Findings</strong>, <strong>Add Finding to Notes</strong> copies selected finding rows (multi-select with Ctrl+click).</p>
+
+<p><strong>Add to Notes</strong> / legacy AI copy actions may still appear in some PCAP areas; prefer <strong>Add Summary to Notes</strong> for the structured snapshot.</p>
 
 <p>While a request runs, the UI shows a progress message. Large JSON periods or PCAP captures can take several minutes — the <strong>Timeout</strong> in Settings controls the maximum wait.</p>
 
@@ -678,11 +750,13 @@ a:hover { text-decoration: underline; }
 
 <ul>
 <li><strong>AI Profile Summary</strong>, <strong>Add to Notes</strong>, <strong>Export Profile</strong> (HTML)</li>
-<li><strong>Evidence Overview</strong> metrics</li>
-<li><strong>Profile Summary</strong> and <strong>Activity rhythm</strong></li>
-<li>Charts: evidence sources, device IPs, event types, behaviour insights</li>
+<li><strong>Evidence Overview</strong> metrics and period coverage</li>
+<li><strong>Profile Summary</strong> and <strong>Activity rhythm</strong> (when traffic tends to occur)</li>
+<li>Charts: evidence sources, device IPs, behaviour insights, <strong>Activity by hour</strong> (with <strong>Expand table</strong> for hour / flows / volume)</li>
 <li><strong>Repository hits</strong> banner when internal repository matches exist</li>
 </ul>
+
+<p>The older standalone <strong>Activity event types</strong> chart has been removed; event history is available from <strong>Recent activity</strong> on the Projects page.</p>
 
 <p>Activity patterns are indicators only — they do not prove who used a device or whether a person was awake or asleep.</p>
 
@@ -718,7 +792,7 @@ a:hover { text-decoration: underline; }
 <table>
 <tr><th>Area</th><th>Formats</th><th>How</th></tr>
 <tr><td>Listing</td><td>CSV, Excel, HTML</td><td><strong>Export</strong></td></tr>
-<tr><td>Explore Flows</td><td>CSV, Excel, HTML</td><td><strong>Export table</strong></td></tr>
+<tr><td>Explore Flows</td><td>CSV, Excel, HTML</td><td><strong>Export table</strong> (visible rows; warning if filtered)</td></tr>
 <tr><td>Registry</td><td>HTML</td><td><strong>Export HTML report</strong></td></tr>
 <tr><td>Registry dataset</td><td>CSV, Excel, HTML</td><td><strong>Open dataset table</strong></td></tr>
 <tr><td>PCAP</td><td>HTML</td><td><strong>Export Summary</strong></td></tr>
@@ -750,6 +824,7 @@ a:hover { text-decoration: underline; }
 <ul>
 <li>No decryption of HTTPS, QUIC, or app-layer encryption</li>
 <li>Metadata ≠ message content</li>
+<li>PCAP <strong>Communications</strong> indicators (including call/media labels) are metadata heuristics only</li>
 <li>Device activity ≠ proof a specific person used the device</li>
 <li>Do not treat AI text as evidence</li>
 <li>Use <strong>Findings</strong> for key items; <strong>Notes</strong> for your reasoning</li>
@@ -823,10 +898,14 @@ a:hover { text-decoration: underline; }
 <table>
 <tr><th>Term</th><th>Meaning</th></tr>
 <tr><td><strong>Activity Profile</strong></td><td>Cross-evidence summary for the active project — JSON days, PCAP volume, findings, notes, and behaviour charts on the <strong>Profile</strong> page.</td></tr>
-<tr><td><strong>Finding</strong></td><td>Investigator-marked important flow or item, saved to the project with title, notes, and optional AI explanation.</td></tr>
+<tr><td><strong>Calendar day</strong></td><td>A full 24-hour period from <code>00:00:00</code> to <code>23:59:59</code> on the selected date. Day mode filters and displays traffic by flow timestamps, not only by source file name.</td></tr>
+<tr><td><strong>Finding</strong></td><td>Investigator-marked important flow, communication indicator, or item, saved to the project with title, notes, and optional AI explanation.</td></tr>
 <tr><td><strong>Flow</strong></td><td>One communication record between source and destination (IPs, ports, protocol, application, timing, volume). Core unit in <strong>JSON → Explore</strong> and Listing.</td></tr>
+<tr><td><strong>Investigation snapshot</strong></td><td>Structured summary block on JSON <strong>Summary</strong> (headline, findings, patterns, next steps) built from analyst metrics without exposing raw IPs in the narrative.</td></tr>
 <tr><td><strong>JSON dataset</strong></td><td>Indexed collection of flow JSON files for a project period (by calendar day). Distinct from a single PCAP capture.</td></tr>
+<tr><td><strong>Review lead</strong></td><td>A grouped communication indicator prioritised for manual review (call/media or stronger messaging signals).</td></tr>
 <tr><td><strong>Repository</strong></td><td>Local store of imported leak/breach datasets searched from <strong>OSINT → Repository</strong> (phones, emails, OIB, names, etc.).</td></tr>
+<tr><td><strong>Routine background</strong></td><td>Low-priority grouped traffic (push/sync, generic contacts) shown separately from review leads in PCAP Communications.</td></tr>
 <tr><td><strong>Workspace</strong></td><td>Per-project folder under the parent you choose at creation; holds <code>datasets/</code>, <code>exports/</code>, <code>findings/</code>, <code>notes/</code>, and <code>reports/</code>.</td></tr>
 </table>
 

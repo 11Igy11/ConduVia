@@ -15,6 +15,9 @@ class ImportProgressMixin:
         self._import_folder_path = ""
         self._import_json_note = ""
         self._import_pcap_note = ""
+        self._import_cancel_requested = False
+        self._import_session_registered = False
+        self._import_session_paths: list[str] = []
 
     def import_session_active(self) -> bool:
         return bool(getattr(self, "_import_session_active", False))
@@ -28,6 +31,9 @@ class ImportProgressMixin:
         self._import_folder_path = str(folder or "")
         self._import_json_note = ""
         self._import_pcap_note = ""
+        self._import_cancel_requested = False
+        self._import_session_registered = False
+        self._import_session_paths = []
         self._import_phase = "Preparing imported evidence..."
         self._import_detail = ""
         self._import_current = 0
@@ -119,11 +125,75 @@ class ImportProgressMixin:
     def toggle_import_pause(self) -> None:
         if not self.import_session_active():
             return
+        if self._import_pause_gate.is_aborted():
+            return
         if self._import_pause_gate.is_paused():
             self._import_pause_gate.resume()
         else:
             self._import_pause_gate.pause()
         self._refresh_import_progress_dialog()
+
+    def cancel_import_session(self) -> None:
+        if not self.import_session_active():
+            return
+        if not self.app._confirm_dialog(
+            title="Cancel import",
+            message="Stop the import and remove evidence indexed in this session?",
+            details=(
+                "Files registered from this folder import will be removed from the project "
+                "(ingest index, dataset registration, and PCAP summaries for those files)."
+            ),
+            ok_text="Cancel import",
+            cancel_text="Keep importing",
+            width=560,
+        ):
+            return
+
+        self._import_cancel_requested = True
+        self._import_pause_gate.abort()
+        self._stop_import_workers()
+
+        project_id = getattr(self.app, "current_project_id", None)
+        folder = str(getattr(self, "_import_folder_path", "") or "")
+        if project_id is not None and self._import_session_registered and folder:
+            from core.db import rollback_project_import
+
+            rollback_project_import(
+                int(project_id),
+                folder,
+                file_paths=list(self._import_session_paths),
+            )
+            if hasattr(self, "_invalidate_ingest_day_groups_cache"):
+                self._invalidate_ingest_day_groups_cache()
+            if hasattr(self.app, "projects_ui_controller"):
+                self.app.projects_ui_controller.refresh_recent_datasets(project_id)
+                self.app.projects_ui_controller.refresh_case_dashboard()
+            if hasattr(self.app, "refresh_activity_profile_ui"):
+                self.app.refresh_activity_profile_ui()
+
+        self._import_plan = None
+        if hasattr(self, "_reset_import_finalize_state"):
+            self._reset_import_finalize_state()
+        if hasattr(self, "reset_dataset_views"):
+            self.reset_dataset_views(preserve_import_session=False)
+        else:
+            self.end_import_session()
+        self.app._message_dialog("Import evidence", "Import was cancelled.", width=420)
+
+    def _stop_import_workers(self) -> None:
+        if hasattr(self, "shutdown_background_tasks"):
+            self.shutdown_background_tasks()
+        pcap_page = getattr(self.app, "pcap_page", None)
+        if pcap_page is None:
+            return
+        batch_runner = getattr(pcap_page, "_batch_runner", None)
+        if batch_runner is not None and batch_runner.is_running():
+            batch_runner.stop()
+        from ui.thread_utils import stop_qthread
+
+        stop_qthread(getattr(pcap_page, "_thread", None))
+        pcap_page._thread = None
+        pcap_page._worker = None
 
     def hide_import_progress_dialog(self) -> None:
         if self._import_progress_dialog is not None:
@@ -150,6 +220,7 @@ class ImportProgressMixin:
         dialog = ImportProgressDialog(self.app)
         dialog.hide_requested.connect(self.hide_import_progress_dialog)
         dialog.pause_toggled.connect(self.toggle_import_pause)
+        dialog.cancel_requested.connect(self.cancel_import_session)
         self._import_progress_dialog = dialog
         if not self._import_progress_hidden:
             dialog.show()

@@ -41,8 +41,14 @@ from core.formatters import format_pcap_datetime, human_bytes
 from core.service_classification import (
     classify_communication_service,
     classify_pcap_investigator_service,
+    communication_indicator_family,
 )
 from core.limit_notices import pcap_flow_cap_notice
+from core.summary_heuristics import (
+    communication_lead_line,
+    format_activity_window,
+    pcap_peak_hour_label,
+)
 
 
 PCAPNG_MAGIC = b"\x0a\x0d\x0d\x0a"
@@ -964,7 +970,7 @@ def build_communication_rows(flows: list[dict[str, Any]], *, limit: int = MAX_CO
         if not service:
             continue
         activity_type, confidence, evidence = _communication_activity(flow, service)
-        rows.append({
+        row = {
             "service": service,
             "activity_type": activity_type,
             "confidence": confidence,
@@ -978,18 +984,90 @@ def build_communication_rows(flows: list[dict[str, Any]], *, limit: int = MAX_CO
             "duration_ms": int(flow.get("bidirectional_duration_ms") or 0),
             "first_seen": flow.get("bidirectional_first_seen_ms") or "",
             "last_seen": flow.get("bidirectional_last_seen_ms") or "",
-        })
+        }
+        from core.service_classification import (
+            communication_indicator_category,
+            communication_indicator_family,
+            communication_indicator_rank_score,
+            communication_tier_sort_key,
+        )
 
-    confidence_rank = {"high": 0, "medium": 1, "low": 2}
+        row["category"] = communication_indicator_category(service, activity_type)
+        row["family"] = communication_indicator_family(activity_type)
+        row["rank_score"] = communication_indicator_rank_score(row)
+        if row["category"] == "social":
+            if int(row["bytes"] or 0) < 25_000 and int(row["packets"] or 0) < 20:
+                continue
+        rows.append(row)
+
+    rows = _aggregate_communication_rows(rows)
     rows.sort(
         key=lambda row: (
-            confidence_rank.get(str(row.get("confidence")), 9),
-            -int(row.get("duration_ms") or 0),
-            -int(row.get("bytes") or 0),
+            communication_tier_sort_key(str(row.get("tier") or "")),
+            -int(row.get("rank_score") or 0),
             str(row.get("service") or ""),
         )
     )
     return rows[:output_limit] if output_limit > 0 else rows
+
+
+def _aggregate_communication_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    from core.service_classification import (
+        communication_activity_label,
+        communication_indicator_family,
+        communication_indicator_rank_score,
+        communication_indicator_tier,
+        communication_type_label,
+    )
+
+    if not rows:
+        return []
+
+    confidence_rank = {"high": 3, "medium": 2, "low": 1}
+    groups: dict[tuple[str, str, str], dict[str, Any]] = {}
+
+    for row in rows:
+        host_key = str(row.get("host") or "").strip().casefold() or "(no host signal)"
+        key = (
+            str(row.get("service") or ""),
+            str(row.get("activity_type") or ""),
+            host_key,
+        )
+        if key not in groups:
+            groups[key] = dict(row)
+            groups[key]["sessions"] = 1
+            continue
+
+        agg = groups[key]
+        agg["sessions"] = int(agg.get("sessions") or 0) + 1
+        agg["bytes"] = int(agg.get("bytes") or 0) + int(row.get("bytes") or 0)
+        agg["packets"] = int(agg.get("packets") or 0) + int(row.get("packets") or 0)
+        agg["duration_ms"] = max(int(agg.get("duration_ms") or 0), int(row.get("duration_ms") or 0))
+        agg["first_seen"] = _min_time_text(agg.get("first_seen"), row.get("first_seen"))
+        agg["last_seen"] = _max_time_text(agg.get("last_seen"), row.get("last_seen"))
+        row_conf = confidence_rank.get(str(row.get("confidence") or "").casefold(), 0)
+        agg_conf = confidence_rank.get(str(agg.get("confidence") or "").casefold(), 0)
+        if row_conf > agg_conf:
+            agg["confidence"] = row.get("confidence")
+        if int(row.get("rank_score") or 0) > int(agg.get("rank_score") or 0):
+            agg["evidence"] = row.get("evidence")
+
+    aggregated: list[dict[str, Any]] = []
+    for agg in groups.values():
+        sessions = int(agg.get("sessions") or 1)
+        activity_type = str(agg.get("activity_type") or "")
+        family = str(agg.get("family") or communication_indicator_family(activity_type))
+        agg["family"] = family
+        agg["activity_label"] = communication_activity_label(activity_type)
+        agg["type"] = communication_type_label(family)
+        agg["tier"] = communication_indicator_tier(agg)
+        agg["rank_score"] = communication_indicator_rank_score(agg) + sessions * 5_000
+        if sessions > 1:
+            evidence = str(agg.get("evidence") or "").strip()
+            suffix = f"Aggregated from {sessions:,} flows."
+            agg["evidence"] = f"{evidence} {suffix}".strip() if evidence else suffix
+        aggregated.append(agg)
+    return aggregated
 
 
 def build_investigator_view(summary: PcapSummary) -> dict[str, Any]:
@@ -1053,25 +1131,42 @@ def _communication_activity(flow: dict[str, Any], service: str) -> tuple[str, st
     if proto == 17 and (3478 in ports or 5349 in ports) and packets >= 20:
         reasons.append("STUN/TURN/WebRTC-style relay port")
         confidence = "high" if duration_ms >= 20_000 and packets >= 80 else "medium"
-        return "Possible call/media signaling", confidence, "; ".join(reasons)
+        return "Possible call/media relay", confidence, "; ".join(reasons)
+
+    if (
+        service in {"WhatsApp", "Signal", "Telegram", "Viber", "Microsoft / Teams"}
+        and proto == 17
+        and duration_ms >= 15_000
+        and packets >= 60
+    ):
+        reasons.append("messaging/calling app with sustained UDP session")
+        confidence = "high" if bytes_count >= 750_000 or duration_ms >= 60_000 else "medium"
+        return "Possible app call/media session", confidence, "; ".join(reasons)
 
     if proto == 17 and duration_ms >= 30_000 and packets >= 120 and bytes_count >= 250_000:
         reasons.append("sustained UDP media-like stream")
         confidence = "high" if bytes_count >= 2_000_000 and duration_ms >= 60_000 else "medium"
-        return "Possible voice/video media session", confidence, "; ".join(reasons)
+        return "Possible voice/video session", confidence, "; ".join(reasons)
 
     if proto == 17 and 443 in ports and duration_ms >= 20_000 and bytes_count >= 500_000:
         reasons.append("sustained QUIC/UDP 443 traffic")
-        return "Possible app media or heavy encrypted session", "medium", "; ".join(reasons)
+        if service in {"WhatsApp", "Telegram", "Signal", "Viber", "Facebook / Meta", "Microsoft / Teams"}:
+            return "Possible encrypted call/media session", "medium", "; ".join(reasons)
+        return "Possible heavy encrypted app session", "medium", "; ".join(reasons)
 
     if _is_push_host(host_l) or 5222 in ports or "applepush" in app.lower():
         reasons.append("known push/messaging transport signal")
         confidence = "medium" if service in {"Apple / iCloud", "Facebook / Meta", "Google / YouTube"} else "low"
-        return "Push/background messaging transport", confidence, "; ".join(reasons)
+        return "Push/notification transport", confidence, "; ".join(reasons)
+
+    if service in {"WhatsApp", "Signal", "Telegram", "Viber"} and proto == 6 and packets >= 25:
+        reasons.append("known messaging service over sustained TCP session")
+        confidence = "medium" if duration_ms >= 15_000 else "low"
+        return "Possible messaging/chat transport", confidence, "; ".join(reasons)
 
     if service == "Apple / iCloud" and any(token in host_l for token in ("gateway.icloud", "mask-api", "courier", "push")):
         reasons.append("Apple cloud/push infrastructure visible in metadata")
-        return "Possible iCloud / device sync or push transport", "medium", "; ".join(reasons)
+        return "Possible iCloud sync or push transport", "medium", "; ".join(reasons)
 
     if _is_messaging_endpoint(host_l, service):
         reasons.append("messaging endpoint name visible in metadata")
@@ -1083,7 +1178,7 @@ def _communication_activity(flow: dict[str, Any], service: str) -> tuple[str, st
             "Signal",
             "Apple / iCloud",
         } else "low"
-        return "Possible messaging endpoint", confidence, "; ".join(reasons)
+        return "Possible messaging/chat endpoint", confidence, "; ".join(reasons)
 
     if duration_ms >= 120_000 and bytes_count <= 120_000:
         reasons.append("long-lived low-volume encrypted connection")
@@ -1130,12 +1225,16 @@ def _is_messaging_endpoint(host: str, service: str) -> bool:
 
 
 def _communication_summary_text(summary: PcapSummary) -> str:
-    rows = list(summary.communication_rows or [])
+    rows = [row for row in (summary.communication_rows or []) if str(row.get("category") or "communications") != "social"]
     if not rows:
         return "No communication indicators were classified in this view."
+
+    review_rows = [row for row in rows if str(row.get("tier") or "") == "review"]
+    visible_rows = [row for row in rows if str(row.get("tier") or "") != "routine"]
+    routine_flows = sum(int(row.get("sessions") or 0) for row in rows if str(row.get("tier") or "") == "routine")
     services: list[str] = []
     seen: set[str] = set()
-    for row in rows:
+    for row in visible_rows or rows:
         service = str(row.get("service") or "").strip()
         if service and service not in seen:
             seen.add(service)
@@ -1143,9 +1242,22 @@ def _communication_summary_text(summary: PcapSummary) -> str:
         if len(services) >= 5:
             break
     service_text = ", ".join(services) if services else "mixed services"
-    return (
-        f"{len(rows):,} communication indicators were identified, mainly involving {service_text}."
+    lead_count = len(review_rows) or len(visible_rows)
+    text = (
+        f"{lead_count:,} review-worthy communication indicators across {service_text}"
     )
+    if routine_flows:
+        text += f"; {routine_flows:,} routine background flows grouped separately"
+    text += "."
+    return text
+
+
+def _communication_family_breakdown(rows: list[dict[str, Any]]) -> dict[str, int]:
+    counts = {"call_media": 0, "messaging": 0, "background": 0, "content": 0, "other": 0}
+    for row in rows:
+        family = communication_indicator_family(str(row.get("activity_type") or ""))
+        counts[family] = counts.get(family, 0) + int(row.get("sessions") or 1)
+    return counts
 
 
 def _plain_summary(
@@ -1153,33 +1265,85 @@ def _plain_summary(
     service_rows: list[dict[str, Any]],
     visibility_rows: list[dict[str, Any]],
 ) -> str:
-    duration = _duration_words(summary.duration_seconds)
     source_count = len(getattr(summary, "source_paths", None) or []) or 1
     scope = f"{source_count:,} PCAP files" if source_count > 1 else "one PCAP file"
-    comm_text = _communication_summary_text(summary)
+    comm_rows = list(summary.communication_rows or [])
+    comm_only = [row for row in comm_rows if str(row.get("category") or "communications") != "social"]
+    social_rows = [row for row in comm_rows if str(row.get("category") or "") == "social"]
+    review_rows = [row for row in comm_only if str(row.get("tier") or "") == "review"]
+    routine_flows = sum(int(row.get("sessions") or 0) for row in comm_only if str(row.get("tier") or "") == "routine")
+    family_counts = _communication_family_breakdown(comm_only)
+
+    peak_label, peak_share = pcap_peak_hour_label(list(summary.hourly_activity or []))
+    activity_window = format_activity_window(summary.first_seen, summary.last_seen)
     top_services = ", ".join(row["service"] for row in service_rows[:5]) or "no dominant service groups"
+
+    parts = [
+        f"This capture spans {scope} with {summary.packet_count:,} packets and "
+        f"{human_bytes(summary.wire_bytes, precision=2)} of volume.",
+    ]
+    if peak_label:
+        peak_text = f"Peak activity clusters around {peak_label}"
+        if peak_share >= 8:
+            peak_text += f" ({peak_share:.1f}% of timed packets)"
+        parts.append(peak_text + ".")
+    if activity_window:
+        parts.append(f"Traffic was observed between {activity_window}.")
+
+    lead_source = review_rows or [row for row in comm_only if str(row.get("tier") or "") != "routine"]
+    if lead_source:
+        parts.append(
+            "Priority review leads: "
+            + " ".join(communication_lead_line(row) for row in lead_source[:2])
+        )
+    elif comm_only:
+        parts.append(_communication_summary_text(summary))
+    else:
+        parts.append("No strong communication leads were classified in this view.")
+
+    if social_rows:
+        top_social = social_rows[0]
+        label = top_social.get("activity_label") or top_social.get("activity_type")
+        parts.append(
+            f"Social/content usage includes {top_social.get('service')} ({label}, "
+            f"{human_bytes(int(top_social.get('bytes') or 0), precision=2)})."
+        )
+    if routine_flows:
+        parts.append(f"{routine_flows:,} routine background flows are grouped below review leads.")
+
+    signal_parts: list[str] = []
+    if family_counts["call_media"]:
+        signal_parts.append(f"{family_counts['call_media']:,} call/media-like flows")
+    if family_counts["messaging"]:
+        signal_parts.append(f"{family_counts['messaging']:,} messaging/push-like flows")
+    if family_counts["background"]:
+        signal_parts.append(f"{family_counts['background']:,} background/sync flows")
+    if signal_parts:
+        parts.append("Signal mix: " + ", ".join(signal_parts) + ".")
+
+    parts.append(f"Visible metadata groups include {top_services}.")
+
     encrypted = next((row for row in visibility_rows if row["label"].startswith("Encrypted")), None)
-    encrypted_text = ""
     if encrypted and encrypted.get("count"):
-        encrypted_text = (
-            f" Most sessions look encrypted or metadata-only "
+        parts.append(
+            f"Most sessions look encrypted or metadata-only "
             f"({encrypted['count']:,} packets on common encrypted service ports)."
         )
 
-    credential_text = "No plaintext credentials were observed in readable samples."
     if any("credential" in str(sample.get("type", "")).lower() for sample in summary.readable_samples):
-        credential_text = "Potential credential-like plaintext was observed and should be reviewed carefully."
+        parts.append("Potential credential-like plaintext was observed and should be reviewed carefully.")
+    else:
+        parts.append("No plaintext credentials were observed in readable samples.")
 
-    return (
-        f"This view covers {duration} across {scope}. "
-        f"{comm_text} "
-        f"Visible metadata groups include {top_services}.{encrypted_text} "
-        f"{credential_text} "
-        f"Open Communications for classified activity and Evidence for DNS, TLS hosts and payloads."
+    parts.append(
+        "Use Communications for grouped call/message/push leads, then Evidence for DNS, TLS hosts and payloads."
     )
+    return " ".join(parts)
 
 
 def _key_points(summary: PcapSummary, service_rows: list[dict[str, Any]]) -> list[str]:
+    peak_label, peak_share = pcap_peak_hour_label(list(summary.hourly_activity or []))
+    activity_window = format_activity_window(summary.first_seen, summary.last_seen)
     points = [
         f"Capture window: {_fmt_pcap_dt(summary.first_seen)} to {_fmt_pcap_dt(summary.last_seen)}",
         f"Packets: {summary.packet_count:,}; volume: {human_bytes(summary.wire_bytes, precision=2)}",
@@ -1187,9 +1351,32 @@ def _key_points(summary: PcapSummary, service_rows: list[dict[str, Any]]) -> lis
         f"TLS SNI hosts: {_visible_count(summary.total_tls_sni_hosts, len(summary.tls_sni))}; "
         f"HTTP hosts: {_visible_count(summary.total_http_hosts, len(summary.http_hosts))}",
     ]
-    comm_count = len(summary.communication_rows or [])
-    if comm_count:
-        points.append(f"Communication indicators: {comm_count:,}")
+    if peak_label:
+        points.append(f"Peak hour bucket: {peak_label} ({peak_share:.1f}% of timed packets)")
+    if activity_window:
+        points.append(f"Observed traffic: {activity_window}")
+
+    comm_rows = list(summary.communication_rows or [])
+    if comm_rows:
+        comm_only = [row for row in comm_rows if str(row.get("category") or "communications") != "social"]
+        review_rows = [row for row in comm_only if str(row.get("tier") or "") == "review"]
+        routine_flows = sum(int(row.get("sessions") or 0) for row in comm_only if str(row.get("tier") or "") == "routine")
+        points.append(f"Review leads: {len(review_rows) or len(comm_only):,}")
+        if routine_flows:
+            points.append(f"Routine background flows grouped: {routine_flows:,}")
+        lead_source = review_rows or comm_only
+        if lead_source:
+            points.append("Top lead: " + communication_lead_line(lead_source[0]))
+        family_counts = _communication_family_breakdown(comm_only)
+        mix = []
+        if family_counts["call_media"]:
+            mix.append(f"{family_counts['call_media']:,} call/media")
+        if family_counts["messaging"]:
+            mix.append(f"{family_counts['messaging']:,} messaging/push")
+        if family_counts["background"]:
+            mix.append(f"{family_counts['background']:,} sync/background")
+        if mix:
+            points.append("Communication mix: " + ", ".join(mix))
     if service_rows:
         points.append("Top service groups: " + ", ".join(row["service"] for row in service_rows[:5]))
     return points

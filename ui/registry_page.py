@@ -14,7 +14,7 @@ from core.workspace import workspace_export_path
 from PySide6.QtCore import Qt, Signal, QModelIndex
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QLineEdit,
-    QTableView, QFileDialog, QMessageBox, QFrame, QGridLayout, QTabWidget,
+    QTableView, QFileDialog, QMessageBox, QFrame, QGridLayout,
     QDialog, QHeaderView,
     QSizePolicy, QCheckBox, QScrollArea, QProgressBar, QApplication
 )
@@ -23,6 +23,7 @@ from core.flow_stats import build_daily_activity_rows
 from core.parser import extract_dataset_meta, build_registry_columns, compute_registry_summary
 from core.analyst import compute_analyst_summary
 from ui.explore_widgets import CopyableTableView
+from ui.tab_widgets import make_tab_widget
 from ui.project_rows_dialog import open_project_rows_dialog
 from ui.registry_models import PairsModel, RegistryTableModel, TextFilterProxy
 from ui.registry_widgets import (
@@ -380,7 +381,7 @@ class RegistryPage(QWidget):
         actions_widget.setLayout(actions)
 
         # ---------------- Main Tabs ----------------
-        self.main_tabs = QTabWidget()
+        self.main_tabs = make_tab_widget()
         self.main_tabs.setDocumentMode(True)
         self.main_tabs.setCornerWidget(actions_widget, Qt.TopRightCorner)
 
@@ -582,11 +583,11 @@ class RegistryPage(QWidget):
         ]
         self._tab_defs = [tab for _group, tabs in self._insight_groups for tab in tabs]
 
-        self.ins_group_tabs = QTabWidget()
+        self.ins_group_tabs = make_tab_widget()
         self.ins_group_tabs.setDocumentMode(True)
-        self.ins_tabs_by_group: list[QTabWidget] = []
+        self.ins_tabs_by_group: list = []
         for group_name, tabs in self._insight_groups:
-            inner = QTabWidget()
+            inner = make_tab_widget()
             inner.setDocumentMode(True)
             for title, _key, _hdrs in tabs:
                 inner.addTab(QWidget(), title)

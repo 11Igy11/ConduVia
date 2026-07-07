@@ -32,6 +32,7 @@ class ImportProgressView:
 class ImportProgressDialog(QDialog):
     hide_requested = Signal()
     pause_toggled = Signal()
+    cancel_requested = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -80,11 +81,15 @@ class ImportProgressDialog(QDialog):
 
         footer = QHBoxLayout()
         footer.addStretch(1)
+        self.btn_cancel = make_dialog_button("Cancel import")
         self.btn_pause = make_dialog_button("Pause")
         self.btn_hide = make_dialog_button("Hide")
+        footer.addWidget(self.btn_cancel)
         footer.addWidget(self.btn_pause)
         footer.addWidget(self.btn_hide)
         root.addLayout(footer)
+
+        self.btn_cancel.clicked.connect(self.cancel_requested.emit)
 
         self.btn_hide.clicked.connect(self.hide_requested.emit)
         self.btn_pause.clicked.connect(self.pause_toggled.emit)

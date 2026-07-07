@@ -68,20 +68,18 @@ class PcapInvestigatorMixin:
         preview = PROFILE_CHART_PREVIEW_ROWS
         service_total = len(service_rows)
         activity_total = len(activity_rows)
-        self.btn_expand_chart_services.setEnabled(embedded_expand_available(service_total))
-        self.btn_expand_chart_activity.setEnabled(embedded_expand_available(activity_total))
-        if embedded_expand_available(service_total):
-            self.btn_expand_chart_services.setToolTip(
-                embedded_expand_tooltip(service_total, preview_rows=preview)
-            )
-        else:
-            self.btn_expand_chart_services.setToolTip("")
-        if embedded_expand_available(activity_total):
-            self.btn_expand_chart_activity.setToolTip(
-                embedded_expand_tooltip(activity_total, preview_rows=preview)
-            )
-        else:
-            self.btn_expand_chart_activity.setToolTip("")
+        self.chart_services.set_expand_enabled(
+            embedded_expand_available(service_total),
+            tooltip=embedded_expand_tooltip(service_total, preview_rows=preview)
+            if embedded_expand_available(service_total)
+            else "",
+        )
+        self.chart_activity.set_expand_enabled(
+            embedded_expand_available(activity_total),
+            tooltip=embedded_expand_tooltip(activity_total, preview_rows=preview)
+            if embedded_expand_available(activity_total)
+            else "",
+        )
         self._schedule_investigator_layout_refresh()
 
     def _refresh_investigator_layout(self) -> None:
@@ -358,32 +356,73 @@ class PcapInvestigatorMixin:
         )
 
     def _set_highlights(self, summary: PcapSummary) -> None:
-        rows = summary.communication_rows or []
-        media_like = sum(1 for row in rows if "media" in str(row.get("activity_type") or "").lower() or "call" in str(row.get("activity_type") or "").lower())
-        messaging_like = sum(1 for row in rows if "messaging" in str(row.get("activity_type") or "").lower() or "push" in str(row.get("activity_type") or "").lower())
-        services = []
-        seen = set()
-        for row in rows:
+        from core.service_classification import communication_indicator_family
+
+        all_rows = list(summary.communication_rows or [])
+        comm_rows = [row for row in all_rows if str(row.get("category") or "communications") != "social"]
+        social_rows = [row for row in all_rows if str(row.get("category") or "") == "social"]
+        visible_rows = [row for row in comm_rows if str(row.get("tier") or "") != "routine"]
+        routine_rows = [row for row in comm_rows if str(row.get("tier") or "") == "routine"]
+        self._communication_rows_comm_all = comm_rows
+        self._communication_rows_comm = visible_rows or comm_rows
+        self._communication_rows_social = social_rows
+
+        review_count = sum(1 for row in comm_rows if str(row.get("tier") or "") == "review")
+        routine_flows = sum(int(row.get("sessions") or 0) for row in routine_rows)
+        media_flows = sum(
+            int(row.get("sessions") or 0)
+            for row in comm_rows
+            if communication_indicator_family(str(row.get("activity_type") or "")) == "call_media"
+        )
+        messaging_flows = sum(
+            int(row.get("sessions") or 0)
+            for row in comm_rows
+            if communication_indicator_family(str(row.get("activity_type") or "")) == "messaging"
+        )
+        services: list[str] = []
+        seen: set[str] = set()
+        for row in self._communication_rows_comm:
             service = str(row.get("service") or "").strip()
             if service and service not in seen:
                 seen.add(service)
                 services.append(service)
 
+        social_services: list[str] = []
+        social_seen: set[str] = set()
+        for row in social_rows:
+            service = str(row.get("service") or "").strip()
+            if service and service not in social_seen:
+                social_seen.add(service)
+                social_services.append(service)
+
         lines = [
-            f"Visible app/service indicators: {', '.join(services) if services else '-'}",
-            f"Messaging/push-like indicators: {messaging_like}",
-            f"Possible call/media indicators: {media_like}",
+            f"Review leads: {review_count:,} grouped indicators ({len(self._communication_rows_comm):,} shown; routine background hidden).",
+            f"Services in view: {', '.join(services) if services else '-'}",
+            f"Social/content: {', '.join(social_services) if social_services else '-'}",
+            f"Messaging/push flows: {messaging_flows:,} | Possible call/media flows: {media_flows:,}",
             "Classification is based on metadata such as host names, ports, protocol, duration and volume. It is an investigative indicator, not content proof.",
         ]
+        if routine_flows:
+            lines.insert(
+                1,
+                f"Routine background grouped: {len(routine_rows):,} rows covering {routine_flows:,} flows (open full table to see all).",
+            )
         self.lbl_highlights_brief.setText("\n".join(lines))
-        self.lbl_communication_count.setText(f"{len(rows):,} indicators")
+        self.lbl_communication_count.setText(f"{len(self._communication_rows_comm):,} indicators")
         self.lbl_communication_breakdown.setText(
-            f"Messaging/push: {messaging_like:,} | "
-            f"Possible call/media: {media_like:,} | "
-            f"Services: {len(services):,}"
+            f"Review leads: {review_count:,} | "
+            f"Messaging/push flows: {messaging_flows:,} | "
+            f"Call/media flows: {media_flows:,}"
+            + (f" | Routine hidden: {routine_flows:,}" if routine_flows else "")
         )
-        self._set_table(self.tbl_communications, rows)
-        if rows:
+        if hasattr(self, "lbl_social_count"):
+            self.lbl_social_count.setText(f"{len(social_rows):,} indicators")
+            top_social = ", ".join(social_services[:4]) if social_services else "-"
+            self.lbl_social_breakdown.setText(
+                f"Services: {len(social_services):,} | Top: {top_social}"
+            )
+        self._set_table(self.tbl_communications, self._communication_rows_comm)
+        if self._communication_rows_comm:
             self.tbl_communications.clearSelection()
         self.txt_communication_detail.clear()
         self._set_selected_communication_row(None)
@@ -409,10 +448,13 @@ class PcapInvestigatorMixin:
         self.txt_communication_detail.setPlainText(self._communication_detail_text(row))
 
     def _communication_detail_text(self, row: dict[str, Any]) -> str:
+        indicator = row.get("activity_label") or row.get("activity_type") or "-"
         lines = [
+            f"Type: {row.get('type') or '-'}",
             f"Service: {row.get('service') or '-'}",
-            f"Indicator: {row.get('activity_type') or '-'}",
+            f"Indicator: {indicator}",
             f"Confidence: {row.get('confidence') or '-'}",
+            f"Sessions: {row.get('sessions') or 1}",
             f"Host / signal: {row.get('host') or '-'}",
             f"Source: {row.get('source') or '-'}",
             f"Destination: {row.get('destination') or '-'}",
@@ -431,9 +473,18 @@ class PcapInvestigatorMixin:
         ]
         return "\n".join(lines)
 
-    def _open_communications_dialog(self) -> None:
-        model = self.tbl_communications.model()
-        rows = list(model.rows) if isinstance(model, DictTableModel) else []
+    def _open_communications_dialog(self, category: str = "communications") -> None:
+        if category == "social":
+            rows = list(getattr(self, "_communication_rows_social", []) or [])
+            title = "Social and content indicators"
+        else:
+            rows = list(getattr(self, "_communication_rows_comm_all", []) or [])
+            if not rows:
+                rows = list(getattr(self, "_communication_rows_comm", []) or [])
+            if not rows:
+                model = self.tbl_communications.model()
+                rows = list(model.rows) if isinstance(model, DictTableModel) else []
+            title = "Communication indicators"
 
         def _mark_row(row: dict[str, Any]) -> None:
             if self.app is not None and hasattr(self.app, "findings_controller"):
@@ -445,9 +496,10 @@ class PcapInvestigatorMixin:
             columns=self.communication_full_columns,
             fixed_widths=self.communication_full_fixed_widths,
             detail_text=self._communication_detail_text,
+            title=title,
             on_empty=self._info,
             append_export_footer=lambda footer, table: self._append_export_footer(
-                footer, title="Communication indicators", table=table
+                footer, title=title, table=table
             ),
             on_mark_finding=_mark_row if self.app is not None else None,
             on_selection_changed=self._set_selected_communication_row,

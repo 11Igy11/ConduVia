@@ -34,7 +34,7 @@ from PySide6.QtGui import QGuiApplication, QIcon
 from PySide6.QtWidgets import (
     QApplication, QWidget, QHBoxLayout, QVBoxLayout,
     QPushButton, QLabel, QStackedWidget,
-    QTextEdit, QTabWidget, QLineEdit,
+    QTextEdit, QLineEdit,
     QFrame
 )
 from core.db import (
@@ -43,6 +43,7 @@ from core.db import (
     get_app_settings,
 )
 from ui.app_helpers import normalize_ui_theme
+from ui.tab_widgets import make_tab_widget
 from ui.theme import apply_app_stylesheet, polish_combo_popups
 from ui.app_sidebar import build_sidebar, wire_navigation
 from ui.projects_page import build_projects_page
@@ -381,9 +382,10 @@ class App(QWidget):
         explore_actions_layout.setSpacing(6)
         explore_actions_layout.addWidget(self.btn_load)
         explore_actions_layout.addWidget(self.btn_ai_summary)
-        explore_actions_layout.addWidget(self.btn_add_ai_to_notes)
+        explore_actions_layout.addWidget(self.btn_add_summary_to_notes)
+        explore_actions_layout.addWidget(self.btn_add_finding_to_notes)
 
-        self.json_tabs = QTabWidget()
+        self.json_tabs = make_tab_widget()
         self.json_tabs.setObjectName("JsonWorkspaceTabs")
         self.json_tabs.setDocumentMode(True)
         self.json_tabs.setCornerWidget(explore_actions, Qt.TopRightCorner)

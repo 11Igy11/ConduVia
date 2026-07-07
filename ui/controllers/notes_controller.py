@@ -31,10 +31,10 @@ class NotesController:
             return
         set_project_notes(project_id, text or "")
 
-    def load_activity(self, project_id: int | None, limit: int = 200):
+    def load_activity(self, project_id: int | None, limit: int = 200, *, order: str = "asc"):
         if project_id is None:
             return []
-        return list_activity(project_id, limit=limit)
+        return list_activity(project_id, limit=limit, order=order)
 
     def refresh_ui(self, *, refresh_profile: bool = True) -> None:
         app = self.app
@@ -177,7 +177,7 @@ class NotesController:
                 app.projects_ui_controller._refresh_project_launcher_cards()
             return
 
-        rows = self.load_activity(project_id)
+        rows = self.load_activity(project_id, order="asc")
         for row in rows:
             ts = row["created_at"]
             et = row["event_type"]

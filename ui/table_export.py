@@ -8,7 +8,7 @@ from PySide6.QtWidgets import QFileDialog, QHBoxLayout, QTableView, QWidget
 from core.db import get_project
 from core.exporters.listing_exporter import export_listing_csv, export_listing_excel
 from core.exporters.table_exporter import export_table_html
-from core.protocols import format_ip_proto
+from core.formatters import format_export_cell
 from core.workspace import workspace_export_path
 from ui.dialogs import message_dialog
 from ui.export_menu import connect_table_export_dropdown, make_export_table_button
@@ -35,11 +35,19 @@ def table_export_data(table: QTableView) -> tuple[list[str], list[list[str]]]:
 def flows_to_export_rows(
     flows: list[dict[str, Any]],
     *,
-    columns: list[tuple[str, str]] | None = None,
+    columns: list[str] | list[tuple[str, str]] | None = None,
 ) -> tuple[list[str], list[list[str]]]:
-    from ui.explore_models import FlowTableModel
+    from ui.flow_columns import friendly_label
 
-    cols = columns or FlowTableModel.COLUMNS
+    if columns and columns and isinstance(columns[0], str):
+        cols = [(key, friendly_label(key)) for key in columns]
+    elif columns:
+        cols = list(columns)
+    else:
+        from ui.explore_models import FlowTableModel
+
+        cols = list(FlowTableModel.COLUMNS)
+
     headers = [title for _, title in cols]
     rows: list[list[str]] = []
     for flow in flows:
@@ -47,10 +55,7 @@ def flows_to_export_rows(
             continue
         row: list[str] = []
         for key, _ in cols:
-            val = flow.get(key, "")
-            if key == "protocol":
-                val = format_ip_proto(val)
-            row.append("" if val is None else str(val))
+            row.append(format_export_cell(key, flow.get(key, ""), flow=flow))
         rows.append(row)
     return headers, rows
 
@@ -213,9 +218,10 @@ def export_table_dialog(
     category: str = "json",
     source_label: str = "",
     flows_override: list[dict[str, Any]] | None = None,
+    flow_columns: list[str] | None = None,
 ) -> None:
     if flows_override is not None:
-        headers, rows = flows_to_export_rows(flows_override)
+        headers, rows = flows_to_export_rows(flows_override, columns=flow_columns)
     else:
         headers, rows = table_export_data(table)
     if not headers or not rows:

@@ -80,6 +80,12 @@ class PcapAnalysisMixin:
             self._start_auto_pcap_batch(paths, auto_save=auto_save)
             return
 
+        if grouped_day:
+            active_day = str(getattr(self, "_pcap_active_day", "") or "")
+            active_paths = self._active_pcap_period_paths(active_day) if active_day else []
+            if active_paths:
+                paths = active_paths
+
         self._pcap_queue = [] if grouped_day else paths[1:]
         self._pcap_queue_auto_save = bool(auto_save and not grouped_day)
         self._pcap_queue_auto_process = bool(auto_process)
@@ -114,6 +120,7 @@ class PcapAnalysisMixin:
         batch_day_groups = self._batch_analysis_day_groups()
         if not batch_day_groups and self._pcap_day_groups_raw:
             batch_day_groups = self._raw_daily_day_groups()
+        batch_periods = len(batch_day_groups) if batch_day_groups else 0
         if batch_day_groups:
             self._pcap_batch_total = sum(len(day_paths) for day_paths in batch_day_groups.values())
         elif self._pcap_day_groups:
@@ -134,11 +141,17 @@ class PcapAnalysisMixin:
         self.btn_add_notes.setEnabled(False)
         if hasattr(self, "btn_mark_finding"):
             self.btn_mark_finding.setEnabled(False)
-        batch_total = max(int(self._pcap_batch_total or 0), len(paths))
-        self.lbl_file.setText(self._active_period_title(file_count=batch_total))
-        self.lbl_stats.setText("Auto analyzing PCAP batch...")
+        if batch_periods > 1:
+            self.lbl_file.setText(f"Selected import window ({self._pcap_batch_total:,} PCAP files / {batch_periods:,} periods)")
+            self.lbl_stats.setText(
+                f"Auto analyzing {self._pcap_batch_total:,} PCAP files across {batch_periods:,} periods..."
+            )
+        else:
+            self.lbl_file.setText(self._active_period_title())
+            self.lbl_stats.setText("Auto analyzing PCAP batch...")
         self._set_stats_style("PcapLoadingStatus")
         self._update_batch_status()
+        batch_total = max(int(self._pcap_batch_total or 0), len(paths))
         self._show_period_load_progress(paths, label="Auto analyzing PCAP batch...", total=batch_total)
 
         controller = getattr(self.app, "dataset_controller", None) if self.app else None
@@ -199,9 +212,8 @@ class PcapAnalysisMixin:
             self.btn_export_metadata.setEnabled(False)
         if hasattr(self, "btn_reanalyze_period"):
             self.btn_reanalyze_period.setEnabled(False)
-        self.txt_pcap_ai_summary.clear()
         if active_day or len(paths) > 1:
-            current_text = label or self._active_period_title(file_count=len(paths))
+            current_text = label or self._active_period_title()
             self.lbl_file.setText(current_text)
         elif len(paths) == 1:
             current_text = label or Path(paths[0]).name
@@ -214,6 +226,10 @@ class PcapAnalysisMixin:
             if len(paths) == 1
             else f"Analyzing {len(paths):,} PCAP files for selected period..."
         )
+        if active_day and hasattr(self, "_calendar_day_source_note"):
+            source_note = self._calendar_day_source_note(len(paths), active_day)
+            if source_note:
+                self.lbl_stats.setText(source_note)
         self._set_stats_style("PcapLoadingStatus")
         self._update_batch_status(current_text)
         show_bar = len(paths) > 1 or self._pcap_period_granularity in {"month", "range"}
@@ -251,6 +267,17 @@ class PcapAnalysisMixin:
         self._update_batch_status()
 
     def _render_loaded_summary(self, summary: PcapSummary) -> None:
+        calendar_note = ""
+        day = str(self._pcap_active_day or "")
+        if self._pcap_period_granularity == "day" and day and day != "undated":
+            from core.period_calendar import refine_pcap_summary_for_calendar_day
+
+            bucket_paths = list(self._pcap_day_groups.get(day, []) or [])
+            summary, calendar_note = refine_pcap_summary_for_calendar_day(
+                summary,
+                day,
+                bucket_paths=bucket_paths,
+            )
         self.summary = summary
         self._saved_source_id = None
         self.btn_export.setEnabled(True)
@@ -276,8 +303,8 @@ class PcapAnalysisMixin:
         self.btn_add_notes.setEnabled(True)
         if hasattr(self, "btn_mark_finding"):
             self.btn_mark_finding.setEnabled(True)
-        if source_count > 1 or self._hide_individual_pcap_names(file_count=source_count):
-            self.lbl_file.setText(self._active_period_title(file_count=source_count))
+        if source_count > 1 or self._hide_individual_pcap_names():
+            self.lbl_file.setText(self._active_period_title())
         else:
             self.lbl_file.setText(summary.file_path or summary.file_name or "PCAP loaded")
         self._set_stats_style("HeaderStatLabel")
@@ -285,6 +312,7 @@ class PcapAnalysisMixin:
             f"{summary.format} | Packets: {summary.packet_count:,} | "
             f"Volume: {human_bytes(summary.wire_bytes, precision=2)} | "
             f"Period: {self._format_pcap_range(summary.first_seen, summary.last_seen)}"
+            + (f" | {calendar_note}" if calendar_note else "")
         )
         if self._pcap_queue:
             self.lbl_stats.setText(
@@ -539,9 +567,10 @@ class PcapAnalysisMixin:
 
         self.btn_ai_summary.setEnabled(False)
         self.btn_ai_summary.setText("Generating...")
-        self.txt_pcap_ai_summary.setPlainText("Generating PCAP AI summary...")
-        if hasattr(self, "ai_summary_tab"):
-            self.tabs.setCurrentWidget(self.ai_summary_tab)
+        if hasattr(self.app, "txt_ai_hub"):
+            self.app.txt_ai_hub.setPlainText("Generating PCAP AI summary...")
+        if hasattr(self.app, "go_to_ai"):
+            self.app.go_to_ai()
 
         project_name = getattr(self.app, "current_project_name", "") or ""
         period_label = self._format_day_label(self._pcap_active_day) if self._pcap_active_day else ""
@@ -561,22 +590,23 @@ class PcapAnalysisMixin:
         )
 
     def _on_ai_summary_finished(self, result: str):
-        self.txt_pcap_ai_summary.setPlainText(result)
         if hasattr(self.app, "publish_ai_output"):
             self.app.publish_ai_output("PCAP", "PCAP AI Summary", result)
-        project_id = getattr(self.app, "current_project_id", None) if self.app else None
-        if project_id is not None and (result or "").strip():
-            try:
-                add_activity(int(project_id), "ai_summary_generated", "PCAP summary")
-                if self.app and hasattr(self.app, "notes_controller"):
-                    self.app.notes_controller.refresh_activity_ui_for_project(int(project_id))
-            except Exception:
-                pass
+        else:
+            project_id = getattr(self.app, "current_project_id", None) if self.app else None
+            if project_id is not None and (result or "").strip():
+                try:
+                    add_activity(int(project_id), "ai_summary_generated", "PCAP summary")
+                    if self.app and hasattr(self.app, "notes_controller"):
+                        self.app.notes_controller.refresh_activity_ui_for_project(int(project_id))
+                except Exception:
+                    pass
         self.btn_ai_summary.setEnabled(True)
         self.btn_ai_summary.setText("AI Summary")
 
     def _on_ai_summary_error(self, message: str):
-        self.txt_pcap_ai_summary.setPlainText(f"AI error: {message}")
+        if hasattr(self.app, "txt_ai_hub"):
+            self.app.txt_ai_hub.setPlainText(f"AI error: {message}")
         self.btn_ai_summary.setEnabled(True)
         self.btn_ai_summary.setText("AI Summary")
 

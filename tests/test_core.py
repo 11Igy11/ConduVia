@@ -1814,9 +1814,9 @@ class PcapAnalyzerTests(unittest.TestCase):
         rows = build_communication_rows(flows)
 
         self.assertEqual(rows[0]["service"], "WhatsApp")
-        self.assertEqual(rows[0]["activity_type"], "Possible voice/video media session")
-        self.assertEqual(rows[0]["confidence"], "medium")
-        self.assertTrue(any(row["activity_type"] == "Push/background messaging transport" for row in rows))
+        self.assertEqual(rows[0]["activity_type"], "Possible app call/media session")
+        self.assertEqual(rows[0]["confidence"], "high")
+        self.assertTrue(any("Push channel" in str(row.get("activity_label") or "") for row in rows))
 
     def test_merge_pcap_summaries_uses_full_dns_counters_not_top_rows_only(self):
         first_counts = {f"host{i}.example": i + 1 for i in range(60)}
@@ -1886,10 +1886,11 @@ class PcapAnalyzerTests(unittest.TestCase):
         self.assertIn(
             rows[0]["activity_type"],
             {
-                "Push/background messaging transport",
-                "Possible iCloud / device sync or push transport",
+                "Push/notification transport",
+                "Possible iCloud sync or push transport",
             },
         )
+        self.assertEqual(rows[0]["tier"], "routine")
 
     def test_analyze_pcap_extracts_dns_http_and_flows(self):
         with temporary_directory() as tmp:

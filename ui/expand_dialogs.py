@@ -44,6 +44,19 @@ def expand_dialog_size(preferred_width: int, preferred_height: int) -> tuple[int
     return width, height
 
 
+def center_dialog_on_parent(dlg: QDialog, parent: QWidget | None = None) -> None:
+    host = parent.window() if parent is not None else dlg.parentWidget()
+    screen = host.screen() if host is not None else None
+    if screen is None:
+        screen = QApplication.primaryScreen()
+    if screen is None:
+        return
+    available = screen.availableGeometry()
+    frame = dlg.frameGeometry()
+    frame.moveCenter(available.center())
+    dlg.move(frame.topLeft())
+
+
 def expanded_column_width(column: tuple[str, str], current_width: int) -> int:
     key, title = column
     name = f"{key} {title}".lower()
@@ -131,6 +144,7 @@ def open_missing_period_days_dialog(
     dlg = QDialog(parent)
     dlg.setWindowTitle(title)
     dlg.resize(720, 560)
+    center_dialog_on_parent(dlg, parent)
     layout = QVBoxLayout(dlg)
     layout.setContentsMargins(14, 14, 14, 28)
     hint = QLabel(
@@ -178,6 +192,7 @@ def open_dict_table_expand_dialog(
     dlg = QDialog(parent)
     dlg.setWindowTitle(title)
     dlg.resize(*expand_dialog_size(1180, 720))
+    center_dialog_on_parent(dlg, parent)
 
     layout = QVBoxLayout(dlg)
     layout.setContentsMargins(14, 14, 14, 28)
@@ -234,6 +249,7 @@ def open_dict_rows_expand_dialog(
     dlg = QDialog(parent)
     dlg.setWindowTitle(title)
     dlg.resize(*expand_dialog_size(1180, 720))
+    center_dialog_on_parent(dlg, parent)
 
     layout = QVBoxLayout(dlg)
     layout.setContentsMargins(14, 14, 14, 28)
@@ -271,6 +287,7 @@ def open_communication_indicators_dialog(
     columns: list[tuple[str, str]],
     fixed_widths: dict[int, int],
     detail_text: DetailTextFn,
+    title: str = "Communication indicators",
     on_empty: EmptyMessageFn | None = None,
     append_export_footer: ExportFooterFn | None = None,
     on_mark_finding: MarkFindingFn | None = None,
@@ -278,19 +295,22 @@ def open_communication_indicators_dialog(
 ) -> None:
     if not rows:
         if on_empty is not None:
-            on_empty("Communication indicators", "No communication indicators are loaded.")
+            on_empty(title, f"No {title.lower()} are loaded.")
         return
 
     dlg = QDialog(parent)
-    dlg.setWindowTitle("Communication indicators")
+    dlg.setWindowTitle(title)
     dlg.resize(*expand_dialog_size(1180, 720))
+    center_dialog_on_parent(dlg, parent)
 
     layout = QVBoxLayout(dlg)
     layout.setContentsMargins(14, 14, 14, 28)
     layout.setSpacing(10)
 
     hint = QLabel(
-        "Metadata-based communication indicators. Sort columns, select rows, or right-click to copy values."
+        "Metadata-based communication indicators grouped by service, type and host. "
+        "Review leads are listed first; routine background rows follow. "
+        "Sort columns, select rows, or right-click to copy values."
     )
     hint.setObjectName("MutedLabel")
     hint.setWordWrap(True)
@@ -300,7 +320,7 @@ def open_communication_indicators_dialog(
         dlg,
         columns,
         fixed_widths=fixed_widths,
-        stretch_columns=[3],
+        stretch_columns=[next((idx for idx, (key, _) in enumerate(columns) if key == "host"), 3)],
         min_height=520,
     )
     table.setMinimumWidth(980)

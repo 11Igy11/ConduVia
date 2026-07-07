@@ -163,6 +163,52 @@ class FindingsController:
         self.set_actions_enabled(True)
         app.findings_page.show_detail(format_finding_detail(row, status_emoji))
 
+    def add_selected_findings_to_notes(self) -> None:
+        app = self.app
+        if app.current_project_id is None:
+            app._message_dialog("Notes", "Open an active project first.", width=420)
+            return
+
+        finding_ids = app.findings_page.selected_finding_ids()
+        if not finding_ids:
+            app._message_dialog("Notes", "Select one or more findings first.", width=420)
+            return
+
+        from ui.findings_format import format_finding_notes_block
+
+        blocks: list[str] = []
+        for finding_id in finding_ids:
+            row = get_finding(finding_id)
+            if row is not None:
+                blocks.append(format_finding_notes_block(row))
+
+        if not blocks:
+            app._message_dialog("Notes", "Selected findings could not be loaded.", width=420)
+            return
+
+        block = "\n".join(blocks)
+        try:
+            if hasattr(app, "notes_page"):
+                app.notes_page.append_block(block)
+            else:
+                existing = app.txt_notes.toPlainText() or ""
+                new_text = f"{existing}\n{block}" if existing.strip() else block
+                app.txt_notes.setPlainText(new_text)
+            app._notes_dirty = True
+            app.notes_controller.flush()
+            add_activity(
+                int(app.current_project_id),
+                "finding_notes_added",
+                f"{len(blocks):,} finding(s)",
+            )
+            app.notes_controller.refresh_activity_ui()
+        except Exception as exc:
+            app._message_dialog("Notes", "Failed to add findings to notes.", str(exc), width=520)
+            return
+
+        if hasattr(app, "go_to_notes"):
+            app.go_to_notes()
+
     def mark_as_finding(self) -> None:
         app = self.app
         if app.current_project_id is None:

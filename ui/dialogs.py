@@ -26,7 +26,11 @@ from PySide6.QtWidgets import (
 )
 from typing import Any, Callable
 
-from core.project_identity import identifier_values_for_editor, is_valid_oib
+from core.project_identity import (
+    identifier_values_for_editor,
+    is_valid_oib,
+    subject_field_rejects_ip,
+)
 from core.evidence_policy import format_period_day_label
 from core.period_gaps import missing_days_in_range, normalize_period_day
 from shiboken6 import isValid
@@ -1012,6 +1016,26 @@ def project_details_dialog(
                 "OIB must contain 11 digits and pass the Croatian control number check.",
             )
             return
+        ip_field_labels = {
+            "first_name": "First name",
+            "last_name": "Last name",
+            "oib": "OIB",
+            "msisdn": "Mobile / MSISDN",
+            "imsi": "IMSI",
+            "imei": "IMEI",
+        }
+        for key, label in ip_field_labels.items():
+            widget = fields.get(key)
+            if widget is None:
+                continue
+            value = widget.text().strip() if hasattr(widget, "text") else ""
+            if subject_field_rejects_ip(key, value):
+                QMessageBox.warning(
+                    dlg,
+                    "Invalid identifier",
+                    f"{label} cannot be an IP address. Enter it under the IP field instead.",
+                )
+                return
         dlg.accept()
 
     buttons.accepted.connect(accept_project_details)

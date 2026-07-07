@@ -63,7 +63,8 @@ class DatasetLoadWorker(QObject):
                     self.progress.emit(0, total, "Starting...")
                 for idx, fp in enumerate(files):
                     if not self._wait_if_paused():
-                        break
+                        self.error.emit("Import cancelled.", "JSON load was cancelled.")
+                        return
                     flows.extend(load_json_file(fp, debug=False))
                     self.progress.emit(idx + 1, total, fp.name)
                 dataset_label = f"Dataset selection: {self.path}"

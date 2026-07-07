@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QFrame, QGroupBox, QLabel, QScrollArea, QSizePolicy, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QFrame, QLabel, QScrollArea, QSizePolicy, QVBoxLayout, QWidget
 
 from core.investigation_snapshot import InvestigationSnapshot
 
@@ -49,24 +49,24 @@ def format_snapshot_body(snapshot: InvestigationSnapshot) -> str:
     return "\n".join(lines).strip()
 
 
-class InvestigationSnapshotPanel(QGroupBox):
+class InvestigationSnapshotPanel(QFrame):
     def __init__(
         self,
         parent=None,
         *,
-        title: str = "Investigation snapshot",
+        title: str = "",
         empty_text: str = "",
         empty_fixed_height: int | None = None,
     ):
-        super().__init__(title, parent)
+        super().__init__(parent)
+        _ = title
         self._empty_text = empty_text or "Load evidence to see an investigation snapshot."
         self._empty_fixed_height = int(empty_fixed_height or 0) or None
         self.setObjectName("InvestigationSnapshotCard")
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        self.setAlignment(Qt.AlignTop)
 
         outer = QVBoxLayout(self)
-        outer.setContentsMargins(12, 10, 12, 10)
+        outer.setContentsMargins(14, 12, 14, 12)
         outer.setSpacing(0)
 
         self._scroll = QScrollArea()
@@ -80,12 +80,14 @@ class InvestigationSnapshotPanel(QGroupBox):
         content.setObjectName("InvestigationSnapshotContent")
         content.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
         body_layout = QVBoxLayout(content)
-        body_layout.setContentsMargins(0, 6, 0, 0)
+        body_layout.setContentsMargins(0, 0, 0, 0)
         body_layout.setSpacing(8)
+        body_layout.setAlignment(Qt.AlignTop)
 
         self.lbl_headline = QLabel()
         self.lbl_headline.setObjectName("InvestigationSnapshotHeadline")
         self.lbl_headline.setWordWrap(True)
+        self.lbl_headline.setAlignment(Qt.AlignTop | Qt.AlignLeft)
         self.lbl_headline.setTextInteractionFlags(Qt.TextSelectableByMouse)
         self.lbl_headline.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum)
 
@@ -98,6 +100,7 @@ class InvestigationSnapshotPanel(QGroupBox):
 
         body_layout.addWidget(self.lbl_headline)
         body_layout.addWidget(self.lbl_body)
+        body_layout.addStretch(1)
 
         self._scroll.setWidget(content)
         outer.addWidget(self._scroll, 1)
@@ -119,6 +122,7 @@ class InvestigationSnapshotPanel(QGroupBox):
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
 
     def _apply_empty_state(self) -> None:
+        self.lbl_headline.setObjectName("InvestigationSnapshotEmpty")
         self.lbl_headline.setText(self._empty_text)
         self.lbl_headline.show()
         self.lbl_body.clear()
@@ -127,6 +131,7 @@ class InvestigationSnapshotPanel(QGroupBox):
         self._apply_fixed_frame_height()
 
     def set_loading(self, message: str) -> None:
+        self.lbl_headline.setObjectName("InvestigationSnapshotEmpty")
         self.lbl_headline.setText(str(message or "Loading...").strip())
         self.lbl_headline.show()
         self.lbl_body.hide()
@@ -154,6 +159,7 @@ class InvestigationSnapshotPanel(QGroupBox):
             self.lbl_body.setText(snapshot.narrative.strip())
             self.lbl_body.show()
         elif snapshot.headline:
+            self.lbl_headline.setObjectName("InvestigationSnapshotHeadline")
             self.lbl_headline.setText(snapshot.headline)
             self.lbl_headline.show()
             if body:

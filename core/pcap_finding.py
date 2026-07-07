@@ -71,7 +71,7 @@ def flow_from_pcap_summary(summary: PcapSummary) -> dict[str, Any]:
 
 def default_communication_finding_title(row: dict[str, Any]) -> str:
     service = str(row.get("service") or "PCAP service").strip()
-    activity = str(row.get("activity_type") or "indicator").strip()
+    activity = str(row.get("activity_label") or row.get("activity_type") or "indicator").strip()
     return f"PCAP: {service} — {activity}"
 
 
@@ -81,11 +81,14 @@ def default_period_finding_title(summary: PcapSummary, *, period_label: str = ""
 
 
 def communication_finding_note(row: dict[str, Any]) -> str:
+    indicator = row.get("activity_label") or row.get("activity_type") or "-"
     lines = [
         "PCAP communication indicator",
+        f"Type: {row.get('type') or '-'}",
         f"Service: {row.get('service') or '-'}",
-        f"Indicator: {row.get('activity_type') or '-'}",
+        f"Indicator: {indicator}",
         f"Confidence: {row.get('confidence') or '-'}",
+        f"Sessions: {row.get('sessions') or 1}",
         f"Host / signal: {row.get('host') or '-'}",
         f"Source: {row.get('source') or '-'}",
         f"Destination: {row.get('destination') or '-'}",
