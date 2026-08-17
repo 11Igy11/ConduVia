@@ -695,8 +695,8 @@ class BehaviorProfileTests(unittest.TestCase):
         self.assertEqual(loaded["json_file_count"], 2)
         self.assertEqual(loaded["loaded_json_file_count"], 2)
         self.assertEqual(loaded["flow_count"], 2)
-        self.assertEqual(behavior["json_file_count"], 2)
-        self.assertEqual(behavior["loaded_json_file_count"], 2)
+        self.assertEqual(behavior["json_file_count"], 522)
+        self.assertEqual(behavior["loaded_json_file_count"], 522)
         self.assertEqual(behavior["skipped_json_file_count"], 0)
         self.assertEqual(behavior["flow_count"], 2)
 
@@ -2320,6 +2320,38 @@ class ProfileComparisonTests(unittest.TestCase):
         label = format_period_day_label("range:2024-03-01:2024-03-08")
         self.assertEqual(label, "01/03/2024 – 08/03/2024")
 
+    def test_interactive_open_guards_large_periods(self):
+        from core.evidence_policy import (
+            MAX_INTERACTIVE_EVIDENCE_BYTES,
+            MAX_INTERACTIVE_EVIDENCE_FILES,
+            oversized_interactive_load_message,
+            period_view_caption,
+            should_batch_pcap_files,
+            should_open_interactively,
+        )
+
+        self.assertTrue(should_open_interactively(10, 1024))
+        self.assertFalse(should_open_interactively(MAX_INTERACTIVE_EVIDENCE_FILES + 1, 1024))
+        self.assertFalse(should_open_interactively(1, MAX_INTERACTIVE_EVIDENCE_BYTES + 1))
+        self.assertTrue(should_batch_pcap_files(11, 1024))
+        self.assertTrue(should_batch_pcap_files(2, MAX_INTERACTIVE_EVIDENCE_BYTES + 1))
+        self.assertFalse(should_batch_pcap_files(2, 1024))
+
+        title, details = oversized_interactive_load_message(
+            kind="JSON",
+            file_count=2311,
+            byte_count=2 * 1024 * 1024 * 1024,
+            period_label="15/01/2024 – 29/11/2024",
+        )
+        self.assertIn("JSON", title)
+        self.assertIn("2,311 files", details)
+        self.assertIn("Day", details)
+        self.assertEqual(
+            period_view_caption("range", "15/01/2024 – 29/11/2024", 1200),
+            "Selected period: 15/01/2024 – 29/11/2024 · 1,200 flows loaded",
+        )
+        self.assertTrue(period_view_caption("day", "04/01/2026", 80).startswith("Day view:"))
+
     def test_analysis_limits_use_compact_profile_preview(self):
         self.assertEqual(PROFILE_CHART_MAX_DAYS, 31)
         self.assertEqual(MAX_PCAP_FLOWS, 0)
@@ -2397,6 +2429,9 @@ class ProfileReadinessTests(unittest.TestCase):
         )
         self.assertEqual(readiness["state"], "ready")
         self.assertIn("Profile ready", readiness["label"])
+        self.assertIn("5 indexed days", readiness["label"])
+        self.assertIn("5 indexed days", readiness["detail"])
+        self.assertIn("flow-timestamp days", readiness["detail"])
 
 
 class AIServiceTests(unittest.TestCase):

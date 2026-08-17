@@ -19,7 +19,13 @@ from core.db import (
 )
 from core.formatters import format_duration_compact_ms, format_pcap_datetime, human_bytes
 from core.project_identity import project_identifiers_text, repair_stored_imsi_identifiers, subject_display_label, target_display_label
-from core.project_evidence import build_project_evidence_snapshot
+from core.project_evidence import (
+    build_project_evidence_snapshot,
+    get_project_evidence_totals,
+    invalidate_project_evidence_cache,
+    list_saved_json_days,
+    list_saved_pcap_days,
+)
 from core.project_datasets import list_project_json_dataset_files
 from core.project_profile import build_project_activity_profile, format_project_activity_profile
 from core.workspace import (
@@ -52,6 +58,8 @@ class ProjectsUIController:
         self.app.projects_info.setText("Select a project to see details.")
         self.app.project_recent_json_rows = []
         self.app.project_recent_json_total_count = 0
+        self.app.project_recent_json_day_count = 0
+        self.app.project_recent_pcap_day_count = 0
         self.app.project_recent_pcap_rows = []
         self.app.project_activity_rows = []
         if self.app.current_project_id is not None and not get_project(self.app.current_project_id):
@@ -521,13 +529,14 @@ class ProjectsUIController:
             pcap_sources.append(" | ".join(piece for piece in pieces if piece))
 
         profile = build_project_activity_profile(project_id)
+        totals = get_project_evidence_totals(project_id)
         activity_lines = self._workspace_activity_lines(project_id)
         finding_lines = self._workspace_finding_lines(project_id)
         case_snapshot = self._workspace_case_snapshot(
             project=project,
             profile=profile,
-            json_count=len(json_datasets),
-            pcap_count=len(pcap_sources),
+            json_count=int(totals.get("json_file_count") or len(json_datasets)),
+            pcap_count=int(totals.get("pcap_source_count") or len(pcap_sources)),
             finding_count=len(finding_lines),
             activity_count=len(activity_lines),
         )
@@ -633,15 +642,23 @@ class ProjectsUIController:
         return f"{ip}:{port}" if port else ip
 
     def refresh_recent_datasets(self, project_id: int):
-        evidence = build_project_evidence_snapshot(project_id, limit=MAX_EVIDENCE_SNAPSHOT_ITEMS)
-        json_evidence = evidence["json"]
-        pcap_evidence = evidence["pcap"]
+        invalidate_project_evidence_cache(project_id)
+        totals = get_project_evidence_totals(project_id)
+        build_project_evidence_snapshot(project_id, limit=MAX_EVIDENCE_SNAPSHOT_ITEMS)
 
-        self.app.project_recent_json_total_count = int(json_evidence.get("count") or 0)
-        self.app.project_recent_json_rows = list(json_evidence.get("json_day_rows") or [])[:MAX_RECENT_UI_ROWS]
-        self.app.project_recent_pcap_rows = list(pcap_evidence.get("recent_day_rows") or [])[:MAX_RECENT_UI_ROWS]
+        self.app.project_recent_json_total_count = int(totals.get("json_file_count") or 0)
+        self.app.project_recent_json_day_count = int(totals.get("json_day_count") or 0)
+        self.app.project_recent_pcap_day_count = int(totals.get("pcap_saved_day_count") or 0)
+        self.app.project_recent_json_rows = list_saved_json_days(
+            project_id,
+            limit=MAX_RECENT_UI_ROWS,
+        )
+        self.app.project_recent_pcap_rows = list_saved_pcap_days(
+            project_id,
+            limit=MAX_RECENT_UI_ROWS,
+        )
 
-        activity_rows = list_activity(project_id, limit=MAX_RECENT_UI_ROWS, order="asc")
+        activity_rows = list_activity(project_id, limit=MAX_RECENT_UI_ROWS, order="desc")
         self.app.project_activity_rows = []
         for row in activity_rows:
             event = self.activity_label(str(row["event_type"] or ""), str(row["message"] or ""))
@@ -655,25 +672,24 @@ class ProjectsUIController:
 
     def _refresh_project_launcher_cards(self) -> None:
         json_rows = getattr(self.app, "project_recent_json_rows", []) or []
-        json_count = int(getattr(self.app, "project_recent_json_total_count", 0) or 0)
-        if not json_count:
-            json_count = sum(
-                int(row.get("file_count") or 1)
-                for row in json_rows
-                if row.get("status") == "Available"
-            )
-        pcap_count = len(getattr(self.app, "project_recent_pcap_rows", []) or [])
+        json_file_count = int(getattr(self.app, "project_recent_json_total_count", 0) or 0)
+        json_day_count = int(getattr(self.app, "project_recent_json_day_count", 0) or 0)
+        if not json_day_count and json_rows:
+            json_day_count = len(json_rows)
+        pcap_count = int(getattr(self.app, "project_recent_pcap_day_count", 0) or 0)
         activity_count = len(getattr(self.app, "project_activity_rows", []) or [])
 
         if hasattr(self.app, "lbl_recent_json_count"):
-            self.app.lbl_recent_json_count.setText(f"{json_count:,} JSON files")
-            if json_count and json_rows:
+            self.app.lbl_recent_json_count.setText(f"{json_day_count:,} JSON days")
+            if json_day_count and json_rows:
                 newest = self._short_text(json_rows[0].get("name") or "-")
-                self.app.lbl_recent_json_detail.setText(f"Most recent: {newest}")
-            elif json_count:
-                self.app.lbl_recent_json_detail.setText(f"{json_count:,} JSON files indexed")
+                files_note = f"{json_file_count:,} files" if json_file_count else "indexed"
+                self.app.lbl_recent_json_detail.setText(f"Most recent: {newest} · {files_note}")
+            elif json_day_count:
+                files_note = f"{json_file_count:,} files indexed" if json_file_count else "indexed"
+                self.app.lbl_recent_json_detail.setText(f"{json_day_count:,} JSON days · {files_note}")
             else:
-                self.app.lbl_recent_json_detail.setText("No JSON files saved for this project.")
+                self.app.lbl_recent_json_detail.setText("No JSON days indexed for this project.")
 
         if hasattr(self.app, "lbl_recent_pcap_count"):
             pcap_rows = getattr(self.app, "project_recent_pcap_rows", []) or []
@@ -690,7 +706,7 @@ class ProjectsUIController:
             activity_rows = getattr(self.app, "project_activity_rows", []) or []
             self.app.lbl_recent_activity_count.setText(f"{activity_count:,} events")
             if activity_count and activity_rows:
-                newest = self._short_text(activity_rows[-1].get("event") or "-")
+                newest = self._short_text(activity_rows[0].get("event") or "-")
                 self.app.lbl_recent_activity_detail.setText(f"Latest: {newest}")
             elif activity_count:
                 self.app.lbl_recent_activity_detail.setText(f"{activity_count:,} recent events")
@@ -822,18 +838,27 @@ class ProjectsUIController:
     def activity_label(self, event_type: str, message: str = "") -> str:
         labels = {
             "dataset_loaded": "JSON dataset loaded",
+            "json_period_loaded": "JSON period loaded",
             "pcap_saved": "PCAP saved",
             "pcap_notes_added": "PCAP notes added",
             "finding_created": "Finding created",
             "finding_updated": "Finding updated",
             "finding_deleted": "Finding deleted",
+            "finding_status": "Finding status changed",
+            "finding_notes_added": "Findings added to notes",
             "case_metadata_mismatch": "Case metadata warning",
             "pcap_batch_finished": "PCAP batch finished",
             "repository_hit": "Repository hit",
             "project_created": "Project created",
             "project_edited": "Project edited",
+            "import_started": "Import started",
+            "import_completed": "Import completed",
+            "import_failed": "Import failed",
+            "import_cancelled": "Import cancelled",
+            "evidence_deleted": "Evidence deleted",
             "import_period_selected": "Period selected",
             "ai_summary_generated": "AI summary generated",
+            "json_notes_added": "JSON snapshot added to notes",
         }
         label = labels.get(event_type, event_type.replace("_", " ").title())
         detail = Path(message).name if message else ""

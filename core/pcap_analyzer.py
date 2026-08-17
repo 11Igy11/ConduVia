@@ -629,16 +629,31 @@ def analyze_pcap_files(
     return merged or PcapSummary(file_name=aggregate_label)
 
 
+def isolated_pcap_child_command(args: list[str]) -> list[str]:
+    """Build argv for the PCAP worker child process (dev Python vs frozen EXE)."""
+    import sys
+
+    if getattr(sys, "frozen", False):
+        return [sys.executable, "--pcap-isolated", *args]
+    return [sys.executable, "-m", "core.pcap_isolated", *args]
+
+
 def _run_isolated_subprocess(args: list[str], *, stdin_payload: bytes | None = None, timeout: float | None = None) -> PcapSummary:
     import subprocess
     import sys
 
+    run_kwargs: dict = {
+        "input": stdin_payload,
+        "capture_output": True,
+        "timeout": timeout,
+        "check": False,
+    }
+    if sys.platform == "win32":
+        run_kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
+
     proc = subprocess.run(
-        [sys.executable, "-m", "core.pcap_isolated", *args],
-        input=stdin_payload,
-        capture_output=True,
-        timeout=timeout,
-        check=False,
+        isolated_pcap_child_command(args),
+        **run_kwargs,
     )
     if proc.returncode != 0:
         detail = (proc.stderr or b"").decode("utf-8", errors="replace").strip()

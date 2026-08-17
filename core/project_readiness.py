@@ -94,14 +94,20 @@ def evaluate_profile_readiness(
         )
 
     if flow_count:
-        detail = (
-            f"{json_file_count:,} JSON files · {json_indexed_day_count:,} indexed file-days · "
-            f"{flow_day_count:,} flow-activity days · "
-            f"{pcap_indexed_day_count:,} PCAP indexed days · {pcap_day_count:,} PCAP saved days"
-        )
+        detail_parts = [
+            f"{json_file_count:,} JSON files",
+            f"{json_indexed_day_count:,} indexed days",
+        ]
+        if flow_day_count and flow_day_count != json_indexed_day_count:
+            detail_parts.append(f"{flow_day_count:,} flow-timestamp days")
+        detail_parts.extend([
+            f"{pcap_indexed_day_count:,} PCAP indexed days",
+            f"{pcap_day_count:,} PCAP saved days",
+        ])
+        detail = " · ".join(detail_parts)
         return _result(
             "ready",
-            f"Profile ready — {flow_count:,} flows indexed across {flow_day_count:,} activity days.",
+            f"Profile ready — {flow_count:,} flows across {json_indexed_day_count:,} indexed days.",
             detail=detail,
             json_file_count=json_file_count,
             indexed_file_count=indexed_file_count,

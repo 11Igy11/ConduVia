@@ -1061,7 +1061,11 @@ class PcapPage(PcapInvestigatorMixin, PcapPeriodMixin, PcapAnalysisMixin, PcapEx
             return
         day = str(self._pcap_active_day or self.cmb_pcap_day.currentData() or "")
         if day:
-            self._try_load_saved_pcap_period(day)
+            paths = self._loadable_pcap_paths_for_day(day)
+            if paths:
+                self._load_pcap_files(paths, label=self._period_bucket_label(day))
+            else:
+                self._try_load_saved_pcap_period(day)
 
     def clear_project_view(self) -> None:
         """Reset PCAP page when project/dataset context is cleared."""

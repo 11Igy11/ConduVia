@@ -177,7 +177,7 @@ class NotesController:
                 app.projects_ui_controller._refresh_project_launcher_cards()
             return
 
-        rows = self.load_activity(project_id, order="asc")
+        rows = self.load_activity(project_id, order="desc")
         for row in rows:
             ts = row["created_at"]
             et = row["event_type"]

@@ -285,7 +285,7 @@ def build_projects_page(app: App) -> QWidget:
     app.btn_expand_project_activity.clicked.connect(
         lambda: open_project_rows_dialog(
             app,
-            "Recent activity",
+            "Project activity",
             [
                 ("event", "Event"),
                 ("created_at", "Time"),
@@ -339,8 +339,8 @@ def build_projects_page(app: App) -> QWidget:
     )
     bottom_grid.addWidget(
         project_launcher_card(
-            "Recent activity",
-            "Central project activity log",
+            "Project activity",
+            "Audit trail for actions on the active project.",
             app.lbl_recent_activity_count,
             app.lbl_recent_activity_detail,
             [app.btn_expand_project_activity],

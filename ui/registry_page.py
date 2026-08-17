@@ -944,19 +944,11 @@ class RegistryPage(QWidget):
         controller = getattr(self.app, "dataset_controller", None)
         active_day = str(getattr(controller, "_json_active_day", "") or "") if controller is not None else ""
         period_mode = str(getattr(controller, "_json_period_granularity", "day") or "day")
-        from core.evidence_policy import format_period_day_label
+        from core.evidence_policy import format_period_day_label, period_view_caption
 
         if active_day:
             period_label = format_period_day_label(active_day) or active_day
-            flow_count = len(self._flows)
-            if period_mode == "month":
-                self.lbl_period_context.setText(
-                    f"Month aggregate: {period_label} · {flow_count:,} flows loaded from selected JSON period"
-                )
-            else:
-                self.lbl_period_context.setText(
-                    f"Day view: {period_label} · {flow_count:,} flows loaded"
-                )
+            self.lbl_period_context.setText(period_view_caption(period_mode, period_label, len(self._flows)))
         else:
             self.lbl_period_context.setText(f"{len(self._flows):,} flows loaded")
 
@@ -1256,15 +1248,13 @@ class RegistryPage(QWidget):
         controller = getattr(self.app, "dataset_controller", None)
         active_day = str(getattr(controller, "_json_active_day", "") or "") if controller is not None else ""
         period_mode = str(getattr(controller, "_json_period_granularity", "day") or "day")
-        from core.evidence_policy import format_period_day_label
+        from core.evidence_policy import format_period_day_label, period_view_caption
 
         flow_count = len(self._flows)
         if not active_day:
             return f"{flow_count:,} flows loaded"
         period_label = format_period_day_label(active_day) or active_day
-        if period_mode == "month":
-            return f"Month aggregate: {period_label} · {flow_count:,} flows loaded from selected JSON period"
-        return f"Day view: {period_label} · {flow_count:,} flows loaded"
+        return period_view_caption(period_mode, period_label, flow_count)
 
     # ----------------- export -----------------
     def export_report(self):

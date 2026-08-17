@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
-from core.project_evidence import list_project_saved_pcap_day_rows
+from core.project_evidence import list_project_saved_pcap_day_rows, resolve_saved_pcap_day_row
 from ui.buttons import make_dialog_button
 from ui.dict_table_model import DictTableModel
 from ui.explore_widgets import CopyableTableView
@@ -213,6 +213,13 @@ def resolve_project_pcap_row(app: App, row: dict[str, Any]) -> dict[str, Any]:
         return row
 
     row_day = str(row.get("day") or "").strip()
+    if row_day:
+        resolved = resolve_saved_pcap_day_row(project_id, day=row_day)
+        if resolved:
+            merged = dict(row)
+            merged.update(resolved)
+            return merged
+
     row_name = str(row.get("name") or "").strip()
     row_path = str(row.get("path") or "").strip()
     try:
@@ -358,7 +365,18 @@ def delete_selected_json_dataset_rows(app: App, rows: list[dict[str, Any]], dial
 
     delete_ingest_items_for_paths(int(project_id), paths)
     touch_project(int(project_id))
+    from core.project_audit import record_project_activity
+
+    record_project_activity(
+        int(project_id),
+        "evidence_deleted",
+        f"JSON | {len(rows):,} period(s), {len(paths):,} file(s)",
+    )
     dialog.accept()
+    if hasattr(app.dataset_controller, "_invalidate_ingest_day_groups_cache"):
+        app.dataset_controller._invalidate_ingest_day_groups_cache(int(project_id))
+    if hasattr(app, "notes_controller"):
+        app.notes_controller.refresh_activity_ui_for_project(int(project_id))
     if hasattr(app, "projects_ui_controller"):
         app.projects_ui_controller.refresh_recent_datasets(project_id)
         app.projects_ui_controller.refresh_case_dashboard()
@@ -410,7 +428,21 @@ def delete_selected_pcap_dataset_rows(app: App, rows: list[dict[str, Any]], dial
     if period_days:
         delete_pcap_sources_for_period_days(int(project_id), period_days)
     touch_project(int(project_id))
+    from core.project_audit import record_project_activity
+
+    record_project_activity(
+        int(project_id),
+        "evidence_deleted",
+        (
+            f"PCAP | {len(rows):,} period(s), {len(paths):,} file(s), "
+            f"{len(period_days):,} saved period(s)"
+        ),
+    )
     dialog.accept()
+    if hasattr(app.dataset_controller, "_invalidate_ingest_day_groups_cache"):
+        app.dataset_controller._invalidate_ingest_day_groups_cache(int(project_id))
+    if hasattr(app, "notes_controller"):
+        app.notes_controller.refresh_activity_ui_for_project(int(project_id))
     if hasattr(app, "projects_ui_controller"):
         app.projects_ui_controller.refresh_recent_datasets(project_id)
         app.projects_ui_controller.refresh_case_dashboard()

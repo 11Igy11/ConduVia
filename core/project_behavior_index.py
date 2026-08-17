@@ -13,6 +13,7 @@ from core.db import (
     save_project_behavior_profile,
 )
 from core.loader import load_json_file
+from core.project_evidence import get_project_evidence_totals
 from core.project_datasets import selected_ingest_items_for_source
 
 
@@ -65,6 +66,9 @@ def build_project_behavior_index(
     profile["skipped_json_file_count"] = skipped_json_file_count
     profile["failed_json_file_count"] = failed
     profile["source_key"] = source_key
+    totals = get_project_evidence_totals(project_id, db_path=db_path)
+    profile["indexed_file_count"] = int(totals.get("json_file_count") or expected_json_file_count)
+    profile["indexed_day_count"] = int(totals.get("json_day_count") or 0)
     previous = get_project_behavior_profile(project_id, db_path=db_path) or {}
     pcap_rows = [
         row
@@ -86,14 +90,18 @@ def build_project_behavior_index(
 
 
 def _project_json_files(project_id: int, *, db_path: Path = DEFAULT_DB_PATH) -> tuple[list[Path], int]:
-    rows = list_recent_dataset_sources(project_id, limit=50000, db_path=db_path)
-    ingest_files, skipped_json_file_count, selected_ingest_count = _json_files_from_ingest_items(
+    """Collect JSON files from saved project ingest; fall back to legacy dataset sources."""
+    ingest_files, skipped_json_file_count, ingest_count = _json_files_from_saved_ingest(
         project_id,
-        rows,
         db_path=db_path,
     )
-    out: list[Path] = list(ingest_files)
-    seen: set[str] = {_path_key(path) for path in out}
+    if ingest_files or ingest_count:
+        return ingest_files, skipped_json_file_count
+
+    rows = list_recent_dataset_sources(project_id, limit=50000, db_path=db_path)
+    out: list[Path] = []
+    seen: set[str] = set()
+    skipped_json_file_count = 0
 
     for row in rows:
         source = Path(str(row["folder_path"] or ""))
@@ -101,11 +109,6 @@ def _project_json_files(project_id: int, *, db_path: Path = DEFAULT_DB_PATH) -> 
         if source.is_file() and source.suffix.lower() == ".json":
             candidates = [source]
         elif source.is_dir():
-            # When a large folder/disc was scanned, the ingest table is the
-            # source of truth. Avoid recursively re-scanning old evidence roots
-            # on every Profile refresh.
-            if selected_ingest_count:
-                continue
             cached_count = _row_int(row, "json_file_count")
             try:
                 selected, selected_skipped = _selected_json_files_for_source(
@@ -144,12 +147,12 @@ def _project_json_files(project_id: int, *, db_path: Path = DEFAULT_DB_PATH) -> 
     return sorted(out, key=lambda path: (path.name.casefold(), str(path).casefold())), skipped_json_file_count
 
 
-def _json_files_from_ingest_items(
+def _json_files_from_saved_ingest(
     project_id: int,
-    source_rows,
     *,
     db_path: Path = DEFAULT_DB_PATH,
 ) -> tuple[list[Path], int, int]:
+    """Saved project evidence from ingest_items — no dataset-source date filters."""
     try:
         done_items = list_ingest_items(
             project_id,
@@ -169,28 +172,9 @@ def _json_files_from_ingest_items(
     if not items:
         return [], 0, 0
 
-    # Rows marked as "done" are explicit user imports into the case. Treat
-    # them as the source of truth even if older saved folder metadata points at
-    # a narrower source/date range.
-    filters = [] if done_items else _source_filters(source_rows)
-    selected = _select_ingest_items(items, filters, ignore_date_range=False)
-
-    # Large evidence folders can be selected by date first and then saved day
-    # by day. Older metadata may point at only the latest opened day while the
-    # ingest table still contains the selected project evidence. If strict
-    # filtering leaves Profile with an obviously tiny slice, relax the date
-    # range and finally trust the ingest table.
-    if not done_items and filters and len(items) > len(selected) and len(selected) < min(2, len(items)):
-        relaxed = _select_ingest_items(items, filters, ignore_date_range=True)
-        if len(relaxed) > len(selected):
-            selected = relaxed
-    if not done_items and filters and len(items) > len(selected) and len(selected) < min(2, len(items)):
-        selected = _select_ingest_items(items, [], ignore_date_range=False)
-
-    selected_count = len(selected)
     files: list[Path] = []
     file_keys: set[str] = set()
-    for item in selected[:MAX_BEHAVIOR_INDEX_JSON_FILES]:
+    for item in items[:MAX_BEHAVIOR_INDEX_JSON_FILES]:
         path = Path(str(getattr(item, "file_path", "") or ""))
         key = _path_key(path)
         if not key or key in file_keys:
@@ -199,8 +183,18 @@ def _json_files_from_ingest_items(
             file_keys.add(key)
             files.append(path)
 
+    selected_count = len(items)
     skipped = max(0, selected_count - len(files))
     return sorted(files, key=lambda path: (path.name.casefold(), str(path).casefold())), skipped, selected_count
+
+
+def _json_files_from_ingest_items(
+    project_id: int,
+    source_rows,
+    *,
+    db_path: Path = DEFAULT_DB_PATH,
+) -> tuple[list[Path], int, int]:
+    return _json_files_from_saved_ingest(project_id, db_path=db_path)
 
 
 def _select_ingest_items(items, filters, *, ignore_date_range: bool) -> list:

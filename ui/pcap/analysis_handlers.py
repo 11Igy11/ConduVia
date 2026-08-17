@@ -7,6 +7,7 @@ from PySide6.QtCore import QObject, QThread, QTimer, Qt
 from PySide6.QtWidgets import QFileDialog
 
 from core.db import add_activity, mark_ingest_item
+from core.evidence_policy import evidence_byte_count, should_batch_pcap_files
 from core.formatters import human_bytes
 from core.pcap_analyzer import PcapSummary, build_investigator_view
 from core.pcap_batch import batch_progress_ui_interval, format_batch_status_text
@@ -201,6 +202,13 @@ class PcapAnalysisMixin:
             return
         paths = [str(path) for path in file_paths if str(path or "").strip()]
         if not paths:
+            return
+
+        if len(paths) > 1 and should_batch_pcap_files(len(paths), evidence_byte_count(paths)):
+            active_day = str(getattr(self, "_pcap_active_day", "") or "")
+            if active_day and self._try_load_saved_pcap_period(active_day, allow_when_paths_exist=True):
+                return
+            self._start_period_reanalyze(paths, day=active_day, label=label)
             return
 
         active_day = str(getattr(self, "_pcap_active_day", "") or "")
@@ -406,7 +414,10 @@ class PcapAnalysisMixin:
                 self._sync_save_period_button(saved=True, hide=True)
                 self._reset_batch_status()
                 if self._pcap_active_day:
-                    self._try_load_saved_pcap_period(str(self._pcap_active_day))
+                    self._try_load_saved_pcap_period(
+                        str(self._pcap_active_day),
+                        allow_when_paths_exist=True,
+                    )
             else:
                 self._render_loaded_summary(last_summary)
                 if self._pcap_queue_auto_save:
