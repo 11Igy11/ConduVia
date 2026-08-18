@@ -74,6 +74,53 @@ def period_view_caption(period_mode: str, period_label: str, flow_count: int) ->
     return f"{prefix}: {label} · {int(flow_count or 0):,} flows loaded"
 
 
+def evidence_byte_count(paths: list[str] | tuple[str, ...] | None) -> int:
+    total = 0
+    for path in paths or []:
+        try:
+            total += Path(path).stat().st_size
+        except OSError:
+            continue
+    return total
+
+
+def oversized_interactive_load_message(
+    *,
+    kind: str,
+    file_count: int,
+    byte_count: int = 0,
+    period_label: str = "",
+) -> tuple[str, str]:
+    from core.formatters import human_bytes
+
+    kind_upper = str(kind or "evidence").strip().upper() or "EVIDENCE"
+    title = f"{kind_upper} period is too large to open interactively"
+    size_text = f"{int(file_count or 0):,} files"
+    if byte_count:
+        size_text += f" ({human_bytes(int(byte_count), precision=2)})"
+    period_text = f"Selected period: {period_label}. " if period_label else ""
+    details = (
+        f"{period_text}This selection has {size_text}, which exceeds the interactive limit "
+        f"({MAX_INTERACTIVE_EVIDENCE_FILES:,} files or "
+        f"{human_bytes(MAX_INTERACTIVE_EVIDENCE_BYTES, precision=0)}). "
+        "The evidence stays indexed. Switch Period to Day to review one day at a time, "
+        "or use Profile for the full-set summary."
+    )
+    return title, details
+
+
+def period_view_caption(period_mode: str, period_label: str, flow_count: int) -> str:
+    mode = str(period_mode or "day")
+    if mode == "month":
+        prefix = "Month aggregate"
+    elif mode == "range":
+        prefix = "Selected period"
+    else:
+        prefix = "Day view"
+    label = str(period_label or "").strip() or "—"
+    return f"{prefix}: {label} · {int(flow_count or 0):,} flows loaded"
+
+
 def format_period_day_label(day: str) -> str:
     return _format_period_day_label_impl(str(day or "").strip(), _depth=0)
 
