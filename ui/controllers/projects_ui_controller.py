@@ -706,7 +706,7 @@ class ProjectsUIController:
             activity_rows = getattr(self.app, "project_activity_rows", []) or []
             self.app.lbl_recent_activity_count.setText(f"{activity_count:,} events")
             if activity_count and activity_rows:
-                newest = self._short_text(activity_rows[0].get("event") or "-")
+                newest = self._short_text(activity_rows[-1].get("event") or "-")
                 self.app.lbl_recent_activity_detail.setText(f"Latest: {newest}")
             elif activity_count:
                 self.app.lbl_recent_activity_detail.setText(f"{activity_count:,} recent events")
