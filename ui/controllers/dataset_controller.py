@@ -66,15 +66,10 @@ from core.project_identity import (
 from core.protocols import format_ip_proto
 
 from core.evidence_policy import (
-    MAX_INTERACTIVE_EVIDENCE_BYTES as MAX_INTERACTIVE_FOLDER_JSON_BYTES,
-    MAX_INTERACTIVE_EVIDENCE_FILES as MAX_INTERACTIVE_FOLDER_JSON_FILES,
     PERIOD_LABEL,
     evidence_byte_count,
     format_period_day_label,
-    indexed_source_message,
-    oversized_interactive_load_message,
     period_combo_label,
-    should_batch_pcap_files,
     should_open_interactively,
 )
 
@@ -743,21 +738,6 @@ class DatasetController(DatasetLoadMixin, DatasetIngestMixin, ImportProgressMixi
         has_period = bool(self._json_day_groups and self._json_active_day and self._active_json_period_files())
         btn.setEnabled(not busy and has_period)
 
-    def _refuse_oversized_json_period(self, files: list[str], day: str) -> bool:
-        byte_count = evidence_byte_count(files)
-        if should_open_interactively(len(files), byte_count):
-            return False
-        title, details = oversized_interactive_load_message(
-            kind="JSON",
-            file_count=len(files),
-            byte_count=byte_count,
-            period_label=self._format_day_label(day),
-        )
-        if hasattr(self.app, "lbl_stats"):
-            self.app.lbl_stats.setText(indexed_source_message(json_files=len(files)))
-        self.app._message_dialog(title, details, width=640)
-        return True
-
     def _try_load_active_json_period(self, *, force: bool = True) -> None:
         if self._json_active_day and self._active_json_period_files():
             self._load_active_json_period(force=force)
@@ -778,8 +758,6 @@ class DatasetController(DatasetLoadMixin, DatasetIngestMixin, ImportProgressMixi
         if active_file and active_file in files:
             files = [active_file]
         if not force and self.app.flow_controller.get_all():
-            return
-        if self._refuse_oversized_json_period(files, day):
             return
         self._json_active_day = day
         period_label = self._format_day_label(day)

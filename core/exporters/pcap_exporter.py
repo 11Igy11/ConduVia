@@ -6,8 +6,9 @@ from pathlib import Path
 from typing import Any
 
 from core.db import Project
-from core.exporters.case_context import build_case_context, context_cards_html
-from core.exporters.template_utils import load_template, render_template
+from core.exporters.case_context import build_case_context, case_context_table_html
+from core.exporters.html_blocks import ranked_list_html, stats_html
+from core.exporters.template_utils import load_export_template, render_template
 from core.formatters import format_export_datetime, format_flow_datetime, human_bytes
 from core.pcap_analyzer import PcapSummary, build_investigator_view
 
@@ -65,68 +66,110 @@ def export_pcap_summary_html(
     generated_at = datetime.now().strftime("%d.%m.%Y %H:%M:%S")
     first_seen = format_flow_datetime(summary.first_seen, milliseconds=True)
     last_seen = format_flow_datetime(summary.last_seen, milliseconds=True)
-    period = f"{first_seen or '-'} - {last_seen or '-'}"
+    period = f"{first_seen or '—'} – {last_seen or '—'}" if first_seen or last_seen else "—"
     case_context = build_case_context(project, project_name=project_name)
     source_summary = _export_source_summary(summary)
+    project_label = html.escape(project_name or case_context.get("project") or "Project")
 
-    hero_cards = "\n".join([
-        context_cards_html(case_context, card_class="card", include_dataset_target=False),
-        _metric_card(text["format"], summary.format),
-        _metric_card(text["packets"], f"{summary.packet_count:,}"),
-        _metric_card(text["traffic_volume"], human_bytes(summary.wire_bytes, precision=2)),
-        _metric_card(text["likely_device_ip"], summary.likely_device_ip or "-"),
-        _metric_card(text["capture_period"], period),
-        _metric_card(text["dns_queries"], summary.total_dns_names or len(summary.dns_queries)),
-        _metric_card(text["tls_sni_hosts"], summary.total_tls_sni_hosts or len(summary.tls_sni)),
-        _metric_card(text["readable_samples"], len(summary.readable_samples)),
+    stats = stats_html([
+        (text["format"], summary.format or "—"),
+        (text["packets"], f"{summary.packet_count:,}"),
+        (text["traffic_volume"], human_bytes(summary.wire_bytes, precision=2)),
+        (text["likely_device_ip"], summary.likely_device_ip or "—"),
+        (text["dns_queries"], summary.total_dns_names or len(summary.dns_queries)),
+        (text["tls_sni_hosts"], summary.total_tls_sni_hosts or len(summary.tls_sni)),
     ])
 
-    service_columns = [("service", text["service_group"]), ("count", text["signals"]), ("share", text["share"]), ("bar_html", text["chart"]), ("example", text["example"])]
-    visibility_columns = [("label", text["visibility"]), ("count", text["signals"]), ("share", text["share"]), ("bar_html", text["chart"])]
-    activity_columns = [("hour", text["hour"]), ("packets", text["packets"]), ("share", text["share"]), ("bar_html", text["chart"])]
     communication_columns = [("service", text["service"]), ("activity_type", text["indicator"]), ("confidence_html", text["confidence"]), ("host", text["host_signal"]), ("protocol", text["protocol"]), ("bytes", text["volume"]), ("packets", text["packets"]), ("duration", text["duration"]), ("first_seen", text["first_seen"])]
-    dns_columns = [("query", text["dns_query"]), ("count", text["count"])]
-    tls_columns = [("host", text["host"]), ("count", text["count"])]
     readable_columns = [("time", text["time"]), ("type", text["type"]), ("source", text["source"]), ("destination", text["destination"]), ("value", text["visible_value"])]
     artifact_columns = [("category", text["category"]), ("type", text["type"]), ("value", text["value"]), ("visibility", text["visibility"]), ("source", text["source"]), ("destination", text["destination"]), ("count", text["count"]), ("explanation", text["explanation"])]
     connection_columns = [("source", text["source"]), ("destination", text["destination"]), ("protocol", text["protocol"]), ("application", text["application"]), ("host", text["host_query"]), ("bytes", text["bytes"]), ("packets", text["packets"]), ("first", text["first_seen"]), ("last", text["last_seen"]), ("visible", text["visible_preview"])]
 
-    template = load_template("pcap_export.html")
-    html_doc = render_template(template, {
+    operational_notes = [
+        note for note in (investigator.get("limitations") or summary.notes or [])
+        if _is_operational_note(note)
+    ]
+    interpretation_section = ""
+    if operational_notes:
+        interpretation_section = (
+            '<section class="section">'
+            f"<h2>{html.escape(text['interpretation_notes'])}</h2>"
+            + "".join(f'<p class="plain">{html.escape(str(note))}</p>' for note in operational_notes)
+            + "</section>"
+        )
+
+    html_doc = render_template(load_export_template("pcap_export.html"), {
         "LANG": "en",
         "TITLE": text["title"],
-        "FILE_NAME": html.escape(source_summary),
-        "SOURCE_SUMMARY": html.escape(source_summary),
+        "DOCUMENT_TYPE": text["document_type"],
+        "REPORT_TITLE": text["title"],
+        "PERIOD_LABEL": text["period"],
+        "PERIOD": html.escape(period),
         "EXPORTED_LABEL": text["exported"],
         "EXPORTED_AT": generated_at,
+        "SOURCE_LABEL": text["source_label"],
+        "SOURCE": html.escape(source_summary),
+        "SCOPE_LABEL": text["scope"],
+        "SCOPE": html.escape(f"{summary.packet_count:,} packets · {human_bytes(summary.wire_bytes, precision=2)}"),
+        "CASE_CONTEXT_LABEL": text["case_context"],
+        "CASE_TABLE": case_context_table_html(case_context, include_dataset_target=False),
+        "PROJECT_NAME": project_label,
+        "PREPARED_LABEL": text["prepared"],
         "SUMMARY_LABEL": text["summary"],
         "INVESTIGATOR_LABEL": text["investigator"],
         "COMMUNICATION_HIGHLIGHTS_LABEL": text["communication_highlights"],
         "EVIDENCE_LABEL": text["evidence"],
         "ARTIFACTS_LABEL": text["artifacts"],
         "CONNECTIONS_LABEL": text["connections"],
-        "HERO_CARDS": hero_cards,
-        "STRUCTURE_NOTE": text["structure_note"],
+        "STATS_SECTION": f'<section class="section">{stats}</section>' if stats else "",
         "VISIBLE_SERVICE_GROUPS_LABEL": text["visible_service_groups"],
         "VISIBLE_VS_ENCRYPTED_LABEL": text["visible_vs_encrypted"],
         "ACTIVITY_TIMELINE_LABEL": text["activity_timeline"],
-        "SERVICE_GROUPS_TABLE": _table_html(headers(service_columns), _chart_rows(investigator.get("service_rows", []), service_columns, text=text)),
-        "VISIBILITY_TABLE": _table_html(headers(visibility_columns), _chart_rows(investigator.get("visibility_rows", []), visibility_columns, text=text)),
-        "ACTIVITY_TABLE": _table_html(headers(activity_columns), _chart_rows(investigator.get("activity_rows", []), activity_columns, text=text)),
+        "SERVICE_GROUPS_TABLE": ranked_list_html(
+            "",
+            investigator.get("service_rows", []),
+            label_key="service",
+            value_key="count",
+            meta_key="example",
+            empty_text=text["no_records"],
+        ),
+        "VISIBILITY_TABLE": ranked_list_html(
+            "",
+            investigator.get("visibility_rows", []),
+            label_key="label",
+            value_key="count",
+            empty_text=text["no_records"],
+        ),
+        "ACTIVITY_TABLE": ranked_list_html(
+            "",
+            investigator.get("activity_rows", []),
+            label_key="hour",
+            value_key="packets",
+            empty_text=text["no_records"],
+        ),
         "PLAIN_SUMMARY": html.escape(str(investigator.get("plain_summary") or "")),
         "KEY_POINTS": "".join(f'<div class="point">{html.escape(str(point))}</div>' for point in investigator.get("key_points", [])),
-        "COMMUNICATION_NOTE": text["communication_note"],
         "COMMUNICATION_BRIEF_CARDS": _brief_cards(communication_brief, text),
         "COMMUNICATION_TABLE": _table_html(headers(communication_columns), _communication_rows(communications, text=text)),
         "COMMUNICATION_EVIDENCE_DETAILS_LABEL": text["communication_evidence_details"],
         "COMMUNICATION_EVIDENCE_CARDS": _communication_evidence_cards(communications[:12], text=text),
-        "INTERPRETATION_NOTES_LABEL": text["interpretation_notes"],
-        "LIMITATION_NOTES": "".join(f'<div class="note">{html.escape(note)}</div>' for note in investigator.get("limitations", summary.notes)),
-        "EVIDENCE_NOTE": text["evidence_note"],
+        "INTERPRETATION_SECTION": interpretation_section,
         "TOP_DNS_QUERIES_LABEL": text["top_dns_queries"],
         "TOP_TLS_SNI_HOSTS_LABEL": text["top_tls_sni_hosts"],
-        "DNS_TABLE": _table_html(headers(dns_columns), rows(summary.dns_queries[:50], dns_columns)),
-        "TLS_TABLE": _table_html(headers(tls_columns), rows(summary.tls_sni[:50], tls_columns)),
+        "DNS_TABLE": ranked_list_html(
+            "",
+            summary.dns_queries[:50],
+            label_key="query",
+            value_key="count",
+            empty_text=text["no_records"],
+        ),
+        "TLS_TABLE": ranked_list_html(
+            "",
+            summary.tls_sni[:50],
+            label_key="host",
+            value_key="count",
+            empty_text=text["no_records"],
+        ),
         "READABLE_EVIDENCE_LABEL": text["readable_evidence"],
         "READABLE_TABLE": _table_html(headers(readable_columns), rows(readable, readable_columns)),
         "ARTIFACTS_TABLE": _table_html(headers(artifact_columns), rows(artifacts, artifact_columns)),
@@ -146,7 +189,7 @@ def _endpoint(ip: Any, port: Any) -> str:
 
 def _metric_card(label: Any, value: Any) -> str:
     return (
-        '<div class="card">'
+        '<div class="briefcard">'
         f'<div class="label">{html.escape(str(label))}</div>'
         f'<div class="value">{html.escape(str(value))}</div>'
         "</div>"
@@ -156,36 +199,19 @@ def _metric_card(label: Any, value: Any) -> str:
 def _brief_cards(communication_brief: dict[str, Any], text: dict[str, str]) -> str:
     return "\n".join(
         [
-            _metric_card(text["classified_indicators"], communication_brief["total"]).replace('class="card"', 'class="briefcard"'),
-            _metric_card(text["messaging_push"], communication_brief["messaging"]).replace('class="card"', 'class="briefcard"'),
-            _metric_card(text["call_media_candidates"], communication_brief["media"]).replace('class="card"', 'class="briefcard"'),
-            _metric_card(text["visible_services"], communication_brief["services"]).replace('class="card"', 'class="briefcard"'),
+            _metric_card(text["classified_indicators"], communication_brief["total"]),
+            _metric_card(text["messaging_push"], communication_brief["messaging"]),
+            _metric_card(text["call_media_candidates"], communication_brief["media"]),
+            _metric_card(text["visible_services"], communication_brief["services"]),
         ]
     )
 
 
 def _table_html(headers_html: str, body_html: str) -> str:
-    return f"<table><thead><tr>{headers_html}</tr></thead><tbody>{body_html}</tbody></table>"
-
-
-def _chart_rows(items: list[dict[str, Any]], columns: list[tuple[str, str]], *, text: dict[str, str] | None = None) -> str:
-    if not items:
-        no_records = (text or {}).get("no_records", "No records.")
-        return f"<tr><td colspan=\"99\">{html.escape(no_records)}</td></tr>"
-
-    parts = []
-    for item in items:
-        cells = []
-        for key, _label in columns:
-            if key == "bar_html":
-                share = _safe_float(item.get("share"))
-                cells.append(f"<td class=\"barcell\"><div class=\"bar\"><span style=\"width:{share:.1f}%\"></span></div></td>")
-            elif key == "share":
-                cells.append(f"<td>{_safe_float(item.get(key)):.1f}%</td>")
-            else:
-                cells.append(f"<td>{html.escape(str(item.get(key, '')))}</td>")
-        parts.append(f"<tr>{''.join(cells)}</tr>")
-    return "\n".join(parts)
+    return (
+        '<div class="table-wrap"><table class="data">'
+        f"<thead><tr>{headers_html}</tr></thead><tbody>{body_html}</tbody></table></div>"
+    )
 
 
 def _communication_brief(items: list[dict[str, Any]]) -> dict[str, Any]:
@@ -269,11 +295,9 @@ def _communication_evidence_cards(items: list[dict[str, Any]], *, text: dict[str
     return "\n".join(cards)
 
 
-def _safe_float(value: Any) -> float:
-    try:
-        return float(value)
-    except Exception:
-        return 0.0
+def _is_operational_note(note: Any) -> bool:
+    lowered = str(note or "").casefold()
+    return "capped" in lowered or "samples" in lowered
 
 
 def _duration_compact(value: Any) -> str:
@@ -310,8 +334,14 @@ def _export_source_summary(summary: PcapSummary) -> str:
 
 def _report_text() -> dict[str, str]:
     return {
-        "title": "ViaNyquist PCAP Report",
+        "title": "PCAP Report",
+        "document_type": "PCAP Report",
+        "period": "Period",
         "exported": "Exported",
+        "source_label": "Source",
+        "scope": "Scope",
+        "case_context": "Case context",
+        "prepared": "Prepared",
         "summary": "Summary",
         "investigator": "Investigator View",
         "communication_highlights": "Communication Highlights",
@@ -322,22 +352,11 @@ def _report_text() -> dict[str, str]:
         "packets": "Packets",
         "traffic_volume": "Traffic Volume",
         "likely_device_ip": "Device IP",
-        "capture_period": "Capture Period",
         "dns_queries": "DNS Queries",
         "tls_sni_hosts": "TLS SNI Hosts",
-        "readable_samples": "Readable Samples",
-        "structure_note": "This report follows the same structure as the PCAP screen in ViaNyquist: Summary explains what the capture indicates, while Evidence lists the observable records behind those conclusions.",
         "visible_service_groups": "Visible Service Groups",
         "visible_vs_encrypted": "Visible vs Encrypted Indicators",
         "activity_timeline": "Activity Timeline By Hour",
-        "service_group": "Service Group",
-        "signals": "Signals",
-        "share": "Share",
-        "chart": "Chart",
-        "example": "Example",
-        "visibility": "Visibility",
-        "hour": "Hour",
-        "communication_note": "These rows are investigative indicators based on metadata such as host names, ports, protocol, duration and traffic volume. They do not prove message content or confirm a call by themselves.",
         "classified_indicators": "Classified indicators",
         "messaging_push": "Messaging / push",
         "call_media_candidates": "Call / media candidates",
@@ -352,13 +371,10 @@ def _report_text() -> dict[str, str]:
         "first_seen": "First Seen",
         "last_seen": "Last Seen",
         "communication_evidence_details": "Communication Evidence Details",
-        "interpretation_notes": "Interpretation Notes",
-        "evidence_note": "These records are the visible metadata and cleartext values extracted from the capture. Encrypted payload contents are not decoded.",
+        "interpretation_notes": "Capture notes",
         "top_dns_queries": "Top DNS Queries",
         "top_tls_sni_hosts": "Top TLS SNI Hosts",
-        "dns_query": "DNS Query",
         "count": "Count",
-        "host": "Host",
         "readable_evidence": "Readable Evidence",
         "time": "Time",
         "type": "Type",
@@ -367,6 +383,7 @@ def _report_text() -> dict[str, str]:
         "visible_value": "Visible Value",
         "category": "Category",
         "value": "Value",
+        "visibility": "Visibility",
         "explanation": "Explanation",
         "application": "Application",
         "host_query": "Host/Query",

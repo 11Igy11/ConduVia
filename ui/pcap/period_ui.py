@@ -446,6 +446,10 @@ class PcapPeriodMixin:
             if revert_index >= 0:
                 self.cmb_pcap_period_mode.setCurrentIndex(revert_index)
             self.cmb_pcap_period_mode.blockSignals(False)
+            self._info(
+                "PCAP",
+                "Wait for the current PCAP analysis to finish, then change the period again.",
+            )
             return
         self._pcap_period_granularity = mode
         self._sync_pcap_range_button()
@@ -592,12 +596,11 @@ class PcapPeriodMixin:
         day = str(self._pcap_active_day or self.cmb_pcap_day.currentData() or "")
         if not day:
             return
-        if prefer_saved and self._try_load_saved_pcap_period(day, allow_when_paths_exist=True):
-            return
         paths = self._loadable_pcap_paths_for_day(day)
         if paths:
             self._load_pcap_files(paths, label=self._period_bucket_label(day))
-        elif prefer_saved:
+            return
+        if prefer_saved:
             self._try_load_saved_pcap_period(day, allow_when_paths_exist=True)
 
     def _loadable_pcap_paths_for_day(self, day: str) -> list[str]:

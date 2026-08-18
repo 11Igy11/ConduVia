@@ -6,6 +6,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QFileDialog, QHBoxLayout, QTableView, QWidget
 
 from core.db import get_project
+from core.exporters.html_blocks import format_export_source_label, format_selected_period_label
 from core.exporters.listing_exporter import export_listing_csv, export_listing_excel
 from core.exporters.table_exporter import export_table_html
 from core.formatters import format_export_cell
@@ -87,6 +88,7 @@ def export_table_file(
     project_id: int | None = None,
     project_name: str = "",
     source_label: str = "",
+    period: str = "",
 ) -> None:
     project = get_project(project_id) if project_id is not None else None
 
@@ -118,6 +120,7 @@ def export_table_file(
             project=project,
             project_name=project_name,
             source_label=source_label,
+            period=period,
         )
         return
     raise ValueError(f"Unsupported export format: {export_format}")
@@ -131,6 +134,33 @@ def resolve_export_project(parent: QWidget, project_id: int | None = None) -> tu
         if project_id is None:
             project_id = getattr(app, "current_project_id", None)
     return project_id, project_name
+
+
+def resolve_json_export_header(
+    parent: QWidget,
+    *,
+    source_label: str = "",
+    period: str = "",
+) -> tuple[str, str]:
+    app = getattr(parent, "app", None) or parent
+    controller = getattr(app, "dataset_controller", None)
+
+    source = format_export_source_label(source_label)
+    if not source:
+        folder = getattr(app, "current_folder", None)
+        source = format_export_source_label(folder)
+    if not source and controller is not None:
+        source = format_export_source_label(getattr(controller, "_json_day_source", ""))
+
+    selected_period = str(period or "").strip()
+    if not selected_period and controller is not None:
+        selected_period = format_selected_period_label(
+            active_day=str(getattr(controller, "_json_active_day", "") or ""),
+            granularity=str(getattr(controller, "_json_period_granularity", "day") or "day"),
+            range_start=str(getattr(controller, "_json_period_range_start", "") or ""),
+            range_end=str(getattr(controller, "_json_period_range_end", "") or ""),
+        )
+    return source, selected_period
 
 
 def notify_export_empty(parent: QWidget, *, title: str = "Export table") -> None:
@@ -219,6 +249,7 @@ def export_table_dialog(
     source_label: str = "",
     flows_override: list[dict[str, Any]] | None = None,
     flow_columns: list[str] | None = None,
+    period: str = "",
 ) -> None:
     if flows_override is not None:
         headers, rows = flows_to_export_rows(flows_override, columns=flow_columns)
@@ -244,6 +275,14 @@ def export_table_dialog(
         return
 
     project_id, project_name = resolve_export_project(parent, project_id)
+    if category == "json":
+        source_label, period = resolve_json_export_header(
+            parent,
+            source_label=source_label,
+            period=period,
+        )
+    else:
+        source_label = format_export_source_label(source_label) or str(source_label or "")
 
     try:
         export_table_file(
@@ -255,6 +294,7 @@ def export_table_dialog(
             project_id=project_id,
             project_name=project_name,
             source_label=source_label,
+            period=period,
         )
     except Exception as exc:
         notify_export_error(parent, str(exc))

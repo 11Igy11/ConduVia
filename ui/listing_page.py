@@ -18,7 +18,13 @@ from core.db import get_app_settings, get_project, get_app_setting, set_app_sett
 from core.parser import extract_dataset_meta
 from core.timeutils import parse_timestamp
 from ui.explore_widgets import CopyableTableView
-from ui.table_export import notify_export_error, notify_export_empty, notify_export_success, table_export_default_path
+from ui.table_export import (
+    notify_export_error,
+    notify_export_empty,
+    notify_export_success,
+    resolve_json_export_header,
+    table_export_default_path,
+)
 
 
 class ListingTableModel(QAbstractTableModel):
@@ -674,17 +680,19 @@ class ListingPage(QWidget):
 
         try:
             meta = self._export_dataset_meta()
+            source, period = resolve_json_export_header(self, source_label=self.dataset_path)
 
             export_listing_html(
                 file_path=file_path,
                 headers=headers,
                 rows=rows,
-                dataset=self.dataset_path,
+                dataset=source or self.dataset_path,
                 view_mode=self.cmb_view_mode.currentText(),
                 files_count=len(self.files),
                 meta=meta,
                 project=self._current_project(),
                 project_name=getattr(self.app, "current_project_name", "") or "",
+                period=period,
             )
             notify_export_success(self, file_path, title="Export")
         except Exception as e:

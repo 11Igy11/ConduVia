@@ -201,6 +201,8 @@ def export_notes_html_action(
             title=f"Project notes: {project_name or 'Project'}",
             notes_text=notes_page.notes_plain_text(),
             notes_html=notes_page.notes_text(),
+            project=project,
+            project_name=project_name or "",
         )
     except Exception as exc:
         return NotesExportResult(exported=False, error=str(exc))

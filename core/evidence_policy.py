@@ -1,12 +1,16 @@
 from __future__ import annotations
 
-"""Shared rules and UI copy for JSON/PCAP evidence handling."""
+"""Shared rules and UI copy for JSON/PCAP evidence handling.
+
+Selecting a JSON or PCAP Day/Month/Range always starts a background load.
+MAX_INTERACTIVE_* only influences the default period after a large import
+(Day vs Range), not whether a selected period can be opened.
+"""
 
 from pathlib import Path
 
 MAX_INTERACTIVE_EVIDENCE_FILES = 100
 MAX_INTERACTIVE_EVIDENCE_BYTES = 512 * 1024 * 1024
-MAX_INTERACTIVE_PCAP_FILES_PER_OPEN = 10
 
 PERIOD_LABEL = "Period:"
 
@@ -18,13 +22,9 @@ def should_open_interactively(file_count: int, byte_count: int) -> bool:
     )
 
 
-def should_batch_pcap_files(file_count: int, byte_count: int) -> bool:
-    count = int(file_count or 0)
-    if count <= 0:
-        return False
-    if not should_open_interactively(count, byte_count):
-        return True
-    return count > MAX_INTERACTIVE_PCAP_FILES_PER_OPEN
+def should_batch_pcap_files(file_count: int, byte_count: int = 0) -> bool:
+    """True when more than one PCAP should be analyzed as a background job."""
+    return int(file_count or 0) > 1
 
 
 def evidence_byte_count(paths: list[str] | tuple[str, ...] | None) -> int:

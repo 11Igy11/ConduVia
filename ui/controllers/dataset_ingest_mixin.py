@@ -821,8 +821,8 @@ class DatasetIngestMixin:
             )
         if scan.pcap_files and should_batch_pcap_files(len(scan.pcap_files), scan.pcap_size):
             details += (
-                "\n\nLarge PCAP source: ViaNyquist will analyze PCAP files in the background "
-                "(one file at a time) and save results to the project."
+                "\n\nPCAP files will be analyzed in the background "
+                "(one file at a time, with progress) and saved to the project."
             )
         return self.app._confirm_dialog(
             title="Import evidence folder",

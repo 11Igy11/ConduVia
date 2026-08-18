@@ -83,43 +83,6 @@ def case_export_metadata_rows(context: dict[str, str]) -> list[tuple[str, str]]:
     return rows
 
 
-def context_cards_html(
-    context: dict[str, str],
-    *,
-    card_class: str,
-    label_class: str = "label",
-    value_class: str = "value",
-    include_dataset_target: bool = True,
-) -> str:
-    fields = [
-        ("Project", context.get("project") or "-"),
-        ("Case Subject", context.get("subject") or "-"),
-        ("Known Identifiers", context.get("identifiers") or "-"),
-    ]
-
-    if context.get("oib") and context.get("oib") != "-":
-        fields.append(("OIB", context.get("oib") or "-"))
-
-    if context.get("known_ip") and context.get("known_ip") != "-":
-        fields.append(("Known IP", context.get("known_ip") or "-"))
-
-    for label, key in (("Klasa", "klasa"), ("Urbroj", "urbroj"), ("Lawful interception dates", "order_validity")):
-        value = str(context.get(key) or "").strip()
-        if value and value != "-":
-            fields.append((label, value))
-
-    if include_dataset_target:
-        fields.append(("Dataset Target", context.get("dataset_target") or "-"))
-
-    return "\n".join(
-        f'<div class="{html.escape(card_class)}">'
-        f'<div class="{html.escape(label_class)}">{html.escape(label)}</div>'
-        f'<div class="{html.escape(value_class)}">{html.escape(str(value))}</div>'
-        "</div>"
-        for label, value in fields
-    )
-
-
 def case_context_table_html(
     context: dict[str, str],
     *,
