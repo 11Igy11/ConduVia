@@ -418,6 +418,7 @@ class DatasetLoadMixin:
                 "Dataset load finished, but the active project changed. The loaded data was ignored.",
                 width=520,
             )
+            self._abort_deferred_import_session()
             return
 
         path = str(result["path"])
@@ -433,6 +434,7 @@ class DatasetLoadMixin:
         ):
             self._bind_empty_project_target(meta)
         elif not self._confirm_or_bind_project_target(meta):
+            self._abort_deferred_import_session()
             return
 
         flows = result["flows"]
@@ -519,8 +521,6 @@ class DatasetLoadMixin:
             self.app.notes_controller.refresh_activity_ui()
             self._start_behavior_index(self.app.current_project_id)
 
-        self.render_summary()
-
         self.app.model.set_flows(self.app.flow_controller.get_loaded())
 
         combo = getattr(self.app, "cmb_flows_view", None)
@@ -546,8 +546,61 @@ class DatasetLoadMixin:
             self.app.findings_controller.refresh_ui()
         if hasattr(self.app, "osint_ui_controller"):
             self.app.osint_ui_controller.refresh()
-        self._flush_pending_pcap_open()
+
+        period_bits: list[str] = []
+        if self._json_active_day:
+            period_bits.append(self._format_day_label(self._json_active_day))
+        if len(files) > 1:
+            period_bits.append(f"{len(files):,} files")
+        period_bits.append(f"{len(flows):,} flows")
+        from core.project_audit import record_project_activity
+
+        record_project_activity(
+            self.app.current_project_id,
+            "json_period_loaded",
+            " | ".join(period_bits) if period_bits else path,
+        )
+
+        self._finish_deferred_import_after_json_load()
         self._sync_json_period_selector_panel()
+        QTimer.singleShot(0, self.render_summary)
+
+    def _abort_deferred_import_session(self) -> None:
+        self._pending_pcap_after_json = None
+        if not getattr(self, "_defer_import_finalize", False):
+            return
+        self._defer_import_finalize = False
+        if self.import_session_active():
+            self.end_import_session()
+
+    def _finish_deferred_import_after_json_load(self) -> None:
+        if getattr(self, "_import_cancel_requested", False):
+            return
+        if not getattr(self, "_defer_import_finalize", False):
+            self._flush_pending_pcap_open()
+            return
+
+        self._defer_import_finalize = False
+        pending_pcap = self._pending_pcap_after_json
+        will_batch = self._pending_pcap_plan_will_batch(pending_pcap)
+        self._flush_pending_pcap_open()
+
+        if will_batch or getattr(self, "_import_finalize_pending", False):
+            self.update_import_progress(
+                phase="PCAP analysis",
+                detail=self._pending_import_banner_message
+                or "Batch PCAP analysis running. Progress updates appear here.",
+                indeterminate=True,
+            )
+            return
+
+        self._import_finalize_completed = True
+        project_id = getattr(self.app, "current_project_id", None)
+        if project_id is not None and not getattr(self, "_import_finalize_pending", False):
+            self.deferred_sync_project_periods(project_id)
+        self._record_import_completed(project_id)
+        self._finalize_import_refresh()
+        self.end_import_session()
 
     def _reset_ai_outputs_for_new_dataset(self) -> None:
         if hasattr(self.app, "btn_ai_summary"):
@@ -765,10 +818,21 @@ class DatasetLoadMixin:
 
     def _on_dataset_load_error(self, title: str, details: str):
         self._close_dataset_load_progress()
+        self._pending_pcap_after_json = None
+        if getattr(self, "_defer_import_finalize", False):
+            self._defer_import_finalize = False
+            from core.project_audit import record_project_activity
+
+            record_project_activity(
+                getattr(self.app, "current_project_id", None),
+                "import_failed",
+                f"JSON load: {details or title}",
+            )
+            if self.import_session_active():
+                self.end_import_session()
         if hasattr(self.app, "lbl_stats"):
             self.app.explore_ui_controller.set_json_stats_text("JSON dataset load failed.", include_counts=False)
         self.app._message_dialog("Dataset", title, details, width=520)
-        self._flush_pending_pcap_open()
 
     def _cleanup_load_thread(self):
         self._close_dataset_load_progress()

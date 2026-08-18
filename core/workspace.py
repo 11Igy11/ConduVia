@@ -27,6 +27,7 @@ def ensure_workspace_structure(base_folder: str) -> None:
 
     for name in WORKSPACE_SUBFOLDERS:
         (root / name).mkdir(parents=True, exist_ok=True)
+    (root / "logs").mkdir(parents=True, exist_ok=True)
 
 
 def get_workspace_subfolder(base_folder: str, name: str) -> Path | None:

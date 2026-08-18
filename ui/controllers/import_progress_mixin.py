@@ -278,12 +278,20 @@ class ImportProgressMixin:
             paused=self._import_pause_gate.is_paused(),
         )
         dialog.apply_view(view)
+        self._sync_import_progress_chrome()
 
     def _sync_import_progress_chrome(self) -> None:
-        btn = getattr(self.app, "btn_show_import_progress", None)
-        if btn is None:
-            return
         active = self.import_session_active()
-        btn.setVisible(active and self._import_progress_hidden)
-        if active:
-            btn.setText("Show import progress")
+        hidden = bool(getattr(self, "_import_progress_hidden", False))
+        btn = getattr(self.app, "btn_show_import_progress", None)
+        if btn is not None:
+            btn.setVisible(active and hidden)
+            if active:
+                btn.setText("Show import progress")
+        sidebar_btn = getattr(self.app, "btn_import_progress", None)
+        if sidebar_btn is not None:
+            sidebar_btn.setVisible(active)
+            if active:
+                phase = str(getattr(self, "_import_phase", "") or "Import in progress").strip()
+                short = phase if len(phase) <= 14 else f"{phase[:11]}…"
+                sidebar_btn.setText(short or "Import…")

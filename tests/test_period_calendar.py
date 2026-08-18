@@ -5,9 +5,12 @@ from datetime import datetime
 
 from core.period_calendar import (
     calendar_day_coverage_note,
+    filter_hourly_activity_to_calendar_day,
     format_calendar_day_window,
     flow_on_calendar_day,
+    refine_pcap_summary_for_calendar_day,
 )
+from core.pcap_analyzer import PcapSummary
 from core.timeutils import LOCAL_TZ
 
 
@@ -46,6 +49,42 @@ class PeriodCalendarTests(unittest.TestCase):
                 "2024-07-03",
             )
         )
+
+    def test_filter_hourly_activity_to_calendar_day(self) -> None:
+        rows = [
+            {"hour": "2024-05-30 11:00", "packets": 55479},
+            {"hour": "2024-05-31 11:00", "packets": 21761},
+            {"hour": "2024-05-31 12:00", "packets": 9000},
+        ]
+        filtered = filter_hourly_activity_to_calendar_day(rows, "2024-05-31")
+        self.assertEqual([row["hour"] for row in filtered], ["2024-05-31 11:00", "2024-05-31 12:00"])
+        self.assertEqual(sum(int(row["packets"]) for row in filtered), 30761)
+
+    def test_refine_pcap_summary_filters_hourly_and_service_metadata(self) -> None:
+        inside = datetime(2024, 5, 31, 11, 30, tzinfo=LOCAL_TZ)
+        summary = PcapSummary(
+            packet_count=120000,
+            hourly_activity=[
+                {"hour": "2024-05-30 11:00", "packets": 55479},
+                {"hour": "2024-05-31 11:00", "packets": 21761},
+            ],
+            tls_sni=[{"host": "old.example", "count": 99999}],
+            flows=[
+                {
+                    "bidirectional_first_seen_ms": int(inside.timestamp() * 1000),
+                    "bidirectional_packets": 500,
+                    "bidirectional_bytes": 12000,
+                    "requested_server_name": "gateway.icloud.com",
+                }
+            ],
+        )
+        refined, _note = refine_pcap_summary_for_calendar_day(summary, "2024-05-31")
+        hours = [row["hour"] for row in refined.hourly_activity]
+        self.assertEqual(hours, ["2024-05-31 11:00"])
+        self.assertEqual(int(refined.hourly_activity[0]["packets"]), 21761)
+        self.assertEqual(refined.packet_count, 500)
+        self.assertTrue(any("icloud" in str(row.get("host") or "").lower() for row in refined.tls_sni))
+        self.assertFalse(any("old.example" in str(row.get("host") or "") for row in refined.tls_sni))
 
 
 if __name__ == "__main__":

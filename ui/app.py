@@ -647,18 +647,6 @@ class App(QWidget):
     def add_ai_text_to_notes(self, text: str) -> bool:
         return self.notes_controller.append_ai_text(text)
 
-    def add_ai_summary_to_notes(self):
-        text = ""
-        if hasattr(self, "_ai_output_state"):
-            text = (self._ai_output_state.text or "").strip()
-        if not text and hasattr(self, "txt_ai_hub"):
-            text = (self.txt_ai_hub.toPlainText() or "").strip()
-        if not text:
-            self._message_dialog("Notes", "There is no AI-generated text to add.", width=440)
-            return
-
-        self.add_ai_text_to_notes(text)
-
     def copy_text(self, text: str):
         if text:
             QGuiApplication.clipboard().setText(text)

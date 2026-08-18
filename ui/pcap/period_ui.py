@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from core.evidence_policy import format_period_day_label
+from core.evidence_policy import evidence_byte_count, format_period_day_label, should_open_interactively
 from core.formatters import human_bytes
 from core.pcap_analyzer import PcapSummary
 from core.pcap_period import _iso_day_from_path, resolve_period_day
@@ -341,11 +341,15 @@ class PcapPeriodMixin:
 
         self._pcap_period_range_start = start_day
         self._pcap_period_range_end = end_day
-        self._pcap_period_granularity = "range"
+        all_paths = [path for paths in self._pcap_day_groups_raw.values() for path in (paths or [])]
+        use_range = should_open_interactively(len(all_paths), evidence_byte_count(all_paths))
+        self._pcap_period_granularity = "range" if use_range else "day"
+        if not use_range:
+            self._pcap_active_day = end_day
 
         if hasattr(self, "cmb_pcap_period_mode"):
             self.cmb_pcap_period_mode.blockSignals(True)
-            idx = self.cmb_pcap_period_mode.findData("range")
+            idx = self.cmb_pcap_period_mode.findData(self._pcap_period_granularity)
             if idx >= 0:
                 self.cmb_pcap_period_mode.setCurrentIndex(idx)
             self.cmb_pcap_period_mode.blockSignals(False)
@@ -454,7 +458,7 @@ class PcapPeriodMixin:
         has_periods = bool(self._pcap_day_groups_raw or self._pcap_day_groups)
         sync_period_selector_panel(
             has_periods=has_periods,
-            granularity=self._pcap_period_granularity,
+            granularity=getattr(self, "_pcap_period_granularity", "day"),
             period_label=getattr(self, "lbl_pcap_day", None),
             day_combo=getattr(self, "cmb_pcap_day", None),
             mode_combo=getattr(self, "cmb_pcap_period_mode", None),
@@ -564,9 +568,10 @@ class PcapPeriodMixin:
         token = str(file_combo.itemData(index) or "")
         self._pcap_active_file = "" if token == _PCAP_ALL_FILES_TOKEN else token
         day = str(self._pcap_active_day or self.cmb_pcap_day.currentData() or "")
-        if day and self._try_load_saved_pcap_period(day) and not self._pcap_active_file:
-            return
-        paths = self._active_pcap_period_paths(day)
+        if day and not self._pcap_active_file and not self._loadable_pcap_paths_for_day(day):
+            if self._try_load_saved_pcap_period(day):
+                return
+        paths = self._loadable_pcap_paths_for_day(day) or self._active_pcap_period_paths(day)
         if not paths:
             return
         if len(paths) == 1:
@@ -587,17 +592,24 @@ class PcapPeriodMixin:
         day = str(self._pcap_active_day or self.cmb_pcap_day.currentData() or "")
         if not day:
             return
-        if prefer_saved and self._try_load_saved_pcap_period(day):
+        if prefer_saved and self._try_load_saved_pcap_period(day, allow_when_paths_exist=True):
             return
-        paths = self._active_pcap_period_paths(day)
+        paths = self._loadable_pcap_paths_for_day(day)
         if paths:
             self._load_pcap_files(paths, label=self._period_bucket_label(day))
         elif prefer_saved:
-            self._try_load_saved_pcap_period(day)
+            self._try_load_saved_pcap_period(day, allow_when_paths_exist=True)
 
-    def _try_load_saved_pcap_period(self, day: str) -> bool:
+    def _loadable_pcap_paths_for_day(self, day: str) -> list[str]:
+        paths = self._active_pcap_period_paths(day)
+        return [path for path in paths if Path(path).is_file()]
+
+    def _try_load_saved_pcap_period(self, day: str, *, allow_when_paths_exist: bool = False) -> bool:
         project_id = self._current_project_id()
         if project_id is None or not day:
+            return False
+
+        if not allow_when_paths_exist and self._loadable_pcap_paths_for_day(day):
             return False
 
         source = get_saved_pcap_period_source(project_id, day)
@@ -620,7 +632,12 @@ class PcapPeriodMixin:
             f"Period: {self._format_pcap_range(source.first_seen, source.last_seen)} | "
             "Loaded from project save — use Re-analyze Period for full communications view."
         )
-        plain = str(source.summary_text or "").strip() or "Saved PCAP period is available in the project profile."
+        plain = str(source.summary_text or "").strip()
+        if int(source.packet_count or 0) <= 0:
+            plain = (
+                plain
+                or "Saved PCAP period is available in the project profile, but packet totals were not recorded."
+            )
         self._set_investigator_text({"plain_summary": plain})
         empty_saved = "Open Re-analyze Period to rebuild full tables from source PCAP files."
         self.lbl_highlights_brief.setText("Saved PCAP period loaded from project profile.")
@@ -714,7 +731,7 @@ class PcapPeriodMixin:
         self._pcap_active_file = ""
         self._rebuild_pcap_file_combo()
         self._pcap_queue = []
-        paths = self._active_pcap_period_paths(day)
+        paths = self._loadable_pcap_paths_for_day(day)
         if self._try_load_saved_pcap_period(day):
             return
         if not paths:

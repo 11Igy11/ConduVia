@@ -134,7 +134,7 @@ class PcapInvestigatorMixin:
                 "label": label,
                 "tooltip": f"{label} - {example}" if example else label,
                 "count": count,
-                "value": f"{count} / {share_text}",
+                "value": f"{count:,} / {share_text}",
             })
         return chart_rows
 

@@ -32,7 +32,6 @@ from core.analysis_limits import (
 )
 from core.analyzer import top_applications, top_dst_ips, top_protocols, top_src_ips
 from core.investigation_snapshot import build_json_snapshot
-from core.evidence_policy import format_period_day_label
 from core.case_ingest import evidence_paths, filter_case_scan, group_evidence_by_date
 from core.db import (
     add_dataset_load,
@@ -70,8 +69,10 @@ from core.evidence_policy import (
     MAX_INTERACTIVE_EVIDENCE_BYTES as MAX_INTERACTIVE_FOLDER_JSON_BYTES,
     MAX_INTERACTIVE_EVIDENCE_FILES as MAX_INTERACTIVE_FOLDER_JSON_FILES,
     PERIOD_LABEL,
+    evidence_byte_count,
     format_period_day_label,
     indexed_source_message,
+    oversized_interactive_load_message,
     period_combo_label,
     should_batch_pcap_files,
     should_open_interactively,
@@ -274,18 +275,15 @@ class DatasetController(DatasetLoadMixin, DatasetIngestMixin, ImportProgressMixi
                 self._fill_summary_preview_rows(rows, items)
 
         for key, button in getattr(self.app, "summary_expand_buttons", {}).items():
-            if key == "src":
-                total = len(top_src_ips(flows, limit=100000))
-            elif key == "dst":
-                total = len(top_dst_ips(flows, limit=100000))
-            elif key == "proto":
-                total = len(top_protocols(flows, limit=100000))
-            else:
-                total = len(top_applications(flows, limit=100000))
-            available = embedded_expand_available(total, preview_rows=preview)
+            items = dataset_items.get("apps" if key == "apps" else key) or []
+            preview_count = len(items)
+            available = embedded_expand_available(preview_count, preview_rows=preview)
             button.setVisible(available)
             button.setEnabled(available)
-            tooltip = embedded_expand_tooltip(total, preview_rows=preview)
+            if preview_count >= preview:
+                tooltip = f"At least {preview:,} rows — open the full table to sort or export."
+            else:
+                tooltip = embedded_expand_tooltip(preview_count, preview_rows=preview)
             button.setToolTip(tooltip if available else "")
 
         active_day = str(getattr(self, "_json_active_day", "") or "")
@@ -405,12 +403,16 @@ class DatasetController(DatasetLoadMixin, DatasetIngestMixin, ImportProgressMixi
 
         self._json_period_range_start = start_day
         self._json_period_range_end = end_day
-        self._json_period_granularity = "range"
+        all_paths = [path for paths in self._json_day_groups_raw.values() for path in (paths or [])]
+        use_range = should_open_interactively(len(all_paths), evidence_byte_count(all_paths))
+        self._json_period_granularity = "range" if use_range else "day"
+        if not use_range:
+            self._json_active_day = end_day
 
         mode_combo = getattr(self.app, "cmb_json_period_mode", None)
         if mode_combo is not None:
             mode_combo.blockSignals(True)
-            idx = mode_combo.findData("range")
+            idx = mode_combo.findData(self._json_period_granularity)
             if idx >= 0:
                 mode_combo.setCurrentIndex(idx)
             mode_combo.blockSignals(False)
@@ -741,6 +743,21 @@ class DatasetController(DatasetLoadMixin, DatasetIngestMixin, ImportProgressMixi
         has_period = bool(self._json_day_groups and self._json_active_day and self._active_json_period_files())
         btn.setEnabled(not busy and has_period)
 
+    def _refuse_oversized_json_period(self, files: list[str], day: str) -> bool:
+        byte_count = evidence_byte_count(files)
+        if should_open_interactively(len(files), byte_count):
+            return False
+        title, details = oversized_interactive_load_message(
+            kind="JSON",
+            file_count=len(files),
+            byte_count=byte_count,
+            period_label=self._format_day_label(day),
+        )
+        if hasattr(self.app, "lbl_stats"):
+            self.app.lbl_stats.setText(indexed_source_message(json_files=len(files)))
+        self.app._message_dialog(title, details, width=640)
+        return True
+
     def _try_load_active_json_period(self, *, force: bool = True) -> None:
         if self._json_active_day and self._active_json_period_files():
             self._load_active_json_period(force=force)
@@ -761,6 +778,8 @@ class DatasetController(DatasetLoadMixin, DatasetIngestMixin, ImportProgressMixi
         if active_file and active_file in files:
             files = [active_file]
         if not force and self.app.flow_controller.get_all():
+            return
+        if self._refuse_oversized_json_period(files, day):
             return
         self._json_active_day = day
         period_label = self._format_day_label(day)
@@ -1031,21 +1050,27 @@ class DatasetController(DatasetLoadMixin, DatasetIngestMixin, ImportProgressMixi
         self._set_json_day_groups(source_root, by_day)
         self._apply_period_index_after_project_sync(by_day, kind="json")
 
-        total_files = sum(len(paths) for paths in by_day.values())
+        from core.project_evidence import get_project_evidence_totals
+
+        totals = get_project_evidence_totals(project_id)
+        total_files = int(totals.get("json_file_count") or sum(len(paths) for paths in by_day.values()))
+        day_count = int(totals.get("json_day_count") or len(by_day))
         if hasattr(self.app, "lbl_path") and not str(getattr(self.app, "current_folder", "") or "").strip():
             self.app.lbl_path.setText(f"Project: {getattr(self.app, 'current_project_name', '') or 'active'}")
         indexed_msg = (
-            f"{total_files:,} JSON files indexed across {len(by_day)} periods. "
+            f"{total_files:,} JSON files indexed across {day_count} periods. "
             f"Select Period above to load flows into the table."
         )
         if hasattr(self.app, "lbl_stats"):
             self.app.explore_ui_controller.set_json_stats_text(indexed_msg, include_counts=False)
 
     def _cached_json_day_groups(self, project_id: int) -> dict[str, list[str]]:
+        from core.project_evidence import json_day_groups_from_ingest
+
         cached = self._json_ingest_day_groups_cache.get(int(project_id))
         if cached is not None:
             return dict(cached)
-        by_day = self._json_day_groups_from_ingest(project_id)
+        by_day = json_day_groups_from_ingest(project_id)
         self._json_ingest_day_groups_cache[int(project_id)] = dict(by_day)
         return by_day
 
@@ -1060,12 +1085,16 @@ class DatasetController(DatasetLoadMixin, DatasetIngestMixin, ImportProgressMixi
         return by_day
 
     def _invalidate_ingest_day_groups_cache(self, project_id: int | None = None) -> None:
+        from core.project_evidence import invalidate_project_evidence_cache
+
         if project_id is None:
             self._pcap_ingest_day_groups_cache.clear()
             self._json_ingest_day_groups_cache.clear()
             return
-        self._pcap_ingest_day_groups_cache.pop(int(project_id), None)
-        self._json_ingest_day_groups_cache.pop(int(project_id), None)
+        pid = int(project_id)
+        self._pcap_ingest_day_groups_cache.pop(pid, None)
+        self._json_ingest_day_groups_cache.pop(pid, None)
+        invalidate_project_evidence_cache(pid)
 
     def _invalidate_pcap_ingest_day_groups_cache(self, project_id: int | None = None) -> None:
         self._invalidate_ingest_day_groups_cache(project_id)
@@ -1094,11 +1123,15 @@ class DatasetController(DatasetLoadMixin, DatasetIngestMixin, ImportProgressMixi
         if getattr(pcap_page, "summary", None) is None and hasattr(pcap_page, "lbl_stats"):
             if pcap_page.batch_is_running():
                 return
-            total_files = sum(len(paths) for paths in by_day.values())
+            from core.project_evidence import get_project_evidence_totals
+
+            totals = get_project_evidence_totals(project_id)
+            total_files = int(totals.get("pcap_indexed_file_count") or sum(len(paths) for paths in by_day.values()))
+            day_count = int(totals.get("pcap_indexed_day_count") or len(by_day))
             saved_only = sum(1 for paths in by_day.values() if not paths)
             saved_note = f" ({saved_only} saved-only)" if saved_only else ""
             pcap_page.lbl_stats.setText(
-                f"{total_files:,} PCAP files indexed across {len(by_day)} periods{saved_note}. "
+                f"{total_files:,} PCAP files indexed across {day_count} periods{saved_note}. "
                 f"Select Period above to open saved analysis or re-analyze source files."
             )
 

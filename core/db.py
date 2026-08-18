@@ -1013,6 +1013,99 @@ def rollback_project_import(
     return counts
 
 
+def count_ingest_items(
+    project_id: int,
+    *,
+    source_root: str = "",
+    file_type: str = "",
+    status: str = "",
+    db_path: Path = DEFAULT_DB_PATH,
+) -> int:
+    clauses = ["project_id = ?"]
+    params: list[object] = [project_id]
+    if source_root:
+        clauses.append("source_root = ?")
+        params.append(source_root)
+    if file_type:
+        clauses.append("file_type = ?")
+        params.append(file_type.strip().lower())
+    if status:
+        clauses.append("status = ?")
+        params.append(status.strip().lower())
+
+    with _connect(db_path) as con:
+        row = con.execute(
+            f"""
+            SELECT COUNT(*) AS total
+            FROM ingest_items
+            WHERE {' AND '.join(clauses)};
+            """,
+            tuple(params),
+        ).fetchone()
+    return int(row["total"] or 0) if row else 0
+
+
+def count_ingest_days(
+    project_id: int,
+    *,
+    file_type: str = "",
+    status: str = "",
+    db_path: Path = DEFAULT_DB_PATH,
+) -> int:
+    clauses = [
+        "project_id = ?",
+        "observed_date IS NOT NULL",
+        "observed_date != ''",
+        "observed_date != 'undated'",
+    ]
+    params: list[object] = [project_id]
+    if file_type:
+        clauses.append("file_type = ?")
+        params.append(file_type.strip().lower())
+    if status:
+        clauses.append("status = ?")
+        params.append(status.strip().lower())
+
+    with _connect(db_path) as con:
+        row = con.execute(
+            f"""
+            SELECT COUNT(DISTINCT observed_date) AS total
+            FROM ingest_items
+            WHERE {' AND '.join(clauses)};
+            """,
+            tuple(params),
+        ).fetchone()
+    return int(row["total"] or 0) if row else 0
+
+
+def count_pcap_sources(project_id: int, *, db_path: Path = DEFAULT_DB_PATH) -> int:
+    with _connect(db_path) as con:
+        row = con.execute(
+            """
+            SELECT COUNT(*) AS total
+            FROM pcap_sources
+            WHERE project_id = ?;
+            """,
+            (project_id,),
+        ).fetchone()
+    return int(row["total"] or 0) if row else 0
+
+
+def count_saved_pcap_days(project_id: int, *, db_path: Path = DEFAULT_DB_PATH) -> int:
+    with _connect(db_path) as con:
+        row = con.execute(
+            """
+            SELECT COUNT(DISTINCT period_day) AS total
+            FROM pcap_sources
+            WHERE project_id = ?
+              AND period_day IS NOT NULL
+              AND period_day != '';
+            """,
+            (project_id,),
+        ).fetchone()
+    return int(row["total"] or 0) if row else 0
+
+
 def list_ingest_items(
     project_id: int,
     *,

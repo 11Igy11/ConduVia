@@ -24,6 +24,7 @@ def wire_app_ui(app: App) -> None:
 
     app.btn_load.clicked.connect(app.dataset_controller.load_dataset_dialog)
     app.btn_show_import_progress.clicked.connect(app.dataset_controller.show_import_progress_dialog)
+    app.btn_import_progress.clicked.connect(app.dataset_controller.show_import_progress_dialog)
     app.btn_ai_summary.clicked.connect(app.explore_ui_controller.generate_ai_summary)
     app.btn_add_summary_to_notes.clicked.connect(app.dataset_controller.add_json_summary_to_notes)
     app.btn_add_finding_to_notes.clicked.connect(app.findings_controller.add_selected_findings_to_notes)

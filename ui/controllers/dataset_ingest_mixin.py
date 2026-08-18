@@ -162,8 +162,19 @@ class DatasetIngestMixin:
         self._scan_worker = None
 
     def _on_folder_scan_error(self, message: str) -> None:
+        if self.import_session_active() and (
+            getattr(self, "_import_cancel_requested", False) or self._import_pause_gate.is_aborted()
+        ):
+            return
         if self.import_session_active():
             self.end_import_session()
+        from core.project_audit import record_project_activity
+
+        record_project_activity(
+            getattr(self.app, "current_project_id", None),
+            "import_failed",
+            f"Scan: {message}",
+        )
         self.app._message_dialog("Dataset folder", "Failed to scan selected folder.", message, width=520)
 
     def _on_folder_scan_finished(self, scan) -> None:
@@ -244,7 +255,18 @@ class DatasetIngestMixin:
     def _on_folder_ingest_error(self, message: str) -> None:
         self._pending_ingest_scan = None
         self._pending_ingest_folder = ""
+        if self.import_session_active() and (
+            getattr(self, "_import_cancel_requested", False) or self._import_pause_gate.is_aborted()
+        ):
+            return
         if self.import_session_active():
+            from core.project_audit import record_project_activity
+
+            record_project_activity(
+                getattr(self.app, "current_project_id", None),
+                "import_failed",
+                f"Ingest: {message}",
+            )
             self.end_import_session()
         self.app._message_dialog("Dataset folder", "Failed to index evidence files.", message, width=520)
 
@@ -318,6 +340,15 @@ class DatasetIngestMixin:
                     return
                 plan["json_files"] = json_files
                 plan["pcap_files"] = pcap_files
+                from core.project_audit import record_project_activity
+
+                record_project_activity(
+                    getattr(self.app, "current_project_id", None),
+                    "import_started",
+                    (
+                        f"{folder} | {len(json_files):,} JSON, {len(pcap_files):,} PCAP"
+                    ),
+                )
                 self._register_project_evidence_source(folder, scan, defer_workspace_sync=True)
                 plan["phase"] = "json" if json_files else "pcap"
                 QTimer.singleShot(0, self._import_process_tick)
@@ -351,6 +382,13 @@ class DatasetIngestMixin:
             if phase == "done":
                 self._finish_import_processing(plan.get("opened"))
         except Exception as exc:
+            from core.project_audit import record_project_activity
+
+            record_project_activity(
+                getattr(self.app, "current_project_id", None),
+                "import_failed",
+                f"Prepare evidence: {exc}",
+            )
             self._finish_import_processing(None)
             self.app._message_dialog(
                 "Import evidence folder",
@@ -370,12 +408,33 @@ class DatasetIngestMixin:
                 indeterminate=True,
             )
             return
+        if self._thread_is_running(getattr(self, "_load_thread", None)):
+            self._defer_import_finalize = True
+            self.update_import_progress(
+                phase="Loading JSON flows",
+                detail="Finishing JSON import...",
+                indeterminate=True,
+            )
+            return
         self._import_finalize_completed = True
         project_id = getattr(self.app, "current_project_id", None)
         if project_id is not None and not getattr(self, "_import_finalize_pending", False):
             self.deferred_sync_project_periods(project_id)
+        self._record_import_completed(project_id)
         self._finalize_import_refresh()
         self.end_import_session()
+
+    def _record_import_completed(self, project_id: int | None) -> None:
+        from core.project_audit import record_project_activity
+
+        record_project_activity(project_id, "import_completed", "Evidence import finished.")
+
+    def _pending_pcap_plan_will_batch(self, pending: tuple[str, object] | None) -> bool:
+        if pending is None:
+            return False
+        folder, scan = pending
+        plan = self._plan_scanned_pcap_import(folder, scan)
+        return bool(plan and plan.get("save_all_periods"))
 
     def complete_deferred_import_finalize(self) -> None:
         if getattr(self, "_import_finalize_completed", False):
@@ -390,6 +449,7 @@ class DatasetIngestMixin:
         self._invalidate_pcap_ingest_day_groups_cache(project_id)
         if project_id is not None:
             self.deferred_sync_project_periods(project_id)
+        self._record_import_completed(project_id)
         self._finalize_import_refresh()
         self.end_import_session()
 
@@ -476,20 +536,6 @@ class DatasetIngestMixin:
         self._pending_pcap_after_json = None
         folder, scan = pending
         QTimer.singleShot(0, lambda: self._open_scanned_pcap_files(folder, scan))
-
-    def _process_scanned_folder(self, folder: str, scan, *, defer_workspace_sync: bool = False) -> str | None:
-        """Legacy single-pass import helper; interactive import uses _import_process_tick."""
-        plan: dict = {"json_load_started": False, "pcap_files": [item.path for item in scan.pcap_files]}
-        opened = self._process_import_json_phase(folder, scan, plan)
-        pcap_files = plan.get("pcap_files") or []
-        if pcap_files and hasattr(self.app, "pcap_page"):
-            if plan.get("json_load_started") and self._thread_is_running(self._load_thread):
-                self._pending_pcap_after_json = (folder, scan)
-                return opened or "json"
-            pcap_opened = self._open_scanned_pcap_files(folder, scan)
-            if pcap_opened:
-                return pcap_opened
-        return opened
 
     def _plan_scanned_pcap_import(self, folder: str, scan) -> dict | None:
         pcap_files = [item.path for item in scan.pcap_files]
@@ -868,29 +914,9 @@ class DatasetIngestMixin:
     def _json_day_groups_from_ingest(self, project_id: int | None, folder_prefix: str = "") -> dict[str, list[str]]:
         if project_id is None:
             return {}
-        prefix_key = ""
-        if folder_prefix:
-            try:
-                prefix_key = str(Path(folder_prefix).resolve()).casefold()
-            except Exception:
-                prefix_key = str(folder_prefix).casefold()
+        from core.project_evidence import json_day_groups_from_ingest
 
-        by_day: dict[str, list[str]] = {}
-        for item in list_ingest_items(project_id, file_type="json", limit=50000):
-            path = str(item.file_path or "").strip()
-            if not path or not Path(path).is_file():
-                continue
-            if prefix_key:
-                try:
-                    if not str(Path(path).resolve()).casefold().startswith(prefix_key):
-                        continue
-                except Exception:
-                    if prefix_key not in path.casefold():
-                        continue
-            day = str(item.observed_date or "undated").strip() or "undated"
-            if path not in by_day.setdefault(day, []):
-                by_day[day].append(path)
-        return by_day
+        return json_day_groups_from_ingest(int(project_id), folder_prefix=folder_prefix)
 
     def _mark_large_json_source_indexed(self, folder: str, file_count: int, byte_count: int, *, day_count: int = 0, defer_workspace_sync: bool = False) -> None:
         if hasattr(self.app, "lbl_path"):

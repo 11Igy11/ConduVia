@@ -5,7 +5,16 @@ from pathlib import Path
 from typing import Any
 
 from core.analysis_limits import MAX_EVIDENCE_SNAPSHOT_ITEMS
-from core.db import DEFAULT_DB_PATH, list_ingest_items, list_pcap_sources, list_recent_datasets
+from core.db import (
+    DEFAULT_DB_PATH,
+    count_ingest_days,
+    count_ingest_items,
+    count_pcap_sources,
+    count_saved_pcap_days,
+    list_ingest_items,
+    list_pcap_sources,
+    list_recent_datasets,
+)
 from core.evidence_policy import format_period_day_label
 from core.formatters import format_pcap_datetime, human_bytes
 from core.pcap_rollup import (
@@ -18,65 +27,114 @@ from core.pcap_rollup import (
 from core.period_groups import month_key
 from core.project_datasets import count_project_json_datasets, list_project_json_dataset_files
 
+_SNAPSHOT_CACHE: dict[str, dict[str, Any]] = {}
+
+
+def _cache_key(project_id: int, db_path: Path) -> str:
+    return f"{int(project_id)}:{Path(db_path).resolve()}"
+
+
+def invalidate_project_evidence_cache(
+    project_id: int,
+    *,
+    db_path: Path = DEFAULT_DB_PATH,
+) -> None:
+    _SNAPSHOT_CACHE.pop(_cache_key(project_id, db_path), None)
+
+
+def get_project_evidence_totals(
+    project_id: int,
+    *,
+    db_path: Path = DEFAULT_DB_PATH,
+) -> dict[str, int]:
+    """Fast aggregate counts for dashboards — no full evidence rebuild."""
+    return {
+        "json_file_count": count_ingest_items(project_id, file_type="json", db_path=db_path),
+        "json_day_count": count_ingest_days(project_id, file_type="json", db_path=db_path),
+        "pcap_indexed_file_count": count_ingest_items(project_id, file_type="pcap", db_path=db_path),
+        "pcap_indexed_day_count": count_ingest_days(project_id, file_type="pcap", db_path=db_path),
+        "pcap_saved_day_count": count_saved_pcap_days(project_id, db_path=db_path),
+        "pcap_source_count": count_pcap_sources(project_id, db_path=db_path),
+    }
+
+
+def list_saved_json_days(
+    project_id: int,
+    *,
+    limit: int = 500,
+    offset: int = 0,
+    db_path: Path = DEFAULT_DB_PATH,
+) -> list[dict[str, Any]]:
+    rows = build_project_evidence_snapshot(project_id, db_path=db_path)["json"]["json_day_rows"]
+    if offset:
+        rows = rows[offset:]
+    if limit > 0:
+        rows = rows[:limit]
+    return list(rows)
+
+
+def list_saved_pcap_days(
+    project_id: int,
+    *,
+    limit: int = 500,
+    offset: int = 0,
+    db_path: Path = DEFAULT_DB_PATH,
+) -> list[dict[str, Any]]:
+    rows = build_project_evidence_snapshot(project_id, db_path=db_path)["pcap"]["pcap_days"]
+    if offset:
+        rows = rows[offset:]
+    if limit > 0:
+        rows = rows[:limit]
+    return list(rows)
+
+
+def json_day_groups_from_ingest(
+    project_id: int,
+    *,
+    folder_prefix: str = "",
+    db_path: Path = DEFAULT_DB_PATH,
+) -> dict[str, list[str]]:
+    """Fast period-selector source: JSON ingest index grouped by calendar day."""
+    prefix_key = ""
+    if folder_prefix:
+        try:
+            prefix_key = str(Path(folder_prefix).resolve()).casefold()
+        except Exception:
+            prefix_key = str(folder_prefix).casefold()
+
+    by_day: dict[str, list[str]] = {}
+    for item in list_ingest_items(project_id, file_type="json", limit=50000, db_path=db_path):
+        path = str(item.file_path or "").strip()
+        if not path or not Path(path).is_file():
+            continue
+        if prefix_key:
+            try:
+                if not str(Path(path).resolve()).casefold().startswith(prefix_key):
+                    continue
+            except Exception:
+                if prefix_key not in path.casefold():
+                    continue
+        day = str(item.observed_date or "undated").strip() or "undated"
+        if path not in by_day.setdefault(day, []):
+            by_day[day].append(path)
+    return dict(sorted(by_day.items(), key=lambda pair: (pair[0] == "undated", pair[0]), reverse=True))
+
 
 def build_project_evidence_snapshot(
     project_id: int,
     *,
     db_path: Path = DEFAULT_DB_PATH,
     limit: int = MAX_EVIDENCE_SNAPSHOT_ITEMS,
+    force_refresh: bool = False,
 ) -> dict[str, Any]:
-    """Single source of truth for saved JSON/PCAP evidence counts and day rows."""
-    json_rows = list_project_json_dataset_files(project_id, limit=limit, db_path=db_path)
-    json_count = count_project_json_datasets(project_id, limit=limit, db_path=db_path)
-    dataset_sources = list_recent_datasets(project_id, limit=limit, db_path=db_path)
-    available_json_files = [row for row in json_rows if row.get("status") == "Available"]
+    """Cached snapshot for saved JSON/PCAP evidence counts and day rows."""
+    key = _cache_key(project_id, db_path)
+    if not force_refresh and key in _SNAPSHOT_CACHE:
+        return _SNAPSHOT_CACHE[key]
 
-    sources = list_pcap_sources(project_id, limit=limit, db_path=db_path)
-    rollup = rollup_pcap_sources(sources)
-    device_ip_counts, device_ip_rows = collect_device_ip_stats(sources)
-
-    ingest_done_paths = _ingest_pcap_paths(project_id, db_path=db_path, status="done")
-    ingest_index_counts = _ingest_pcap_index_counts(project_id, db_path=db_path)
-    pcap_indexed_file_count = sum(int(count or 0) for count in ingest_index_counts.values())
-    pcap_indexed_day_count = len(ingest_index_counts)
-    saved_period_days = _saved_period_days(sources)
-    day_groups = _build_pcap_day_groups(sources, ingest_done_paths, saved_period_days)
-    recent_day_rows = _build_pcap_recent_day_rows(sources, rollup, ingest_done_paths)
-    profile_day_rows = _build_pcap_profile_day_rows(rollup)
-    period_coverage = _build_pcap_period_coverage(ingest_index_counts, saved_period_days)
-    capture_range = _build_capture_range(sources)
-    json_day_rows = _build_json_recent_day_rows(project_id, db_path=db_path)
-
-    return {
-        "project_id": project_id,
-        "json": {
-            "count": json_count,
-            "rows": json_rows,
-            "json_day_rows": json_day_rows,
-            "available_files": available_json_files,
-            "dataset_sources": dataset_sources,
-        },
-        "pcap": {
-            "sources": sources,
-            "source_count": len(sources),
-            "day_count": rollup.pcap_day_count,
-            "indexed_file_count": pcap_indexed_file_count,
-            "indexed_day_count": pcap_indexed_day_count,
-            "indexed_day_counts": ingest_index_counts,
-            "saved_period_days": saved_period_days,
-            "day_groups": day_groups,
-            "recent_day_rows": recent_day_rows,
-            "day_rows": profile_day_rows,
-            "device_ip_counts": dict(device_ip_counts),
-            "device_ip_rows": device_ip_rows,
-            "period_coverage": period_coverage,
-            "rollup": rollup,
-            "total_packets": rollup.total_packets,
-            "total_bytes": rollup.total_bytes,
-            "total_bytes_label": human_bytes(rollup.total_bytes, precision=2),
-            "capture_range": capture_range,
-        },
-    }
+    snapshot = _build_project_evidence_snapshot(project_id, db_path=db_path, limit=limit)
+    _SNAPSHOT_CACHE[key] = snapshot
+    return snapshot
 
 
 def summarize_saved_json_evidence(
@@ -88,22 +146,13 @@ def summarize_saved_json_evidence(
     return build_project_evidence_snapshot(project_id, limit=limit, db_path=db_path)["json"]
 
 
-def count_saved_pcap_days(
-    project_id: int,
-    *,
-    db_path: Path = DEFAULT_DB_PATH,
-) -> int:
-    return build_project_evidence_snapshot(project_id, db_path=db_path)["pcap"]["day_count"]
-
-
 def list_project_saved_pcap_day_rows(
     project_id: int,
     *,
     limit: int = 500,
     db_path: Path = DEFAULT_DB_PATH,
 ) -> list[dict[str, Any]]:
-    rows = build_project_evidence_snapshot(project_id, db_path=db_path)["pcap"]["recent_day_rows"]
-    return list(rows)[:limit]
+    return list_saved_pcap_days(project_id, limit=limit, db_path=db_path)
 
 
 def saved_pcap_device_ip_counts(
@@ -173,12 +222,88 @@ def get_saved_pcap_period_source(
     return max(matches, key=lambda row: int(getattr(row, "packet_count", 0) or 0))
 
 
+def resolve_saved_pcap_day_row(
+    project_id: int,
+    *,
+    day: str = "",
+    db_path: Path = DEFAULT_DB_PATH,
+) -> dict[str, Any] | None:
+    day_key = str(day or "").strip()
+    if not day_key:
+        return None
+    for row in list_saved_pcap_days(project_id, limit=0, db_path=db_path):
+        if str(row.get("day") or "").strip() == day_key:
+            return dict(row)
+    return None
+
+
+def _build_project_evidence_snapshot(
+    project_id: int,
+    *,
+    db_path: Path,
+    limit: int,
+) -> dict[str, Any]:
+    totals = get_project_evidence_totals(project_id, db_path=db_path)
+    json_rows = list_project_json_dataset_files(project_id, limit=limit, db_path=db_path)
+    dataset_sources = list_recent_datasets(project_id, limit=limit, db_path=db_path)
+    available_json_files = [row for row in json_rows if row.get("status") == "Available"]
+
+    sources = list_pcap_sources(project_id, limit=limit, db_path=db_path)
+    rollup = rollup_pcap_sources(sources)
+    device_ip_counts, device_ip_rows = collect_device_ip_stats(sources)
+
+    ingest_done_paths = _ingest_pcap_paths(project_id, db_path=db_path, status="done")
+    ingest_index_counts = _ingest_pcap_index_counts(project_id, db_path=db_path)
+    saved_period_days = _saved_period_days(sources)
+    day_groups = _build_pcap_day_groups(sources, ingest_done_paths, saved_period_days)
+    pcap_days = _build_pcap_day_rows(sources, rollup, ingest_done_paths)
+    profile_day_rows = _pcap_days_to_chart_rows(pcap_days)
+    period_coverage = _build_pcap_period_coverage(ingest_index_counts, saved_period_days)
+    capture_range = _build_capture_range(sources)
+    json_day_rows = _build_json_day_rows(project_id, db_path=db_path)
+
+    return {
+        "project_id": project_id,
+        "totals": totals,
+        "json": {
+            "count": totals["json_file_count"] or count_project_json_datasets(project_id, limit=limit, db_path=db_path),
+            "day_count": totals["json_day_count"],
+            "rows": json_rows,
+            "json_day_rows": json_day_rows,
+            "available_files": available_json_files,
+            "dataset_sources": dataset_sources,
+        },
+        "pcap": {
+            "sources": sources,
+            "source_count": totals["pcap_source_count"] or len(sources),
+            "day_count": rollup.pcap_day_count,
+            "saved_day_count": totals["pcap_saved_day_count"],
+            "indexed_file_count": totals["pcap_indexed_file_count"],
+            "indexed_day_count": totals["pcap_indexed_day_count"],
+            "indexed_day_counts": ingest_index_counts,
+            "saved_period_days": saved_period_days,
+            "day_groups": day_groups,
+            "pcap_days": pcap_days,
+            "recent_day_rows": pcap_days,
+            "day_rows": profile_day_rows,
+            "device_ip_counts": dict(device_ip_counts),
+            "device_ip_rows": device_ip_rows,
+            "period_coverage": period_coverage,
+            "rollup": rollup,
+            "total_packets": rollup.total_packets,
+            "total_bytes": rollup.total_bytes,
+            "total_bytes_label": human_bytes(rollup.total_bytes, precision=2),
+            "capture_range": capture_range,
+        },
+    }
+
+
 def _saved_pcap_period_matches(source: Any, day: str) -> bool:
     period_day = str(getattr(source, "period_day", "") or "").strip()
     key = pcap_day_key(source)
     if period_day == day or key == day:
         return True
-    # Month aggregate selector (YYYY-MM) matches daily saved periods in that month.
+    # Month aggregate selector (YYYY-MM) is UI-only; canonical evidence keys are daily.
     if len(day) == 7 and day[4:5] == "-" and day.count("-") == 1:
         month_prefix = f"{day}-"
         if period_day.startswith(month_prefix):
@@ -199,7 +324,7 @@ def _saved_period_days(sources: list[Any]) -> list[str]:
     return sorted(days)
 
 
-def _build_json_recent_day_rows(project_id: int, *, db_path: Path) -> list[dict[str, Any]]:
+def _build_json_day_rows(project_id: int, *, db_path: Path) -> list[dict[str, Any]]:
     by_day: dict[str, list[str]] = {}
     for item in list_ingest_items(project_id, file_type="json", limit=50000, db_path=db_path):
         path = str(item.file_path or "").strip()
@@ -212,10 +337,12 @@ def _build_json_recent_day_rows(project_id: int, *, db_path: Path) -> list[dict[
     rows: list[dict[str, Any]] = []
     for day in sorted(by_day, reverse=True):
         paths = by_day[day]
+        display_name = format_period_day_label(day) if day != "undated" else "Undated"
         rows.append(
             {
                 "day": day,
-                "name": format_period_day_label(day) if day != "undated" else "Undated",
+                "display_name": display_name,
+                "name": display_name,
                 "file_count": len(paths),
                 "period": day if day != "undated" else "-",
                 "paths": paths,
@@ -277,7 +404,7 @@ def _build_pcap_day_groups(
     return dict(sorted(by_day.items(), key=lambda pair: (pair[0] == "undated", pair[0]), reverse=True))
 
 
-def _build_pcap_recent_day_rows(
+def _build_pcap_day_rows(
     sources: list[Any],
     rollup: PcapRollupTotals,
     ingest_paths: dict[str, list[str]],
@@ -291,8 +418,8 @@ def _build_pcap_recent_day_rows(
     for day in sorted(set(by_day) | set(ingest_paths), reverse=True):
         group = by_day.get(day, [])
         if day == "undated":
-            packets = rollup.undated_packets
-            wire_bytes = rollup.undated_bytes
+            packets = int(rollup.undated_packets or 0)
+            wire_bytes = int(rollup.undated_bytes or 0)
         else:
             packets = int(rollup.day_packets.get(day, 0) or 0)
             wire_bytes = int(rollup.day_bytes.get(day, 0) or 0)
@@ -320,6 +447,7 @@ def _build_pcap_recent_day_rows(
                 paths.append(path)
 
         file_count = len(paths) or (1 if group else 0)
+        display_name = _display_day(day)
         period = " - ".join(
             value
             for value in (
@@ -329,39 +457,40 @@ def _build_pcap_recent_day_rows(
             if value
         )
         rows.append({
-            "name": f"{_display_day(day)} ({file_count:,} PCAP files)",
+            "day": day,
+            "display_name": display_name,
+            "name": f"{display_name} ({file_count:,} PCAP files)",
             "file_count": file_count,
             "packets": f"{packets:,}",
+            "packets_count": packets,
+            "bytes": wire_bytes,
+            "bytes_label": human_bytes(wire_bytes, precision=2),
             "volume": human_bytes(wire_bytes, precision=2),
             "device_ip": device_ip,
+            "device_ips": sorted(day_ips.keys()) if day_ips else [],
+            "first_seen": first_seen,
+            "last_seen": last_seen,
             "period": period or "-",
             "path": paths[0] if len(paths) == 1 else "",
             "paths": paths,
-            "day": day,
         })
     return rows
 
 
-def _build_pcap_profile_day_rows(rollup: PcapRollupTotals) -> list[dict[str, Any]]:
-    rows = [
-        {
-            "label": format_period_day_label(day),
-            "date": day,
-            "count": packets,
-            "bytes": rollup.day_bytes[day],
-            "bytes_label": human_bytes(rollup.day_bytes[day], precision=2),
-            "detail": f"{packets:,} packets / {human_bytes(rollup.day_bytes[day], precision=2)}",
-        }
-        for day, packets in sorted(rollup.day_packets.items())
-    ]
-    if rollup.undated_day_count:
+def _pcap_days_to_chart_rows(pcap_days: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for day_row in pcap_days:
+        day = str(day_row.get("day") or "").strip()
+        packets = int(day_row.get("packets_count") or 0)
+        wire_bytes = int(day_row.get("bytes") or 0)
+        label = "Undated PCAP" if day == "undated" else format_period_day_label(day)
         rows.append({
-            "label": "Undated PCAP",
-            "date": "",
-            "count": rollup.undated_packets,
-            "bytes": rollup.undated_bytes,
-            "bytes_label": human_bytes(rollup.undated_bytes, precision=2),
-            "detail": f"{rollup.undated_packets:,} packets / {human_bytes(rollup.undated_bytes, precision=2)}",
+            "label": label,
+            "date": "" if day == "undated" else day,
+            "count": packets,
+            "bytes": wire_bytes,
+            "bytes_label": human_bytes(wire_bytes, precision=2),
+            "detail": f"{packets:,} packets / {human_bytes(wire_bytes, precision=2)}",
         })
     return rows
 

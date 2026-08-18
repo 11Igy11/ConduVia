@@ -146,6 +146,87 @@ def calendar_day_coverage_note(flows: list[dict[str, Any]], day: str) -> str:
     return " ".join(parts)
 
 
+def filter_hourly_activity_to_calendar_day(
+    hourly_activity: list[dict[str, Any]],
+    day: str,
+) -> list[dict[str, Any]]:
+    normalized = normalize_period_day(day)
+    if not normalized or normalized == "undated":
+        return list(hourly_activity or [])
+
+    prefix = f"{normalized} "
+    filtered: list[dict[str, Any]] = []
+    for row in hourly_activity or []:
+        bucket = str(row.get("hour") or "").strip()
+        if bucket.startswith(prefix):
+            filtered.append(dict(row))
+    return filtered
+
+
+def hourly_activity_from_flows(
+    flows: list[dict[str, Any]],
+    day: str,
+) -> list[dict[str, Any]]:
+    """Approximate hourly packet buckets from flow timestamps on one calendar day."""
+    from collections import Counter
+
+    normalized = normalize_period_day(day)
+    if not normalized or normalized == "undated":
+        return []
+
+    counts: Counter[str] = Counter()
+    for flow in flows or []:
+        timestamps = flow_timestamps_on_calendar_day(flow, normalized)
+        if not timestamps:
+            continue
+        packets = int(flow.get("bidirectional_packets") or 0)
+        if packets <= 0:
+            packets = 1
+        hour_bucket = timestamps[0].astimezone(LOCAL_TZ).strftime("%Y-%m-%d %H:00")
+        counts[hour_bucket] += packets
+
+    return [
+        {"hour": hour, "packets": int(count)}
+        for hour, count in sorted(counts.items())
+    ]
+
+
+def investigator_host_metadata_from_flows(
+    flows: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Rebuild DNS/TLS/HTTP investigator counters from filtered flow summaries."""
+    from collections import Counter
+
+    dns: Counter[str] = Counter()
+    tls: Counter[str] = Counter()
+    http: Counter[str] = Counter()
+
+    for flow in flows or []:
+        weight = max(1, int(flow.get("bidirectional_packets") or 0))
+        host = str(flow.get("requested_server_name") or "").strip()
+        if host:
+            tls[host] += weight
+            continue
+        app = str(flow.get("application_name") or "").strip()
+        if app:
+            dns[app] += weight
+
+    dns_queries = [{"query": name, "count": count} for name, count in dns.most_common()]
+    tls_sni = [{"host": name, "count": count} for name, count in tls.most_common()]
+    http_hosts = [{"host": name, "count": count} for name, count in http.most_common()]
+    return {
+        "dns_queries": dns_queries,
+        "tls_sni": tls_sni,
+        "http_hosts": http_hosts,
+        "dns_query_counts": dict(dns),
+        "tls_sni_counts": dict(tls),
+        "http_host_counts": dict(http),
+        "total_dns_names": len(dns),
+        "total_tls_sni_hosts": len(tls),
+        "total_http_hosts": len(http),
+    }
+
+
 def refine_pcap_summary_for_calendar_day(
     summary: Any,
     day: str,
@@ -173,6 +254,16 @@ def refine_pcap_summary_for_calendar_day(
             duration_seconds=0.0,
             first_seen="",
             last_seen="",
+            hourly_activity=[],
+            dns_queries=[],
+            tls_sni=[],
+            http_hosts=[],
+            dns_query_counts={},
+            tls_sni_counts={},
+            http_host_counts={},
+            total_dns_names=0,
+            total_tls_sni_hosts=0,
+            total_http_hosts=0,
             source_paths=[str(path) for path in (bucket_paths or []) if str(path or "").strip()],
             notes=[*(summary.notes or []), "No flows mapped to the selected calendar day."],
         ), note
@@ -181,6 +272,11 @@ def refine_pcap_summary_for_calendar_day(
     duration_seconds = calendar_day_duration_seconds(day)
     packet_count = sum(int(flow.get("bidirectional_packets") or 0) for flow in filtered)
     wire_bytes = sum(int(flow.get("bidirectional_bytes") or 0) for flow in filtered)
+
+    hourly_activity = filter_hourly_activity_to_calendar_day(list(summary.hourly_activity or []), day)
+    if not hourly_activity:
+        hourly_activity = hourly_activity_from_flows(filtered, day)
+    host_metadata = investigator_host_metadata_from_flows(filtered)
 
     notes = list(summary.notes or [])
     if stats["dropped"] > 0:
@@ -202,6 +298,8 @@ def refine_pcap_summary_for_calendar_day(
         first_seen=first_seen,
         last_seen=last_seen,
         duration_seconds=duration_seconds,
+        hourly_activity=hourly_activity,
         source_paths=display_paths,
         notes=notes,
+        **host_metadata,
     ), note

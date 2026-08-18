@@ -24,12 +24,11 @@ from core.analysis_limits import (
     embedded_expand_available,
     embedded_expand_tooltip,
 )
-from core.behavior_profile import build_flow_behavior_profile
 from core.period_comparison import PERIOD_COMPARISON_CHART_FOOTER
 from core.limit_notices import profile_skipped_json_notice
 from core.db import get_project, get_project_behavior_profile
 from core.exporters.profile_exporter import export_activity_profile_html
-from core.project_datasets import count_project_json_datasets, load_project_dataset_flows
+from core.project_evidence import get_project_evidence_totals
 from core.project_profile import build_project_activity_profile
 from core.timeutils import parse_timestamp
 from core.workspace import workspace_export_path
@@ -838,7 +837,7 @@ class ActivityProfilePage(QWidget):
             saved_json_count = 0
             if project_id is not None:
                 try:
-                    saved_json_count = count_project_json_datasets(project_id, limit=50000)
+                    saved_json_count = int(get_project_evidence_totals(project_id).get("json_file_count") or 0)
                 except Exception:
                     saved_json_count = int((self.profile or {}).get("dataset_count") or 0)
 
@@ -861,8 +860,14 @@ class ActivityProfilePage(QWidget):
                     ],
                 }
             else:
-                flows = self._current_flows()
-                behavior = build_flow_behavior_profile(flows)
+                behavior = {
+                    "flow_count": 0,
+                    "routine_lines": [
+                        "No saved project behavior index is available yet.",
+                        "Behavior charts are built from saved project evidence, not the currently opened JSON period.",
+                        "Refresh Profile after import or dataset save finishes.",
+                    ],
+                }
         behavior["project_dataset_info"] = dict(self._project_dataset_info or {})
         if self.profile is not None:
             self.profile["behavior_profile"] = behavior
@@ -889,7 +894,7 @@ class ActivityProfilePage(QWidget):
         if len(domain_rows) > PROFILE_CHART_PREVIEW_ROWS:
             self.domain_chart.setToolTip(f"{len(domain_rows):,} domains indexed. Chart shows top {PROFILE_CHART_PREVIEW_ROWS} by volume.")
         self.day_chart.set_rows(
-            _top_volume_day_rows((self.profile or {}).get("json_day_rows") or behavior.get("day_rows") or []),
+            _top_volume_day_rows((self.profile or {}).get("json_day_rows") or []),
             empty_text="No saved JSON activity is available by day.",
         )
         self.pcap_day_chart.set_rows(
@@ -929,13 +934,7 @@ class ActivityProfilePage(QWidget):
         project_id = getattr(self.app, "current_project_id", None) if self.app else None
         if project_id is None:
             return {}
-        indexed = get_project_behavior_profile(project_id)
-        if indexed.get("flow_count"):
-            return indexed
-        flows = self._current_flows()
-        if not flows:
-            return indexed
-        return build_flow_behavior_profile(flows)
+        return dict(get_project_behavior_profile(project_id) or {})
 
     def _expand_behavior_rows(self, key: str, title: str) -> None:
         behavior = self._current_behavior_profile()
@@ -979,41 +978,6 @@ class ActivityProfilePage(QWidget):
         else:
             columns = [("label", "Day"), ("count", "Flows"), ("detail", "Detail")]
         open_project_rows_dialog(self.app, title, columns, rows)
-
-    def _current_flows(self) -> list[dict[str, Any]]:
-        if self.app and getattr(self.app, "current_project_id", None) is not None:
-            return self._project_dataset_flows()
-
-        if not self.app or not hasattr(self.app, "flow_controller"):
-            return self._project_dataset_flows()
-
-        controller = self.app.flow_controller
-        flows: list[dict[str, Any]] = []
-        if hasattr(controller, "get_all"):
-            flows = list(controller.get_all() or [])
-        if not flows and hasattr(controller, "get_loaded"):
-            flows = list(controller.get_loaded() or [])
-        if flows:
-            return flows
-        return self._project_dataset_flows()
-
-    def _project_dataset_flows(self) -> list[dict[str, Any]]:
-        project_id = getattr(self.app, "current_project_id", None) if self.app else None
-        if project_id is None:
-            return []
-
-        dataset_info = load_project_dataset_flows(project_id)
-        cache_key = str(dataset_info.get("cache_key") or "")
-
-        if cache_key == self._behavior_cache_key:
-            self._project_dataset_info = dataset_info
-            return self._behavior_cache_flows
-
-        flows = list(dataset_info.get("flows") or [])
-        self._behavior_cache_key = cache_key
-        self._behavior_cache_flows = flows
-        self._project_dataset_info = dataset_info
-        return flows
 
     def _set_behavior_routine_text(self, behavior: dict[str, Any]) -> None:
         lines: list[str] = []

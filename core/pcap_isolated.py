@@ -13,7 +13,10 @@ def _emit(summary) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = list(argv or sys.argv[1:])
+    if argv is None:
+        args = list(sys.argv[1:])
+    else:
+        args = list(argv)
     if not args:
         print("usage: pcap_isolated <path> | pcap_isolated --batch", file=sys.stderr)
         return 2

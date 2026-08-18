@@ -26,6 +26,12 @@ def build_sidebar(app: App) -> QFrame:
     app.btn_nav_ai = QPushButton("AI output")
     app.btn_nav_notes = QPushButton("Notes")
     app.btn_nav_profile = QPushButton("Profile")
+    app.btn_import_progress = QPushButton("Import…")
+    app.btn_import_progress.setObjectName("NavButton")
+    app.btn_import_progress.setFixedHeight(NAV_BUTTON_HEIGHT)
+    app.btn_import_progress.setToolTip("Show import progress for the active evidence import.")
+    app.btn_import_progress.hide()
+
     app.btn_global_refresh = QPushButton("Refresh")
     app.btn_nav_settings = QPushButton("Settings")
     app.btn_nav_help = QPushButton("Help")
@@ -38,6 +44,7 @@ def build_sidebar(app: App) -> QFrame:
         app.btn_nav_ai,
         app.btn_nav_notes,
         app.btn_nav_profile,
+        app.btn_import_progress,
         app.btn_global_refresh,
         app.btn_nav_settings,
         app.btn_nav_help,
@@ -53,9 +60,6 @@ def build_sidebar(app: App) -> QFrame:
     app._nav_notes = app.btn_nav_notes
     app._nav_ai = app.btn_nav_ai
     app._nav_json = app.btn_nav_json
-    app._nav_explore = app.btn_nav_json
-    app._nav_registry = app.btn_nav_json
-    app._nav_listing = app.btn_nav_json
     app._nav_pcap = app.btn_nav_pcap
     app._nav_osint = app.btn_nav_osint
     app._nav_settings = app.btn_nav_settings
@@ -77,6 +81,7 @@ def build_sidebar(app: App) -> QFrame:
     sidebar.addWidget(app.btn_nav_ai)
     sidebar.addWidget(app.btn_nav_notes)
     sidebar.addWidget(app.btn_nav_profile)
+    sidebar.addWidget(app.btn_import_progress)
     sidebar.addStretch()
     sidebar.addWidget(app.btn_global_refresh)
     sidebar.addWidget(app.btn_nav_settings)
