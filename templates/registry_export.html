@@ -2,87 +2,46 @@
 <html lang="{{LANG}}">
 <head>
 <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>{{TITLE}}</title>
-<style>
-:root{
-    --bg:#0c1520;
-    --bg2:#132031;
-    --panel:#162334;
-    --line:rgba(255,255,255,.10);
-    --text:#eaf1fb;
-    --muted:#9bb0c9;
-    --paper:#ffffff;
-    --ink:#111827;
-}
-*{box-sizing:border-box;}
-body{margin:0;padding:24px;font-family:"Segoe UI",Arial,sans-serif;color:var(--text);background:linear-gradient(180deg,var(--bg),var(--bg2));}
-.report{max-width:1400px;margin:0 auto;}
-.hero{position:relative;border:1px solid var(--line);border-radius:16px;background:var(--panel);padding:22px 24px;margin-bottom:14px;}
-.watermark{position:absolute;right:20px;top:14px;width:88px;opacity:.12;}
-h1{margin:0;font-size:26px;font-weight:800;}
-.meta{margin-top:8px;font-size:13px;color:var(--muted);line-height:1.5;}
-.case-table{width:100%;border-collapse:collapse;margin-top:16px;font-size:13px;}
-.case-table th,.case-table td{padding:8px 10px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top;}
-.case-table th{width:200px;color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.05em;font-weight:700;}
-.case-table td{color:var(--text);word-break:break-word;}
-.table-shell{border:1px solid var(--line);border-radius:16px;overflow:hidden;background:var(--panel);margin-bottom:12px;}
-.table-head{padding:14px 18px;border-bottom:1px solid var(--line);}
-.table-head h2{margin:0;font-size:16px;font-weight:700;}
-.table-wrap{background:var(--paper);max-height:78vh;overflow:auto;}
-table.data{width:100%;border-collapse:separate;border-spacing:0;font-size:13px;}
-table.data thead th{position:sticky;top:0;z-index:2;background:#1f2937;color:#fff;padding:10px 12px;text-align:left;white-space:nowrap;border-bottom:2px solid #35a8ff;}
-table.data tbody td{padding:8px 12px;color:var(--ink);border-bottom:1px solid #e5e7eb;white-space:nowrap;}
-table.data tbody tr:nth-child(even) td{background:#f9fafb;}
-td.num,th.num{text-align:right;}
-.stats{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px;margin-bottom:12px;}
-.stat{border:1px solid var(--line);border-radius:12px;background:var(--panel);padding:12px 14px;}
-.stat .t{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;font-weight:700;}
-.stat .v{margin-top:6px;font-size:22px;font-weight:800;color:var(--text);}
-.panel{border:1px solid var(--line);border-radius:16px;background:var(--panel);padding:18px 20px;margin-bottom:12px;}
-.panel h2{margin:0 0 12px;font-size:16px;font-weight:700;}
-.panel h3{margin:0 0 8px;font-size:14px;font-weight:700;color:var(--text);}
-.period-context{margin:0 0 14px;color:var(--muted);font-size:13px;}
-.two{display:grid;grid-template-columns:1fr 1fr;gap:14px;}
-.block{border:1px solid var(--line);border-radius:12px;padding:12px 14px;background:rgba(255,255,255,.02);}
-.block-wide{grid-column:1 / -1;}
-.muted-note{color:var(--muted);font-size:12px;margin:0 0 8px;}
-.insight-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;}
-.compare-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;}
-.compare-grid div{border:1px solid var(--line);border-radius:10px;padding:10px 12px;background:rgba(255,255,255,.02);}
-.compare-grid span{display:block;color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.04em;}
-.compare-grid strong{display:block;margin-top:4px;font-size:18px;}
-.histogram{display:flex;align-items:flex-end;gap:4px;height:48px;margin-top:8px;}
-.hist-bar-wrap{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;min-width:0;}
-.hist-bar{width:100%;max-width:18px;background:linear-gradient(180deg,#79c7ff,#35a8ff);border-radius:4px 4px 0 0;min-height:3px;}
-.hist-label{font-size:9px;color:var(--muted);margin-top:4px;}
-.direction-bar{height:10px;border-radius:999px;overflow:hidden;background:#1f2937;margin-top:8px;border:1px solid var(--line);}
-.direction-out{height:100%;background:linear-gradient(90deg,#35a8ff,#79c7ff);}
-.footer{margin-top:8px;text-align:right;color:var(--muted);font-size:12px;}
-@media (max-width:1100px){.stats{grid-template-columns:repeat(2,minmax(0,1fr));}.two,.insight-grid{grid-template-columns:1fr;}.compare-grid{grid-template-columns:repeat(2,minmax(0,1fr));}}
-</style>
+<style>{{REPORT_CSS}}</style>
 </head>
 <body>
 <div class="report">
   <section class="hero">
-    <img class="watermark" src="{{LOGO}}" alt="">
-    <h1>{{REPORT_TITLE}}</h1>
-    <div class="meta">
-      <div><strong>Dataset:</strong> {{FOLDER}}</div>
-      <div><strong>{{EXPORTED_LABEL}}:</strong> {{EXPORTED_AT}} · <strong>{{TARGET_LABEL}}:</strong> {{TARGET}} · <strong>{{ORDER_VALIDITY_LABEL}}:</strong> {{PERIOD}}</div>
-      <div><strong>{{ROWS_LABEL}}:</strong> {{TOTAL_FLOWS}} · <strong>{{APPS_LABEL}}:</strong> {{UNIQ_APPS}} · <strong>{{FILES_LABEL}}:</strong> {{FILES_COUNT}} · <strong>Klasa:</strong> {{KLASA}} · <strong>Urbroj:</strong> {{URBROJ}}</div>
+    <div class="hero-top">
+      <div>
+        <div class="eyebrow">{{DOCUMENT_TYPE}}</div>
+        <h1>{{REPORT_TITLE}}</h1>
+      </div>
+      <div class="period-badge">
+        <span class="meta-label">{{PERIOD_LABEL}}</span>
+        <span class="meta-value">{{PERIOD}}</span>
+      </div>
     </div>
-    {{CASE_TABLE}}
+    <div class="meta-grid">
+      <div class="meta-card">
+        <span class="meta-label">{{EXPORTED_LABEL}}</span>
+        <span class="meta-value">{{EXPORTED_AT}}</span>
+      </div>
+      <div class="meta-card">
+        <span class="meta-label">{{SOURCE_LABEL}}</span>
+        <span class="meta-value">{{SOURCE}}</span>
+      </div>
+      <div class="meta-card">
+        <span class="meta-label">{{SCOPE_LABEL}}</span>
+        <span class="meta-value">{{SCOPE}}</span>
+      </div>
+    </div>
+    <div class="case-block">
+      <h2 class="case-title">{{CASE_CONTEXT_LABEL}}</h2>
+      {{CASE_TABLE}}
+    </div>
   </section>
 
-  <section class="stats">
-    <div class="stat"><div class="t">{{TOTAL_FLOWS_LABEL}}</div><div class="v">{{TOTAL_FLOWS}}</div></div>
-    <div class="stat"><div class="t">{{UNIQ_SRC_LABEL}}</div><div class="v">{{UNIQ_SRC}}</div></div>
-    <div class="stat"><div class="t">{{UNIQ_DST_LABEL}}</div><div class="v">{{UNIQ_DST}}</div></div>
-    <div class="stat"><div class="t">{{UNIQ_APPS_LABEL}}</div><div class="v">{{UNIQ_APPS}}</div></div>
-    <div class="stat"><div class="t">{{TOTAL_BYTES_LABEL}}</div><div class="v">{{TOTAL_BYTES}}</div></div>
-  </section>
+  {{STATS_SECTION}}
 
-  <section class="panel">
+  <section class="section">
     <h2>{{ANALYST_SUMMARY_LABEL}}</h2>
     <div class="period-context">{{PERIOD_CONTEXT_LABEL}}: {{PERIOD_CONTEXT}}</div>
     <div class="two">
@@ -118,10 +77,10 @@ td.num,th.num{text-align:right;}
         {{HIST_FLOWS}}
       </div>
     </div>
-    <div class="meta" style="margin-top:14px;">
+    <div class="meta-value" style="margin-top:14px;">
       {{PEAK_LABEL}}: {{PEAK_HOUR}} · {{QUIET_LABEL}}: {{QUIET_HOUR}} · {{NIGHT_LABEL}}: {{NIGHT_SHARE}} · {{BUSINESS_LABEL}}: {{BUSINESS_SHARE}}
     </div>
-    <div class="meta" style="margin-top:8px;">
+    <div class="meta-value" style="margin-top:8px;">
       OUT {{OUT_BYTES}} ({{OUT_PCT}}) · IN {{IN_BYTES}} ({{IN_PCT}})
       {{DIRECTION_BAR}}
     </div>
@@ -129,14 +88,17 @@ td.num,th.num{text-align:right;}
 
   {{COMPARE_BLOCK}}
 
-  <section class="panel">
+  <section class="section">
     <h2>{{INSIGHTS_LABEL}}</h2>
-    <div class="insight-grid">{{INSIGHT_CARDS}}</div>
+    <div class="two">{{INSIGHT_CARDS}}</div>
   </section>
 
   {{FULL_DATASET}}
 
-  <div class="footer">{{GENERATED_BY_LABEL}} ViaNyquist</div>
+  <div class="footer">
+    <span>{{PROJECT_NAME}} · {{PERIOD_LABEL}} {{PERIOD}}</span>
+    <span>{{PREPARED_LABEL}} {{EXPORTED_AT}}</span>
+  </div>
 </div>
 </body>
 </html>

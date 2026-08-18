@@ -2,80 +2,56 @@
 <html lang="{{LANG}}">
 <head>
 <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>{{TITLE}}</title>
-<style>
-body { margin:0; padding:28px; font-family:"Segoe UI", Arial, sans-serif; color:#111827; background:#f3f4f6; }
-.report { max-width:1500px; margin:0 auto; }
-.hero { background:#111827; color:white; border-radius:14px; padding:24px 26px; margin-bottom:18px; }
-h1 { margin:0 0 8px; font-size:30px; }
-h2 { margin:24px 0 10px; font-size:18px; }
-h3 { margin:18px 0 8px; font-size:15px; color:#1f2937; }
-.muted { color:#9ca3af; }
-.nav { display:flex; gap:8px; flex-wrap:wrap; margin:16px 0 0; }
-.nav a { color:white; text-decoration:none; border:1px solid rgba(255,255,255,.28); border-radius:999px; padding:7px 11px; font-size:12px; font-weight:700; }
-.nav a:hover { background:rgba(255,255,255,.12); }
-.grid { display:grid; grid-template-columns:repeat(4, minmax(0, 1fr)); gap:10px; margin-top:18px; }
-.card { background:white; border:1px solid #e5e7eb; border-radius:10px; padding:14px; }
-.hero .card { background:rgba(255,255,255,.08); border-color:rgba(255,255,255,.16); color:white; }
-.label { font-size:11px; text-transform:uppercase; color:#6b7280; font-weight:700; letter-spacing:.08em; margin-bottom:5px; }
-.hero .label { color:#bfdbfe; }
-.value { font-size:17px; font-weight:700; word-break:break-word; }
-.note { border-left:4px solid #2563eb; padding:10px 12px; background:#eff6ff; margin:8px 0; }
-.plain { background:white; border:1px solid #e5e7eb; border-radius:12px; padding:18px 20px; font-size:15px; line-height:1.55; }
-.points { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:8px; margin-top:12px; }
-.point { background:#f9fafb; border:1px solid #e5e7eb; border-radius:8px; padding:10px 12px; }
-.briefgrid { display:grid; grid-template-columns:repeat(4, minmax(0, 1fr)); gap:10px; margin:10px 0 12px; }
-.briefcard { background:white; border:1px solid #dbeafe; border-radius:10px; padding:12px 14px; }
-.briefcard .value { font-size:20px; color:#1d4ed8; }
-.tag { display:inline-block; border-radius:999px; padding:3px 8px; font-size:11px; font-weight:700; background:#e5e7eb; color:#111827; }
-.tag.high { background:#dcfce7; color:#166534; }
-.tag.medium { background:#dbeafe; color:#1e40af; }
-.tag.low { background:#f3f4f6; color:#4b5563; }
-.evidence-grid { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:10px; margin-top:10px; }
-.evidence-card { background:white; border:1px solid #e5e7eb; border-radius:10px; padding:12px 14px; }
-.evidence-title { font-weight:700; margin-bottom:6px; }
-.evidence-meta { color:#4b5563; font-size:12px; margin-bottom:8px; }
-.evidence-text { font-size:12px; line-height:1.45; }
-.barcell { min-width:190px; }
-.bar { height:12px; background:#e5e7eb; border-radius:999px; overflow:hidden; }
-.bar span { display:block; height:100%; background:#2563eb; }
-table { width:100%; border-collapse:collapse; background:white; border:1px solid #e5e7eb; }
-th { text-align:left; background:#1f2937; color:white; font-size:12px; padding:9px; position:sticky; top:0; }
-td { border-top:1px solid #e5e7eb; padding:8px 9px; font-size:12px; vertical-align:top; }
-tr:nth-child(even) td { background:#f9fafb; }
-.section { margin-bottom:18px; }
-.section-shell { background:#ffffff; border:1px solid #e5e7eb; border-radius:14px; padding:18px 20px; margin-bottom:18px; }
-.section-shell h2:first-child { margin-top:0; }
-.subsection { margin-top:16px; }
-.two-col { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:14px; }
-.report-note { background:#f8fafc; border:1px solid #e5e7eb; border-radius:10px; padding:12px 14px; color:#374151; line-height:1.5; }
-@media (max-width: 980px) {
-  .grid, .briefgrid, .points, .two-col, .evidence-grid { grid-template-columns:1fr; }
-}
-</style>
+<style>{{REPORT_CSS}}</style>
 </head>
 <body>
 <div class="report">
-  <div class="hero">
-    <h1>{{TITLE}}</h1>
-    <div class="muted">{{FILE_NAME}} | {{EXPORTED_LABEL}}: {{EXPORTED_AT}}</div>
-    <div class="nav">
+  <section class="hero">
+    <div class="hero-top">
+      <div>
+        <div class="eyebrow">{{DOCUMENT_TYPE}}</div>
+        <h1>{{REPORT_TITLE}}</h1>
+      </div>
+      <div class="period-badge">
+        <span class="meta-label">{{PERIOD_LABEL}}</span>
+        <span class="meta-value">{{PERIOD}}</span>
+      </div>
+    </div>
+    <div class="meta-grid">
+      <div class="meta-card">
+        <span class="meta-label">{{EXPORTED_LABEL}}</span>
+        <span class="meta-value">{{EXPORTED_AT}}</span>
+      </div>
+      <div class="meta-card">
+        <span class="meta-label">{{SOURCE_LABEL}}</span>
+        <span class="meta-value">{{SOURCE}}</span>
+      </div>
+      <div class="meta-card">
+        <span class="meta-label">{{SCOPE_LABEL}}</span>
+        <span class="meta-value">{{SCOPE}}</span>
+      </div>
+    </div>
+    <nav class="nav">
       <a href="#summary">{{SUMMARY_LABEL}}</a>
       <a href="#investigator">{{INVESTIGATOR_LABEL}}</a>
       <a href="#communications">{{COMMUNICATION_HIGHLIGHTS_LABEL}}</a>
       <a href="#evidence">{{EVIDENCE_LABEL}}</a>
       <a href="#artifacts">{{ARTIFACTS_LABEL}}</a>
       <a href="#connections">{{CONNECTIONS_LABEL}}</a>
+    </nav>
+    <div class="case-block">
+      <h2 class="case-title">{{CASE_CONTEXT_LABEL}}</h2>
+      {{CASE_TABLE}}
     </div>
-    <div class="grid">
-      {{HERO_CARDS}}
-    </div>
-  </div>
+  </section>
 
-  <div class="section-shell" id="summary">
+  {{STATS_SECTION}}
+
+  <section class="section" id="summary">
     <h2>{{SUMMARY_LABEL}}</h2>
-    <div class="report-note">{{STRUCTURE_NOTE}}</div>
-    <div class="two-col">
+    <div class="two">
       <div>
         <h3>{{VISIBLE_SERVICE_GROUPS_LABEL}}</h3>
         {{SERVICE_GROUPS_TABLE}}
@@ -85,68 +61,59 @@ tr:nth-child(even) td { background:#f9fafb; }
         {{VISIBILITY_TABLE}}
       </div>
     </div>
-    <div class="subsection">
+    <div style="margin-top:16px;">
       <h3>{{ACTIVITY_TIMELINE_LABEL}}</h3>
       {{ACTIVITY_TABLE}}
     </div>
-  </div>
+  </section>
 
-  <div class="section-shell" id="investigator">
+  <section class="section" id="investigator">
     <h2>{{INVESTIGATOR_LABEL}}</h2>
-    <div class="plain">
-      {{PLAIN_SUMMARY}}
-      <div class="points">
-        {{KEY_POINTS}}
-      </div>
-    </div>
-  </div>
+    <div class="plain">{{PLAIN_SUMMARY}}</div>
+    <div class="points">{{KEY_POINTS}}</div>
+  </section>
 
-  <div class="section-shell" id="communications">
+  <section class="section" id="communications">
     <h2>{{COMMUNICATION_HIGHLIGHTS_LABEL}}</h2>
-    <div class="note">{{COMMUNICATION_NOTE}}</div>
-    <div class="briefgrid">
-      {{COMMUNICATION_BRIEF_CARDS}}
-    </div>
+    <div class="briefgrid">{{COMMUNICATION_BRIEF_CARDS}}</div>
     {{COMMUNICATION_TABLE}}
     <h2>{{COMMUNICATION_EVIDENCE_DETAILS_LABEL}}</h2>
-    <div class="evidence-grid">
-      {{COMMUNICATION_EVIDENCE_CARDS}}
-    </div>
-  </div>
+    <div class="evidence-grid">{{COMMUNICATION_EVIDENCE_CARDS}}</div>
+  </section>
 
-  <div class="section-shell">
-    <h2>{{INTERPRETATION_NOTES_LABEL}}</h2>
-    {{LIMITATION_NOTES}}
-  </div>
+  {{INTERPRETATION_SECTION}}
 
-  <div class="section-shell" id="evidence">
+  <section class="section" id="evidence">
     <h2>{{EVIDENCE_LABEL}}</h2>
-    <div class="report-note">{{EVIDENCE_NOTE}}</div>
-    <div class="two-col">
+    <div class="two">
       <div>
-        <h2>{{TOP_DNS_QUERIES_LABEL}}</h2>
+        <h3>{{TOP_DNS_QUERIES_LABEL}}</h3>
         {{DNS_TABLE}}
       </div>
       <div>
-        <h2>{{TOP_TLS_SNI_HOSTS_LABEL}}</h2>
+        <h3>{{TOP_TLS_SNI_HOSTS_LABEL}}</h3>
         {{TLS_TABLE}}
       </div>
     </div>
-
-    <div class="subsection">
-      <h2>{{READABLE_EVIDENCE_LABEL}}</h2>
+    <div style="margin-top:16px;">
+      <h3>{{READABLE_EVIDENCE_LABEL}}</h3>
       {{READABLE_TABLE}}
     </div>
-  </div>
+  </section>
 
-  <div class="section-shell" id="artifacts">
+  <section class="section" id="artifacts">
     <h2>{{ARTIFACTS_LABEL}}</h2>
     {{ARTIFACTS_TABLE}}
-  </div>
+  </section>
 
-  <div class="section-shell" id="connections">
+  <section class="section" id="connections">
     <h2>{{CONNECTIONS_LABEL}}</h2>
     {{CONNECTIONS_TABLE}}
+  </section>
+
+  <div class="footer">
+    <span>{{PROJECT_NAME}} · {{PERIOD_LABEL}} {{PERIOD}}</span>
+    <span>{{PREPARED_LABEL}} {{EXPORTED_AT}}</span>
   </div>
 </div>
 </body>

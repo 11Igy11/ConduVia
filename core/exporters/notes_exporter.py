@@ -4,8 +4,13 @@ import html
 import re
 import zipfile
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from urllib.parse import unquote, urlparse
+
+from core.db import Project
+from core.exporters.case_context import build_case_context, case_context_table_html
+from core.exporters.template_utils import load_export_template, render_template
 
 
 EMU_PER_INCH = 914400
@@ -53,6 +58,8 @@ def export_notes_html(
     title: str,
     notes_html: str,
     notes_text: str = "",
+    project: Project | None = None,
+    project_name: str = "",
 ) -> Path:
     """Export project notes to a standalone HTML file."""
     output = Path(file_path)
@@ -60,21 +67,37 @@ def export_notes_html(
 
     body = _html_body(notes_html) if notes_html else ""
     if not body.strip():
-        body = "<br>".join(html.escape(line) for line in (notes_text or "").splitlines())
+        body = "<br>".join(html.escape(line) for line in (notes_text or "").splitlines()) or "—"
 
-    output.write_text(
-        "<!doctype html><html><head><meta charset=\"utf-8\">"
-        f"<title>{html.escape(title or 'Project notes')}</title>"
-        "<style>"
-        "body{font-family:'Segoe UI',Arial,sans-serif;margin:28px;color:#111827;line-height:1.5;}"
-        "h1{font-size:22px;margin:0 0 18px;} img{max-width:100%;height:auto;}"
-        ".notes{border-top:1px solid #e5e7eb;padding-top:18px;}"
-        "</style></head><body>"
-        f"<h1>{html.escape(title or 'Project notes')}</h1>"
-        f"<div class=\"notes\">{body}</div>"
-        "</body></html>",
-        encoding="utf-8",
+    generated_at = datetime.now().strftime("%d.%m.%Y %H:%M:%S")
+    case_context = build_case_context(project, project_name=project_name)
+    project_label = html.escape(project_name or case_context.get("project") or "Project")
+    report_title = title or "Project notes"
+
+    rendered = render_template(
+        load_export_template("notes_export.html"),
+        {
+            "LANG": "en",
+            "TITLE": html.escape(report_title),
+            "DOCUMENT_TYPE": "Notes",
+            "REPORT_TITLE": html.escape(report_title),
+            "PERIOD_LABEL": "Period",
+            "PERIOD": "—",
+            "EXPORTED_LABEL": "Exported",
+            "EXPORTED_AT": generated_at,
+            "SOURCE_LABEL": "Source",
+            "SOURCE": "Project notes",
+            "SCOPE_LABEL": "Scope",
+            "SCOPE": "Investigator notes",
+            "CASE_CONTEXT_LABEL": "Case context",
+            "CASE_TABLE": case_context_table_html(case_context, include_dataset_target=False),
+            "NOTES_BODY": body,
+            "PROJECT_NAME": project_label,
+            "PREPARED_LABEL": "Prepared",
+        },
+        escape_values=False,
     )
+    output.write_text(rendered, encoding="utf-8")
     return output
 
 

@@ -60,14 +60,7 @@ from core.project_identity import (
 from core.protocols import format_ip_proto
 
 from core.evidence_policy import (
-    MAX_INTERACTIVE_EVIDENCE_BYTES as MAX_INTERACTIVE_FOLDER_JSON_BYTES,
     MAX_INTERACTIVE_EVIDENCE_FILES as MAX_INTERACTIVE_FOLDER_JSON_FILES,
-    PERIOD_LABEL,
-    format_period_day_label,
-    indexed_source_message,
-    period_combo_label,
-    should_batch_pcap_files,
-    should_open_interactively,
 )
 
 

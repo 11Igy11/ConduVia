@@ -7,7 +7,8 @@ from typing import Any
 
 from core.db import Project
 from core.exporters.case_context import build_case_context, case_context_table_html
-from core.exporters.template_utils import load_template, logo_data_uri, render_template
+from core.exporters.html_blocks import ranked_list_html, stats_html
+from core.exporters.template_utils import load_export_template, render_template
 
 
 def export_activity_profile_html(
@@ -22,33 +23,74 @@ def export_activity_profile_html(
     generated_at = datetime.now().strftime("%d.%m.%Y %H:%M:%S")
     behavior = dict(profile.get("behavior_profile") or {})
     case_context = build_case_context(project, project_name=project_name)
+    project_label = html.escape(project_name or text["project_fallback"])
+    period = str((profile.get("capture_range") or {}).get("label") or "").strip() or "—"
+    if period in {"-", "—"}:
+        period = "—"
 
-    template = load_template("profile_export.html")
-    html_doc = render_template(template, {
+    json_files = _metric_display(profile, "JSON Datasets", "Datasets")
+    pcap_sources = _metric_display(profile, "PCAP Sources", "PCAP Days")
+    scope_parts = [part for part in (json_files, pcap_sources) if part]
+    scope = " · ".join(scope_parts) or "Saved project evidence"
+
+    html_doc = render_template(load_export_template("profile_export.html"), {
         "LANG": "en",
-        "LOGO": logo_data_uri(),
         "TITLE": text["title"],
-        "PROJECT_LABEL": text["project"],
-        "PROJECT_NAME": html.escape(project_name or text["project_fallback"]),
+        "DOCUMENT_TYPE": text["document_type"],
+        "REPORT_TITLE": text["title"],
+        "PERIOD_LABEL": text["period"],
+        "PERIOD": html.escape(period),
         "EXPORTED_LABEL": text["exported"],
         "EXPORTED_AT": generated_at,
-        "CASE_INFORMATION_LABEL": text["case_information"],
+        "SOURCE_LABEL": text["source"],
+        "SOURCE": html.escape(text["source_value"]),
+        "SCOPE_LABEL": text["scope"],
+        "SCOPE": html.escape(scope),
+        "CASE_CONTEXT_LABEL": text["case_context"],
         "CASE_TABLE": case_context_table_html(case_context, include_dataset_target=False),
-        "EVIDENCE_METRICS_LABEL": text["evidence_metrics"],
-        "METRICS_TABLE": _metrics_table(profile, text),
-        "OPERATIONAL_SUMMARY_LABEL": text["operational_summary"],
+        "PROJECT_NAME": project_label,
+        "PREPARED_LABEL": text["prepared"],
+        "EVIDENCE_SUMMARY_LABEL": text["evidence_summary"],
+        "STATS_SECTION": _metrics_stats(profile, text),
         "OPERATIONAL_SUMMARY": html.escape(_operational_summary(profile.get("summary_lines"))),
         "EVIDENCE_OVERVIEW_LABEL": text["evidence_overview"],
-        "EVIDENCE_SOURCES_TABLE": _bar_table(text["evidence_sources"], profile.get("evidence_counts") or [], "count", text=text),
-        "PCAP_DEVICE_IP_TABLE": _bar_table(text["pcap_device_ip_distribution"], profile.get("pcap_device_ip_rows") or [], "count", text=text),
+        "EVIDENCE_SOURCES_TABLE": ranked_list_html(
+            text["evidence_sources"], profile.get("evidence_counts") or [], empty_text=text["no_records"]
+        ),
+        "PCAP_DEVICE_IP_TABLE": ranked_list_html(
+            text["pcap_device_ip_distribution"], profile.get("pcap_device_ip_rows") or [], empty_text=text["no_records"]
+        ),
         "BEHAVIOR_INSIGHTS_LABEL": text["behavior_insights"],
-        "BEHAVIOR_NOTE": text["behavior_note"],
-        "SERVICE_GROUPS_TABLE": _bar_table(text["service_groups_by_volume"], behavior.get("service_rows") or [], "bytes", "bytes_label", text=text),
-        "OBSERVED_DOMAINS_TABLE": _bar_table(text["observed_domains_by_volume"], behavior.get("domain_rows") or [], "bytes", "bytes_label", text=text),
-        "JSON_ACTIVITY_BY_DAY_TABLE": _bar_table(text["json_activity_by_day"], profile.get("json_day_rows") or [], "count", "detail", text=text),
-        "PCAP_ACTIVITY_BY_DAY_TABLE": _bar_table(text["pcap_activity_by_day"], profile.get("pcap_day_rows") or [], "count", "detail", text=text),
+        "SERVICE_GROUPS_TABLE": ranked_list_html(
+            text["service_groups_by_volume"],
+            behavior.get("service_rows") or [],
+            value_key="bytes",
+            value_label_key="bytes_label",
+            empty_text=text["no_records"],
+        ),
+        "OBSERVED_DOMAINS_TABLE": ranked_list_html(
+            text["observed_domains_by_volume"],
+            behavior.get("domain_rows") or [],
+            value_key="bytes",
+            value_label_key="bytes_label",
+            empty_text=text["no_records"],
+        ),
+        "JSON_ACTIVITY_BY_DAY_TABLE": ranked_list_html(
+            text["json_activity_by_day"],
+            profile.get("json_day_rows") or [],
+            meta_key="detail",
+            empty_text=text["no_records"],
+        ),
+        "PCAP_ACTIVITY_BY_DAY_TABLE": ranked_list_html(
+            text["pcap_activity_by_day"],
+            profile.get("pcap_day_rows") or [],
+            meta_key="detail",
+            empty_text=text["no_records"],
+        ),
         "ACTIVITY_BY_HOUR_LABEL": text["activity_by_hour"],
-        "HOURLY_ACTIVITY_TABLE": _bar_table(text["hourly_activity"], behavior.get("hour_rows") or [], "count", text=text),
+        "HOURLY_ACTIVITY_TABLE": ranked_list_html(
+            "", behavior.get("hour_rows") or [], empty_text=text["no_records"]
+        ),
         "ACTIVITY_RHYTHM_LABEL": text["activity_rhythm"],
         "ACTIVITY_RHYTHM": html.escape(_lines(behavior.get("routine_lines"))),
         "RECENT_PROJECT_TIMELINE_LABEL": text["recent_project_timeline"],
@@ -58,30 +100,33 @@ def export_activity_profile_html(
     path.write_text(html_doc, encoding="utf-8")
 
 
+def _metric_display(profile: dict[str, Any], *labels: str) -> str:
+    wanted = {label.casefold() for label in labels}
+    for metric in profile.get("metrics") or []:
+        label = str(metric.get("label") or "")
+        if label.casefold() not in wanted:
+            continue
+        value = metric.get("lines")
+        if value:
+            return " · ".join(str(line) for line in value)
+        return str(metric.get("value") or "").strip()
+    return ""
+
+
+def _metrics_stats(profile: dict[str, Any], text: dict[str, str]) -> str:
+    items: list[tuple[str, Any]] = []
+    for metric in profile.get("metrics") or []:
+        items.append((_metric_label(str(metric.get("label") or ""), text), _metric_value(metric)))
+    items.append((text["pcap_volume"], profile.get("total_pcap_bytes_label") or "-"))
+    items.append((text["capture_range"], (profile.get("capture_range") or {}).get("label") or "-"))
+    return stats_html(items[:6])
+
+
 def _metric_value(metric: dict[str, Any]) -> str:
     lines = metric.get("lines")
     if lines:
         return " · ".join(str(line) for line in lines)
     return str(metric.get("value") or "-")
-
-
-def _metrics_table(profile: dict[str, Any], text: dict[str, str]) -> str:
-    metrics = list(profile.get("metrics") or [])
-    metrics.extend([
-        {"label": text["pcap_volume"], "value": profile.get("total_pcap_bytes_label") or "-"},
-        {"label": text["capture_range"], "value": (profile.get("capture_range") or {}).get("label") or "-"},
-    ])
-    rows = "".join(
-        "<tr>"
-        f"<td>{html.escape(_metric_label(str(metric.get('label') or ''), text))}</td>"
-        f"<td>{html.escape(_metric_value(metric))}</td>"
-        "</tr>"
-        for metric in metrics
-    )
-    return (
-        '<table class="data-table"><thead><tr><th>Metric</th><th>Value</th></tr></thead>'
-        f"<tbody>{rows}</tbody></table>"
-    )
 
 
 def _operational_summary(summary_lines: Any) -> str:
@@ -107,44 +152,10 @@ def _operational_summary(summary_lines: Any) -> str:
     return "\n".join(lines) or "-"
 
 
-def _bar_table(title: str, rows: list[dict[str, Any]], value_key: str, value_label_key: str = "", *, text: dict[str, str] | None = None) -> str:
-    labels = text or _report_text()
-    if not rows:
-        return f"<h3>{html.escape(title)}</h3><div class=\"empty\">{html.escape(labels['no_records'])}</div>"
-
-    max_value = max(_safe_float(row.get(value_key)) for row in rows) or 1.0
-    body = []
-    for row in rows[:24]:
-        label = str(row.get("label") or row.get("service") or row.get("domain") or "-")
-        value = _safe_float(row.get(value_key))
-        display = str(row.get(value_label_key) or row.get(value_key) or "0")
-        width = max(2.0, min(100.0, (value / max_value) * 100.0)) if value else 0.0
-        body.append(
-            "<tr>"
-            f"<td>{html.escape(label)}</td>"
-            f"<td class=\"barcell\"><div class=\"bar\"><span style=\"width:{width:.1f}%\"></span></div></td>"
-            f"<td>{html.escape(display)}</td>"
-            "</tr>"
-        )
-    return (
-        f"<h3>{html.escape(title)}</h3>"
-        f"<div class=\"table-wrap\"><table class=\"data-table\">"
-        f"<thead><tr><th>{html.escape(labels['item'])}</th><th>{html.escape(labels['chart'])}</th><th>{html.escape(labels['value'])}</th></tr></thead>"
-        f"<tbody>{''.join(body)}</tbody></table></div>"
-    )
-
-
 def _lines(value: Any) -> str:
     if isinstance(value, str):
         return value
     return "\n".join(str(line) for line in (value or [])) or "-"
-
-
-def _safe_float(value: Any) -> float:
-    try:
-        return float(value or 0)
-    except Exception:
-        return 0.0
 
 
 def _metric_label(label: str, text: dict[str, str]) -> str:
@@ -162,24 +173,26 @@ def _metric_label(label: str, text: dict[str, str]) -> str:
 
 def _report_text() -> dict[str, str]:
     return {
-        "title": "ViaNyquist Activity Profile",
-        "project": "Project",
+        "title": "Activity Profile",
+        "document_type": "Activity Profile",
         "project_fallback": "Project",
+        "period": "Period",
         "exported": "Exported",
-        "case_information": "Case Information",
-        "evidence_metrics": "Evidence Metrics",
-        "operational_summary": "Operational Summary",
+        "source": "Source",
+        "source_value": "Saved project evidence",
+        "scope": "Scope",
+        "case_context": "Case context",
+        "prepared": "Prepared",
+        "evidence_summary": "Evidence summary",
         "evidence_overview": "Evidence Overview",
         "evidence_sources": "Evidence Sources",
         "pcap_device_ip_distribution": "PCAP Device IP Distribution",
         "behavior_insights": "Behavior Insights From Saved JSON Datasets",
-        "behavior_note": "These indicators describe observed device activity patterns. They are investigative indicators, not proof of the person's exact awake/asleep state or message content.",
         "service_groups_by_volume": "Service Groups By Volume",
         "observed_domains_by_volume": "Observed Domains By Volume",
         "json_activity_by_day": "JSON Activity By Day",
         "pcap_activity_by_day": "PCAP Volume By Day",
         "activity_by_hour": "Activity By Hour",
-        "hourly_activity": "Hourly Activity",
         "activity_rhythm": "Activity Rhythm",
         "recent_project_timeline": "Recent Project Timeline",
         "json_datasets": "JSON Datasets",
@@ -189,8 +202,5 @@ def _report_text() -> dict[str, str]:
         "device_ips": "Device IPs",
         "pcap_volume": "PCAP Volume",
         "capture_range": "Capture Range",
-        "item": "Item",
-        "chart": "Chart",
-        "value": "Value",
         "no_records": "No records.",
     }
